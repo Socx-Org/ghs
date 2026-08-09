@@ -1,0 +1,75 @@
+# Copied from socx-platform's reference/github/workflows/ci.yml
+# (Approved), {{PLACEHOLDER}} values substituted for GHS. Stage order and
+# rationale: ENG-040.2. Do not hand-roll deploy steps here -- the deploy
+# job is a deliberate stub until Phase 3 (Infrastructure Alignment) wires
+# reference/deployment in for real.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Install, Lint, Test, Build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ${{ secrets.CI_DB_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.CI_DB_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.CI_DB_NAME }}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: ${{ secrets.CI_DATABASE_URL }}
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint --workspaces --if-present
+
+      - name: Test
+        run: npm test --workspaces --if-present
+
+      - name: Build
+        run: npm run build --workspaces --if-present
+
+  # Deliberately a stub -- proves gating is correct (ENG-040.4: separate job,
+  # triggered only on push to main), not real deploy mechanics. Phase 3
+  # (Infrastructure Alignment) replaces this with reference/deployment.
+  deploy:
+    name: Deploy
+    needs: [ci]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: "prod-lab-01"
+    steps:
+      - name: Deploy (placeholder)
+        run: |
+          echo "Real deploy steps land in Phase 3 (Infrastructure Alignment), via reference/deployment."
+          echo "This job intentionally only proves correct gating for now."
