@@ -17,6 +17,8 @@ import { createAuthService } from "./application/auth.service.ts";
 import { createMfaService } from "./application/mfa.service.ts";
 import { createAdminUsersService } from "./application/admin-users.service.ts";
 import { createSystemSettingsService } from "./application/system-settings.service.ts";
+import { createRoundsRepository } from "./data/rounds.repository.ts";
+import { createRoundsService } from "./application/rounds.service.ts";
 import { createApp } from "./interface/http/app.ts";
 
 // Composition root: config and secrets are read exactly once, here, and
@@ -36,8 +38,10 @@ const passwordResetTokenRepository = createPasswordResetTokenRepository(pool);
 const refreshTokensRepository = createRefreshTokensRepository(pool);
 const mfaRepository = createMfaRepository(pool);
 const systemSettingsRepository = createSystemSettingsRepository(pool);
+const roundsRepository = createRoundsRepository(pool);
 
 const clubsService = createClubsService(clubsRepository, logger);
+const roundsService = createRoundsService(roundsRepository, logger);
 const coursesService = createCoursesService(coursesRepository, logger);
 const authProvider = createLocalAuthProvider(config.auth, refreshTokensRepository);
 const mfaService = createMfaService(mfaRepository, config.auth.mfaEncryptionKey);
@@ -63,6 +67,8 @@ const app = createApp({
   mfaService,
   adminUsersService,
   systemSettingsService,
+  roundsService,
+  playersRepository,
   authProvider,
 });
 
