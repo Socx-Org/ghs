@@ -1,15 +1,32 @@
 import { Router } from "express";
 import type { AuthService } from "../../../application/auth.service.ts";
+import type { SystemSettingsService } from "../../../application/system-settings.service.ts";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-export function authRouter(service: AuthService): Router {
+export function authRouter(service: AuthService, settings: SystemSettingsService): Router {
   const router = Router();
 
   router.post("/auth/register", async (req, res, next) => {
     try {
+      // ghs#11: self-registration gate, moved from legacy's env var into
+      // system_settings. Unconditional -- unlike legacy's single endpoint
+      // (which served both self- and admin-initiated registration and so
+      // needed an admin bypass here), GHS already has a separate,
+      // properly admin-gated POST /admin/users (ghs#8) for admin-created
+      // accounts, which is never subject to this toggle in the first
+      // place because it isn't self-registration. Re-adding an admin
+      // bypass to this endpoint would be carrying forward legacy's
+      // single-endpoint mechanism onto a redesign that doesn't have that
+      // constraint -- not a real domain requirement of its own.
+      const selfRegistrationEnabled = await settings.getSelfRegistrationEnabled();
+      if (!selfRegistrationEnabled) {
+        res.status(403).json({ error: "self_registration_disabled" });
+        return;
+      }
+
       const { email, password, firstName, lastName, clubId } = req.body as Record<string, unknown>;
       if (!isNonEmptyString(email) || !isNonEmptyString(password) || !isNonEmptyString(firstName) || !isNonEmptyString(lastName)) {
         res.status(400).json({ error: "email, password, firstName, lastName are required" });
