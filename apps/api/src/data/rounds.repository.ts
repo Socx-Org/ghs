@@ -24,6 +24,10 @@ export interface Round {
   grossScore: number | null;
   adjustedGrossScore: number | null;
   scoreDifferential: number | null;
+  totalPutts: number | null;
+  totalGir: number | null;
+  totalFairwaysHit: number | null;
+  totalPenalties: number | null;
   isTournament: boolean;
   is9Hole: boolean;
   status: RoundStatus;
@@ -63,9 +67,33 @@ export interface CreateRoundInput {
   holeScores?: CreateHoleScoreInput[];
 }
 
+// The WHS-calculated/aggregate round fields (gross_score, adjusted_gross_
+// score, score_differential, total_putts, total_gir, total_fairways_hit,
+// total_penalties) are not set at creation time -- gross_score and the
+// total_* aggregates are naturally derived from hole_scores once a round
+// is complete, and adjusted_gross_score/score_differential require the
+// tee configuration's course/slope rating and system_settings' PCC
+// override to compute. All of that is Phase 2's calculation logic, not
+// this issue's. This method exists so the repository layer can actually
+// store and retrieve those values once Phase 2 computes them -- without
+// it, the schema's own columns would be write-only-by-nobody, which is
+// what "round-trip through the repository layer" in this issue's own
+// Domain Behaviour Verification criterion requires, found and fixed
+// before claiming that criterion met.
+export interface RoundScoreUpdate {
+  grossScore?: number;
+  adjustedGrossScore?: number;
+  scoreDifferential?: number;
+  totalPutts?: number;
+  totalGir?: number;
+  totalFairwaysHit?: number;
+  totalPenalties?: number;
+}
+
 export interface RoundsRepository {
   create(input: CreateRoundInput): Promise<Round>;
   addHoleScore(roundId: string, input: CreateHoleScoreInput): Promise<HoleScore>;
+  updateScores(id: string, update: RoundScoreUpdate): Promise<Round>;
   get(id: string): Promise<Round | null>;
   listByPlayer(playerId: string): Promise<RoundSummary[]>;
   // Bare status transition only -- no recalculation, no notification.
@@ -83,6 +111,10 @@ interface RoundRow {
   gross_score: number | null;
   adjusted_gross_score: number | null;
   score_differential: string | null;
+  total_putts: number | null;
+  total_gir: number | null;
+  total_fairways_hit: number | null;
+  total_penalties: number | null;
   is_tournament: boolean;
   is_9_hole: boolean;
   status: RoundStatus;
@@ -133,6 +165,10 @@ function toRound(row: RoundRow, holeScores: HoleScore[]): Round {
     grossScore: row.gross_score,
     adjustedGrossScore: row.adjusted_gross_score,
     scoreDifferential: row.score_differential === null ? null : Number(row.score_differential),
+    totalPutts: row.total_putts,
+    totalGir: row.total_gir,
+    totalFairwaysHit: row.total_fairways_hit,
+    totalPenalties: row.total_penalties,
     isTournament: row.is_tournament,
     is9Hole: row.is_9_hole,
     rejectionReason: row.rejection_reason,
@@ -141,7 +177,8 @@ function toRound(row: RoundRow, holeScores: HoleScore[]): Round {
 }
 
 const ROUND_COLUMNS = `id, player_id, tee_configuration_id, played_at, playing_handicap, gross_score,
-  adjusted_gross_score, score_differential, is_tournament, is_9_hole, status, rejection_reason`;
+  adjusted_gross_score, score_differential, total_putts, total_gir, total_fairways_hit, total_penalties,
+  is_tournament, is_9_hole, status, rejection_reason`;
 
 const HOLE_SCORE_COLUMNS = `id, round_id, hole_number, strokes, putts, gir, fairway_result, in_sand,
   penalties, net_double_bogey_adjusted`;
@@ -209,6 +246,41 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
 
     async addHoleScore(roundId, input) {
       return insertHoleScore(pool, roundId, input);
+    },
+
+    async updateScores(id, update) {
+      const columns: Record<keyof RoundScoreUpdate, string> = {
+        grossScore: "gross_score",
+        adjustedGrossScore: "adjusted_gross_score",
+        scoreDifferential: "score_differential",
+        totalPutts: "total_putts",
+        totalGir: "total_gir",
+        totalFairwaysHit: "total_fairways_hit",
+        totalPenalties: "total_penalties",
+      };
+
+      const setClauses: string[] = [];
+      const values: unknown[] = [id];
+      for (const [key, column] of Object.entries(columns) as [keyof RoundScoreUpdate, string][]) {
+        if (update[key] !== undefined) {
+          values.push(update[key]);
+          setClauses.push(`${column} = $${values.length}`);
+        }
+      }
+
+      const roundResult = setClauses.length === 0
+        ? await pool.query<RoundRow>(`SELECT ${ROUND_COLUMNS} FROM rounds WHERE id = $1`, [id])
+        : await pool.query<RoundRow>(
+            `UPDATE rounds SET ${setClauses.join(", ")}, updated_at = now() WHERE id = $1 RETURNING ${ROUND_COLUMNS}`,
+            values,
+          );
+      if (roundResult.rows.length === 0) throw new Error("round not found");
+
+      const holeScoresResult = await pool.query<HoleScoreRow>(
+        `SELECT ${HOLE_SCORE_COLUMNS} FROM hole_scores WHERE round_id = $1 ORDER BY hole_number`,
+        [id],
+      );
+      return toRound(roundResult.rows[0]!, holeScoresResult.rows.map(toHoleScore));
     },
 
     async get(id) {

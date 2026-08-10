@@ -103,6 +103,44 @@ test("an invalid fairway_result is rejected at the database level", async () => 
   );
 });
 
+test("WHS-calculated/aggregate round fields round-trip through the repository layer -- found and fixed a real gap (create() never accepted them, no update path existed)", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Score", lastName: "Update" });
+  const rounds = createRoundsRepository(pool);
+
+  const round = await rounds.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  assert.equal(round.grossScore, null);
+  assert.equal(round.scoreDifferential, null);
+
+  const updated = await rounds.updateScores(round.id, {
+    grossScore: 88,
+    adjustedGrossScore: 86,
+    scoreDifferential: 14.2,
+    totalPutts: 32,
+    totalGir: 6,
+    totalFairwaysHit: 8,
+    totalPenalties: 2,
+  });
+
+  assert.equal(updated.grossScore, 88);
+  assert.equal(updated.adjustedGrossScore, 86);
+  assert.equal(updated.scoreDifferential, 14.2);
+  assert.equal(updated.totalPutts, 32);
+  assert.equal(updated.totalGir, 6);
+  assert.equal(updated.totalFairwaysHit, 8);
+  assert.equal(updated.totalPenalties, 2);
+
+  // Round-trips through a fresh read too, not just the UPDATE...RETURNING.
+  const fetched = await rounds.get(round.id);
+  assert.equal(fetched!.scoreDifferential, 14.2);
+
+  // A partial update only touches the fields provided.
+  const partiallyUpdated = await rounds.updateScores(round.id, { grossScore: 90 });
+  assert.equal(partiallyUpdated.grossScore, 90);
+  assert.equal(partiallyUpdated.totalPutts, 32, "fields not included in the update must be left unchanged");
+});
+
 test("a round can be created with zero hole scores and have them added incrementally -- the real gameplay workflow the hole-count open question was resolved around", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   const players = createPlayersRepository(pool);
