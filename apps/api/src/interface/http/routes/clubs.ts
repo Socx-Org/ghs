@@ -1,18 +1,18 @@
 import { Router } from "express";
 import type { ClubsService } from "../../../application/clubs.service.ts";
+import type { AuthProvider } from "../../../application/auth-provider.ts";
+import { requireAuth, requireRole } from "../middleware/require-auth.ts";
 
 // Request/response shape and input validation live here, not in the
 // application layer (ADR-060).
 //
-// No auth applied yet -- deliberate, not an oversight: ghs#8 (Player &
-// User Identity) hasn't landed, so no AuthProvider exists to gate this
-// with. Matches reference/application's own demonstrated widgets routes,
-// which are also unauthenticated for the same structural reason (no ADR
-// had settled an approach when it was written). Wiring real admin-only
-// auth onto these write routes is follow-up work once ghs#8 lands, not
-// silently deferred without a trace.
-export function clubsRouter(service: ClubsService): Router {
+// Write routes now admin-gated (ghs#8 closes the gap ghs#7 deliberately
+// left open -- no AuthProvider existed yet at that point). Reads remain
+// open to any authenticated context in the future; not gated here since
+// no read-visibility requirement has been identified.
+export function clubsRouter(service: ClubsService, authProvider: AuthProvider): Router {
   const router = Router();
+  const requireAdmin = [requireAuth(authProvider), requireRole("admin", "super_admin")];
 
   router.get("/clubs", async (_req, res, next) => {
     try {
@@ -35,7 +35,7 @@ export function clubsRouter(service: ClubsService): Router {
     }
   });
 
-  router.post("/clubs", async (req, res, next) => {
+  router.post("/clubs", ...requireAdmin, async (req, res, next) => {
     try {
       const { name, city, country } = req.body as { name?: unknown; city?: unknown; country?: unknown };
       if (typeof name !== "string" || name.trim().length === 0) {

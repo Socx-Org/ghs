@@ -1,0 +1,84 @@
+import type { Pool, PoolClient } from "pg";
+
+export interface Player {
+  id: string;
+  userId: string | null;
+  clubId: string | null;
+  firstName: string;
+  lastName: string;
+  country: string;
+  createdAt: string;
+}
+
+export interface CreatePlayerInput {
+  userId?: string;
+  clubId?: string;
+  firstName: string;
+  lastName: string;
+  country?: string;
+}
+
+export interface PlayersRepository {
+  create(input: CreatePlayerInput, client?: PoolClient): Promise<Player>;
+  findByUserId(userId: string): Promise<Player | null>;
+  get(id: string): Promise<Player | null>;
+}
+
+interface PlayerRow {
+  id: string;
+  user_id: string | null;
+  club_id: string | null;
+  first_name: string;
+  last_name: string;
+  country: string;
+  created_at: Date;
+}
+
+function toPlayer(row: PlayerRow): Player {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    clubId: row.club_id,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    country: row.country,
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+const SELECT_COLUMNS = "id, user_id, club_id, first_name, last_name, country, created_at";
+
+export function createPlayersRepository(pool: Pool): PlayersRepository {
+  return {
+    // Accepts an optional client so callers (e.g. registration, which must
+    // create a user and a player in one transaction -- ghs#8's symmetry
+    // fix) can participate in an existing transaction rather than opening
+    // a second, unrelated connection.
+    async create(input, client) {
+      const runner = client ?? pool;
+      const result = await runner.query<PlayerRow>(
+        `INSERT INTO players (user_id, club_id, first_name, last_name, country)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING ${SELECT_COLUMNS}`,
+        [input.userId ?? null, input.clubId ?? null, input.firstName, input.lastName, input.country ?? "GB"],
+      );
+      return toPlayer(result.rows[0]!);
+    },
+
+    async findByUserId(userId) {
+      const result = await pool.query<PlayerRow>(
+        `SELECT ${SELECT_COLUMNS} FROM players WHERE user_id = $1 AND deleted_at IS NULL`,
+        [userId],
+      );
+      return result.rows[0] ? toPlayer(result.rows[0]) : null;
+    },
+
+    async get(id) {
+      const result = await pool.query<PlayerRow>(
+        `SELECT ${SELECT_COLUMNS} FROM players WHERE id = $1 AND deleted_at IS NULL`,
+        [id],
+      );
+      return result.rows[0] ? toPlayer(result.rows[0]) : null;
+    },
+  };
+}

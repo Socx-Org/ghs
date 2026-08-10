@@ -9,11 +9,23 @@ export interface DatabaseConfig {
   password: string;
 }
 
+export interface AuthConfig {
+  jwtSecret: string;
+  jwtAccessExpiresInSeconds: number;
+  jwtRefreshExpiresInSeconds: number;
+  mfaPendingExpiresInSeconds: number;
+  // AES-256-GCM key for MFA TOTP secrets -- encrypted, not hashed, since
+  // verifying a code requires the raw secret back (IAM-020). 32 raw bytes,
+  // hex-encoded (64 hex characters).
+  mfaEncryptionKey: Buffer;
+}
+
 export interface AppConfig {
   env: string;
   port: number;
   serviceName: string;
   database: DatabaseConfig;
+  auth: AuthConfig;
 }
 
 // Reads a systemd LoadCredential= file at $CREDENTIALS_DIRECTORY/<name>
@@ -53,6 +65,16 @@ export function loadConfig(): AppConfig {
       database: process.env.DB_NAME ?? "ghs",
       user: process.env.DB_USER ?? "ghs",
       password: readSecret("db_password", "DB_PASSWORD"),
+    },
+    auth: {
+      jwtSecret: readSecret("jwt_secret", "JWT_SECRET"),
+      // Platform owner decision, 2026-08-10 (ghs#8): matches legacy GHS's
+      // own real, already-sound values, explicitly confirmed rather than
+      // silently inherited.
+      jwtAccessExpiresInSeconds: 15 * 60,
+      jwtRefreshExpiresInSeconds: 30 * 24 * 60 * 60,
+      mfaPendingExpiresInSeconds: 5 * 60,
+      mfaEncryptionKey: Buffer.from(readSecret("mfa_encryption_key", "MFA_ENCRYPTION_KEY"), "hex"),
     },
   };
 }

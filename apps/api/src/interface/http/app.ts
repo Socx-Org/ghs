@@ -3,14 +3,25 @@ import type { Express, Request, Response, NextFunction } from "express";
 import type { Logger } from "../../logger.ts";
 import type { ClubsService } from "../../application/clubs.service.ts";
 import type { CoursesService } from "../../application/courses.service.ts";
+import type { AuthService } from "../../application/auth.service.ts";
+import type { MfaService } from "../../application/mfa.service.ts";
+import type { AdminUsersService } from "../../application/admin-users.service.ts";
+import type { AuthProvider } from "../../application/auth-provider.ts";
 import { healthRouter } from "./routes/health.ts";
 import { clubsRouter } from "./routes/clubs.ts";
 import { coursesRouter } from "./routes/courses.ts";
+import { authRouter } from "./routes/auth.ts";
+import { mfaRouter } from "./routes/mfa.ts";
+import { adminUsersRouter } from "./routes/admin-users.ts";
 
 export interface AppDeps {
   logger: Logger;
   clubsService: ClubsService;
   coursesService: CoursesService;
+  authService: AuthService;
+  mfaService: MfaService;
+  adminUsersService: AdminUsersService;
+  authProvider: AuthProvider;
 }
 
 // Composition root for the interface layer -- wires routers, never touches
@@ -25,8 +36,11 @@ export function createApp(deps: AppDeps): Express {
   });
 
   app.use(healthRouter());
-  app.use(clubsRouter(deps.clubsService));
-  app.use(coursesRouter(deps.coursesService));
+  app.use(authRouter(deps.authService));
+  app.use(mfaRouter(deps.mfaService, deps.authProvider));
+  app.use(adminUsersRouter(deps.adminUsersService, deps.mfaService, deps.authProvider));
+  app.use(clubsRouter(deps.clubsService, deps.authProvider));
+  app.use(coursesRouter(deps.coursesService, deps.authProvider));
 
   // Centralised error handling -- errors from any route are logged
   // structurally (OPS-050.3: never the raw request body, which may contain
