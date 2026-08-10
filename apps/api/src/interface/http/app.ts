@@ -8,6 +8,7 @@ import type { MfaService } from "../../application/mfa.service.ts";
 import type { AdminUsersService } from "../../application/admin-users.service.ts";
 import type { SystemSettingsService } from "../../application/system-settings.service.ts";
 import type { RoundsService } from "../../application/rounds.service.ts";
+import type { HandicapOverridesService } from "../../application/handicap-overrides.service.ts";
 import type { PlayersRepository } from "../../data/players.repository.ts";
 import type { AuthProvider } from "../../application/auth-provider.ts";
 import { healthRouter } from "./routes/health.ts";
@@ -18,6 +19,7 @@ import { mfaRouter } from "./routes/mfa.ts";
 import { adminUsersRouter } from "./routes/admin-users.ts";
 import { adminSettingsRouter } from "./routes/admin-settings.ts";
 import { roundsRouter } from "./routes/rounds.ts";
+import { handicapOverridesRouter } from "./routes/handicap-overrides.ts";
 
 export interface AppDeps {
   logger: Logger;
@@ -28,6 +30,7 @@ export interface AppDeps {
   adminUsersService: AdminUsersService;
   systemSettingsService: SystemSettingsService;
   roundsService: RoundsService;
+  handicapOverridesService: HandicapOverridesService;
   playersRepository: PlayersRepository;
   authProvider: AuthProvider;
 }
@@ -51,6 +54,7 @@ export function createApp(deps: AppDeps): Express {
   app.use(clubsRouter(deps.clubsService, deps.authProvider));
   app.use(coursesRouter(deps.coursesService, deps.authProvider));
   app.use(roundsRouter(deps.roundsService, deps.playersRepository, deps.authProvider));
+  app.use(handicapOverridesRouter(deps.handicapOverridesService, deps.playersRepository, deps.authProvider));
 
   // Centralised error handling -- errors from any route are logged
   // structurally (OPS-050.3: never the raw request body, which may contain
