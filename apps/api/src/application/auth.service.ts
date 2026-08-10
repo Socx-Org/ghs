@@ -1,0 +1,191 @@
+import type { Pool } from "pg";
+import type { Logger } from "../logger.ts";
+import type { AuthProvider, TokenPair } from "./auth-provider.ts";
+import type { UsersRepository } from "../data/users.repository.ts";
+import type { PlayersRepository } from "../data/players.repository.ts";
+import type { ActivationTokenRepository } from "../data/activation-tokens.repository.ts";
+import type { PasswordResetTokenRepository } from "../data/password-reset-tokens.repository.ts";
+import type { MfaRepository } from "../data/mfa.repository.ts";
+import { hashPassword, verifyPassword } from "../lib/password.ts";
+import { generateToken, hashToken } from "../lib/tokens.ts";
+
+const ACTIVATION_TOKEN_TTL_HOURS = 24;
+const PASSWORD_RESET_TOKEN_TTL_MINUTES = 30;
+
+export type LoginResult =
+  | { status: "authenticated"; tokens: TokenPair }
+  | { status: "mfa_required"; mfaPendingToken: string };
+
+export interface RegisterInput {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  clubId?: string;
+}
+
+// Narrow interface auth.service depends on for MFA code verification --
+// implemented by mfa.service.ts, which owns the actual TOTP/backup-code
+// algorithm. Kept separate from MfaRepository (used directly below only
+// for the simple "is MFA enabled" existence check) so the real
+// verification logic lives in exactly one place.
+export interface MfaCodeVerifier {
+  verifyLoginCode(userId: string, code: string): Promise<boolean>;
+}
+
+export interface AuthServiceDeps {
+  pool: Pool;
+  logger: Logger;
+  authProvider: AuthProvider;
+  users: UsersRepository;
+  players: PlayersRepository;
+  activationTokens: ActivationTokenRepository;
+  passwordResetTokens: PasswordResetTokenRepository;
+  mfa: MfaRepository;
+  mfaVerifier: MfaCodeVerifier;
+}
+
+export interface AuthService {
+  register(input: RegisterInput): Promise<{ userId: string }>;
+  login(email: string, password: string): Promise<LoginResult>;
+  completeMfaLogin(mfaPendingToken: string, code: string): Promise<TokenPair>;
+  refresh(refreshToken: string): Promise<TokenPair>;
+  activateAccount(rawToken: string): Promise<void>;
+  resendActivation(email: string): Promise<void>;
+  requestPasswordReset(email: string): Promise<void>;
+  resetPassword(rawToken: string, newPassword: string): Promise<void>;
+}
+
+// Interim: activation/reset "delivery" is a structured log line, not a
+// real email send. ADR-210's outbox pattern is the real mechanism, landed
+// in Phase 4 -- explicitly flagged placeholder, not a second, GHS-specific
+// email path (same approach already used in the Phase 2/4 epics).
+function logDeliveryPlaceholder(logger: Logger, kind: string, email: string, rawToken: string): void {
+  logger.info("TODO(Phase 4, ADR-210): real email delivery not yet implemented", {
+    kind,
+    email,
+    token: rawToken,
+  });
+}
+
+export function createAuthService(deps: AuthServiceDeps): AuthService {
+  const { pool, logger, authProvider, users, players, activationTokens, passwordResetTokens, mfa, mfaVerifier } = deps;
+
+  return {
+    async register(input) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+
+        const passwordHash = await hashPassword(input.password);
+        const userResult = await client.query(
+          `INSERT INTO users (email, password_hash, role, status)
+           VALUES ($1, $2, 'player', 'pending_verification')
+           RETURNING id`,
+          [input.email, passwordHash],
+        );
+        const userId = userResult.rows[0].id as string;
+
+        // Symmetric player-profile creation (ghs#8's fix over legacy) --
+        // every player-role account gets a linked profile at creation
+        // time, regardless of registration path.
+        await players.create(
+          { userId, clubId: input.clubId, firstName: input.firstName, lastName: input.lastName },
+          client,
+        );
+
+        const rawToken = generateToken();
+        const expiresAt = new Date(Date.now() + ACTIVATION_TOKEN_TTL_HOURS * 60 * 60 * 1000);
+        await activationTokens.create(userId, hashToken(rawToken), expiresAt, client);
+
+        await client.query("COMMIT");
+
+        logDeliveryPlaceholder(logger, "account_activation", input.email, rawToken);
+        return { userId };
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+
+    async login(email, password) {
+      const user = await users.findByEmail(email);
+      if (!user) throw new Error("invalid credentials");
+      if (user.status !== "active") throw new Error("account not active");
+
+      const passwordOk = await verifyPassword(user.passwordHash, password);
+      if (!passwordOk) throw new Error("invalid credentials");
+
+      const mfaMethod = await mfa.getTotpMethod(user.id);
+      if (mfaMethod && mfaMethod.enabledAt) {
+        return { status: "mfa_required", mfaPendingToken: authProvider.issueMfaPendingToken(user.id) };
+      }
+
+      const tokens = await authProvider.issueTokens(user, ["pwd"]);
+      return { status: "authenticated", tokens };
+    },
+
+    async completeMfaLogin(mfaPendingToken, code) {
+      const userId = authProvider.verifyMfaPendingToken(mfaPendingToken);
+      const user = await users.findById(userId);
+      if (!user || user.status !== "active") throw new Error("account not active");
+
+      const codeOk = await mfaVerifier.verifyLoginCode(userId, code);
+      if (!codeOk) throw new Error("invalid MFA code");
+
+      return authProvider.issueTokens(user, ["pwd", "otp"]);
+    },
+
+    async refresh(refreshToken) {
+      const userId = await authProvider.validateAndRotateRefreshToken(refreshToken);
+      const user = await users.findById(userId);
+      if (!user || user.status !== "active") throw new Error("account not active");
+      return authProvider.issueTokens(user, ["pwd"]);
+    },
+
+    async activateAccount(rawToken) {
+      const record = await activationTokens.findValidByHash(hashToken(rawToken));
+      if (!record) throw new Error("invalid or expired activation token");
+
+      await users.setStatus(record.userId, "active");
+      await users.markEmailVerified(record.userId);
+      await activationTokens.markUsed(record.id);
+    },
+
+    async resendActivation(email) {
+      const user = await users.findByEmail(email);
+      // Responds the same way regardless of whether the user exists --
+      // closes the user-enumeration gap legacy GHS had (409 on duplicate
+      // registration). Caller (route layer) always returns 200.
+      if (!user || user.status !== "pending_verification") return;
+
+      const rawToken = generateToken();
+      const expiresAt = new Date(Date.now() + ACTIVATION_TOKEN_TTL_HOURS * 60 * 60 * 1000);
+      await activationTokens.create(user.id, hashToken(rawToken), expiresAt);
+      logDeliveryPlaceholder(logger, "account_activation_resend", email, rawToken);
+    },
+
+    async requestPasswordReset(email) {
+      const user = await users.findByEmail(email);
+      if (!user) return; // same user-enumeration protection as resendActivation
+
+      const rawToken = generateToken();
+      const expiresAt = new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+      await passwordResetTokens.create(user.id, hashToken(rawToken), expiresAt);
+      logDeliveryPlaceholder(logger, "password_reset", email, rawToken);
+    },
+
+    async resetPassword(rawToken, newPassword) {
+      const record = await passwordResetTokens.findValidByHash(hashToken(rawToken));
+      if (!record) throw new Error("invalid or expired reset token");
+
+      const passwordHash = await hashPassword(newPassword);
+      await users.setPasswordHash(record.userId, passwordHash);
+      // Invalidates every other outstanding reset token for this user too
+      // -- the real improvement over legacy's schema (ghs#8).
+      await passwordResetTokens.markUsedAndInvalidateOthers(record.id, record.userId);
+    },
+  };
+}

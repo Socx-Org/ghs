@@ -1,6 +1,8 @@
 import { Router } from "express";
 import type { CoursesService } from "../../../application/courses.service.ts";
 import type { CreateCourseInput, CreateHoleInput, CreateTeeConfigurationInput } from "../../../data/courses.repository.ts";
+import type { AuthProvider } from "../../../application/auth-provider.ts";
+import { requireAuth, requireRole } from "../middleware/require-auth.ts";
 
 // Request/response shape and input validation live here, not in the
 // application layer (ADR-060). Mirrors the database's own real domain
@@ -8,8 +10,7 @@ import type { CreateCourseInput, CreateHoleInput, CreateTeeConfigurationInput } 
 // request gets a clean 400 here rather than a raw constraint-violation
 // error surfacing from the data layer.
 //
-// No auth applied yet -- same deliberate, tracked gap as clubs.ts; ghs#8
-// hasn't landed.
+// Write routes now admin-gated (ghs#8 closes the gap ghs#7 left open).
 
 function parseHole(value: unknown): CreateHoleInput | null {
   if (typeof value !== "object" || value === null) return null;
@@ -46,8 +47,9 @@ function parseTeeConfiguration(value: unknown): CreateTeeConfigurationInput | nu
   return { name: t.name.trim(), holeCount: t.holeCount, courseRating: t.courseRating, slopeRating: t.slopeRating, holes };
 }
 
-export function coursesRouter(service: CoursesService): Router {
+export function coursesRouter(service: CoursesService, authProvider: AuthProvider): Router {
   const router = Router();
+  const requireAdmin = [requireAuth(authProvider), requireRole("admin", "super_admin")];
 
   router.get("/courses", async (_req, res, next) => {
     try {
@@ -70,7 +72,7 @@ export function coursesRouter(service: CoursesService): Router {
     }
   });
 
-  router.post("/courses", async (req, res, next) => {
+  router.post("/courses", ...requireAdmin, async (req, res, next) => {
     try {
       const body = req.body as Record<string, unknown>;
       const { name, clubId, city, country, teeConfigurations } = body;
