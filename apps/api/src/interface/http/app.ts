@@ -1,13 +1,16 @@
 import express from "express";
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Logger } from "../../logger.ts";
-import type { WidgetsService } from "../../application/widgets.service.ts";
+import type { ClubsService } from "../../application/clubs.service.ts";
+import type { CoursesService } from "../../application/courses.service.ts";
 import { healthRouter } from "./routes/health.ts";
-import { widgetsRouter } from "./routes/widgets.ts";
+import { clubsRouter } from "./routes/clubs.ts";
+import { coursesRouter } from "./routes/courses.ts";
 
 export interface AppDeps {
   logger: Logger;
-  widgetsService: WidgetsService;
+  clubsService: ClubsService;
+  coursesService: CoursesService;
 }
 
 // Composition root for the interface layer -- wires routers, never touches
@@ -22,7 +25,8 @@ export function createApp(deps: AppDeps): Express {
   });
 
   app.use(healthRouter());
-  app.use(widgetsRouter(deps.widgetsService));
+  app.use(clubsRouter(deps.clubsService));
+  app.use(coursesRouter(deps.coursesService));
 
   // Centralised error handling -- errors from any route are logged
   // structurally (OPS-050.3: never the raw request body, which may contain
