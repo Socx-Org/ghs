@@ -6,6 +6,7 @@ import type { CoursesService } from "../../application/courses.service.ts";
 import type { AuthService } from "../../application/auth.service.ts";
 import type { MfaService } from "../../application/mfa.service.ts";
 import type { AdminUsersService } from "../../application/admin-users.service.ts";
+import type { SystemSettingsService } from "../../application/system-settings.service.ts";
 import type { AuthProvider } from "../../application/auth-provider.ts";
 import { healthRouter } from "./routes/health.ts";
 import { clubsRouter } from "./routes/clubs.ts";
@@ -13,6 +14,7 @@ import { coursesRouter } from "./routes/courses.ts";
 import { authRouter } from "./routes/auth.ts";
 import { mfaRouter } from "./routes/mfa.ts";
 import { adminUsersRouter } from "./routes/admin-users.ts";
+import { adminSettingsRouter } from "./routes/admin-settings.ts";
 
 export interface AppDeps {
   logger: Logger;
@@ -21,6 +23,7 @@ export interface AppDeps {
   authService: AuthService;
   mfaService: MfaService;
   adminUsersService: AdminUsersService;
+  systemSettingsService: SystemSettingsService;
   authProvider: AuthProvider;
 }
 
@@ -36,9 +39,10 @@ export function createApp(deps: AppDeps): Express {
   });
 
   app.use(healthRouter());
-  app.use(authRouter(deps.authService));
+  app.use(authRouter(deps.authService, deps.systemSettingsService));
   app.use(mfaRouter(deps.mfaService, deps.authProvider));
   app.use(adminUsersRouter(deps.adminUsersService, deps.mfaService, deps.authProvider));
+  app.use(adminSettingsRouter(deps.systemSettingsService, deps.authProvider));
   app.use(clubsRouter(deps.clubsService, deps.authProvider));
   app.use(coursesRouter(deps.coursesService, deps.authProvider));
 

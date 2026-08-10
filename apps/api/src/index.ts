@@ -9,12 +9,14 @@ import { createActivationTokenRepository } from "./data/activation-tokens.reposi
 import { createPasswordResetTokenRepository } from "./data/password-reset-tokens.repository.ts";
 import { createRefreshTokensRepository } from "./data/refresh-tokens.repository.ts";
 import { createMfaRepository } from "./data/mfa.repository.ts";
+import { createSystemSettingsRepository } from "./data/system-settings.repository.ts";
 import { createClubsService } from "./application/clubs.service.ts";
 import { createCoursesService } from "./application/courses.service.ts";
 import { createLocalAuthProvider } from "./application/auth-provider.ts";
 import { createAuthService } from "./application/auth.service.ts";
 import { createMfaService } from "./application/mfa.service.ts";
 import { createAdminUsersService } from "./application/admin-users.service.ts";
+import { createSystemSettingsService } from "./application/system-settings.service.ts";
 import { createApp } from "./interface/http/app.ts";
 
 // Composition root: config and secrets are read exactly once, here, and
@@ -33,11 +35,13 @@ const activationTokenRepository = createActivationTokenRepository(pool);
 const passwordResetTokenRepository = createPasswordResetTokenRepository(pool);
 const refreshTokensRepository = createRefreshTokensRepository(pool);
 const mfaRepository = createMfaRepository(pool);
+const systemSettingsRepository = createSystemSettingsRepository(pool);
 
 const clubsService = createClubsService(clubsRepository, logger);
 const coursesService = createCoursesService(coursesRepository, logger);
 const authProvider = createLocalAuthProvider(config.auth, refreshTokensRepository);
 const mfaService = createMfaService(mfaRepository, config.auth.mfaEncryptionKey);
+const systemSettingsService = createSystemSettingsService(systemSettingsRepository);
 const authService = createAuthService({
   pool,
   logger,
@@ -58,6 +62,7 @@ const app = createApp({
   authService,
   mfaService,
   adminUsersService,
+  systemSettingsService,
   authProvider,
 });
 
