@@ -7,6 +7,7 @@ import type {
   CreateRoundInput,
   HoleScore,
   Round,
+  RoundScoreUpdate,
   RoundsRepository,
   RoundStatus,
   RoundSummary,
@@ -28,6 +29,10 @@ function fakeRepository(): RoundsRepository {
         grossScore: null,
         adjustedGrossScore: null,
         scoreDifferential: null,
+        totalPutts: null,
+        totalGir: null,
+        totalFairwaysHit: null,
+        totalPenalties: null,
         isTournament: input.isTournament ?? false,
         is9Hole: input.is9Hole ?? false,
         status: "pending",
@@ -62,6 +67,11 @@ function fakeRepository(): RoundsRepository {
       };
       round.holeScores.push(holeScore);
       return holeScore;
+    },
+    async updateScores(id: string, update: RoundScoreUpdate) {
+      const round = rounds.get(id)!;
+      Object.assign(round, update);
+      return round;
     },
     async get(id: string) {
       return rounds.get(id) ?? null;
