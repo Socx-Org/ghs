@@ -4,31 +4,27 @@ import type { PlayersRepository } from "../../../data/players.repository.ts";
 import type { CreateHoleScoreInput, FairwayResult } from "../../../data/rounds.repository.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth, requireRole } from "../middleware/require-auth.ts";
+import { ADMIN_ROLES, createPlayerAccessAuthorizer } from "../authorization.ts";
 
-const ADMIN_ROLES = ["admin", "super_admin"];
 const FAIRWAY_RESULTS: FairwayResult[] = ["hit", "missed_left", "missed_right"];
 
 // Request/response shape and input validation live here, not in the
 // application layer (ADR-060).
 //
-// Authorization: unlike clubs/courses (admin-only reference data) or
-// handicap overrides (admin-only capability), round submission is a
-// real, primary player-facing action -- a `player`-role caller may only
-// act on their own linked player record; `admin`/`super_admin` may act
-// on any player's rounds (e.g. entering a paper scorecard on a member's
-// behalf). This is real authorization on an existing repository
-// operation, not new business/workflow logic -- approval behaviour
-// (recalculation, notification) remains Phase 2's scope.
+// Authorization: unlike clubs/courses (admin-only reference data), round
+// submission is a real, primary player-facing action -- a `player`-role
+// caller may only act on their own linked player record;
+// `admin`/`super_admin` may act on any player's rounds (e.g. entering a
+// paper scorecard on a member's behalf). Same pattern as
+// handicap-overrides.ts's read access. This is real authorization on an
+// existing repository operation, not new business/workflow logic --
+// approval behaviour (recalculation, notification) remains Phase 2's
+// scope.
 export function roundsRouter(service: RoundsService, players: PlayersRepository, authProvider: AuthProvider): Router {
   const router = Router();
   const auth = requireAuth(authProvider);
   const requireAdmin = [auth, requireRole(...ADMIN_ROLES)];
-
-  async function authorizeForPlayer(identitySub: string, ghsRole: string, targetPlayerId: string): Promise<boolean> {
-    if (ADMIN_ROLES.includes(ghsRole)) return true;
-    const ownPlayer = await players.findByUserId(identitySub);
-    return ownPlayer !== null && ownPlayer.id === targetPlayerId;
-  }
+  const authorizeForPlayer = createPlayerAccessAuthorizer(players);
 
   function parseFairwayResult(value: unknown): FairwayResult | undefined | null {
     if (value === undefined) return undefined;
