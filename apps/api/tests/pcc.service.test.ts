@@ -64,11 +64,20 @@ test("getPlayedOnDate: rejects an invalid date", () => {
 function fakeRepository(): PccRepository & {
   dailyPccRows: Map<string, DailyPcc>;
   roundInputs: RoundDifferentialInput[];
+  // Explicitly settable, tracked separately from roundInputs -- a round
+  // and the player who played it are different identities
+  // (RoundDifferentialInput has no playerId field at all). Deriving a
+  // fake "player id" from roundId would let a caller that mishandles
+  // affectedPlayerIds (e.g. treating a round id as a player id) pass
+  // this fake's tests while being genuinely broken against the real
+  // repository. Caught in review, PR #31.
+  affectedPlayerIds: string[];
   applyCalls: Array<{ teeConfigurationId: string; playedOn: string; pcc: number; source: PccSource; updatedBy: string | null }>;
 } {
   const dailyPccRows = new Map<string, DailyPcc>();
   const applyCalls: Array<{ teeConfigurationId: string; playedOn: string; pcc: number; source: PccSource; updatedBy: string | null }> = [];
   let roundInputs: RoundDifferentialInput[] = [];
+  let affectedPlayerIds: string[] = [];
 
   return {
     dailyPccRows,
@@ -77,6 +86,12 @@ function fakeRepository(): PccRepository & {
     },
     set roundInputs(value: RoundDifferentialInput[]) {
       roundInputs = value;
+    },
+    get affectedPlayerIds() {
+      return affectedPlayerIds;
+    },
+    set affectedPlayerIds(value: string[]) {
+      affectedPlayerIds = value;
     },
     applyCalls,
     async getOrCreateDailyPcc(teeConfigurationId, playedOn) {
@@ -110,7 +125,7 @@ function fakeRepository(): PccRepository & {
         updatedAt: new Date().toISOString(),
       };
       dailyPccRows.set(`${teeConfigurationId}:${playedOn}`, dailyPcc);
-      return { dailyPcc, updatedRounds: roundInputs.length, affectedPlayerIds: [...new Set(roundInputs.map((r) => r.roundId))] };
+      return { dailyPcc, updatedRounds: roundInputs.length, affectedPlayerIds };
     },
   };
 }
@@ -151,6 +166,23 @@ test("calculateOrOverride: rejects a non-integer override", async () => {
   const repo = fakeRepository();
   const service = createPccService(repo);
   await assert.rejects(() => service.calculateOrOverride("tc-1", "2026-05-01", 1.5, "admin-1"), InvalidPccInputError);
+});
+
+test("calculateOrOverride: affectedPlayerIds are real player ids, independent of roundInputs' round ids (PR #31 review fix)", async () => {
+  const repo = fakeRepository();
+  // Deliberately different cardinality/values from roundInputs' round
+  // ids below -- if a caller (or this fake) ever conflated the two, this
+  // test would catch it immediately.
+  repo.roundInputs = [
+    { roundId: "round-1", adjustedGrossScore: 90, courseRating: 72, slopeRating: 113 },
+    { roundId: "round-2", adjustedGrossScore: 85, courseRating: 72, slopeRating: 113 },
+  ];
+  repo.affectedPlayerIds = ["player-a", "player-b", "player-c"];
+  const service = createPccService(repo);
+
+  const result = await service.calculateOrOverride("tc-1", "2026-05-01", 1, "admin-1");
+
+  assert.deepEqual(result.affectedPlayerIds, ["player-a", "player-b", "player-c"]);
 });
 
 test("getOrCreateDailyPcc: normalises playedOn before delegating to the repository", async () => {
