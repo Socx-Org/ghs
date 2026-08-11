@@ -105,10 +105,23 @@ export interface BuildEffectiveDifferentialsResult {
 // score in the record, then discarded. Legacy drops an unpaired 9
 // immediately with no waiting period -- not preserved.
 //
-// Pairing itself (two 9-hole rounds summed into one 18-hole-equivalent
-// differential, matched to the next 9-hole round encountered
-// chronologically, not necessarily date-adjacent) was not a disputed
-// point during discovery and is preserved from legacy's real algorithm.
+// Pairing must be processed chronologically oldest-to-newest, not
+// newest-to-oldest. In a live system, each new 9-hole round pairs with
+// whichever 9-hole round has been waiting longest -- not with an older
+// one found while scanning backwards from today. With an odd number of
+// 9-hole rounds this matters: walking newest-first pairs the two most
+// recent rounds and leaves the *oldest* one dangling as "pending", which
+// is backwards -- an old, long-forgotten round would never correctly
+// register as overdue for ageing, while a genuinely new, still-waiting
+// round would incorrectly appear to have already found a partner.
+// Walking oldest-first, the only round that can ever be left pending is
+// the single most recent 9-hole round in the whole set -- exactly the
+// one actually still waiting for a future partner. It can still be
+// "old" relative to the full scoring record (and so still subject to
+// ageing) if enough full rounds have since accumulated ahead of it; it
+// just can never be older than every other 9-hole round, which is what
+// the previous newest-first walk got backwards. (Caught in review, PR
+// #29 -- an earlier version of this function walked most-recent-first.)
 //
 // The "20th-oldest 18-hole score" cutoff is a genuine interpretation
 // call, not independently re-verified beyond the rule text already
@@ -122,17 +135,13 @@ export interface BuildEffectiveDifferentialsResult {
 // considers anyway (Rule 5.1's own most-recent-20 window), so a pending
 // 9 older than it is discarded. With fewer than 20 resolved scores on
 // record, no cutoff applies yet and the pending 9 is simply retained.
-// (Caught in review: an earlier version of this function derived the
-// cutoff from real 18-hole rounds only, which meant 19 full rounds plus
-// one already-paired 9-hole set -- 20 resolved scores in total -- would
-// wrongly still report no cutoff at all.)
 export function buildEffectiveDifferentials(rounds: RoundDifferentialInput[]): BuildEffectiveDifferentialsResult {
-  const sortedDesc = [...rounds].sort((a, b) => (a.playedAt < b.playedAt ? 1 : a.playedAt > b.playedAt ? -1 : 0));
+  const sortedAsc = [...rounds].sort((a, b) => (a.playedAt < b.playedAt ? -1 : a.playedAt > b.playedAt ? 1 : 0));
 
   const resolved: EffectiveDifferential[] = [];
   let pending: RoundDifferentialInput | null = null;
 
-  for (const round of sortedDesc) {
+  for (const round of sortedAsc) {
     if (!round.is9Hole) {
       resolved.push({ value: round.scoreDifferential, source: "full_round", roundIds: [round.roundId], playedAt: round.playedAt });
       continue;
@@ -143,18 +152,18 @@ export function buildEffectiveDifferentials(rounds: RoundDifferentialInput[]): B
       continue;
     }
 
-    // `pending` was encountered first while walking most-recent-first,
-    // so it's the more recent of the pair. Rounded (not truncated) to 3
-    // decimals -- consistent with computeScoreDifferential's own
-    // rounding for an individual round's differential (scoring.
-    // service.ts); truncation is specifically a final-index-level
-    // requirement (Rule 5.2a), not a general precision policy for every
-    // intermediate sum (caught in review).
+    // `pending` was encountered first while walking oldest-first, so
+    // it's the older of the pair; `round` is the more recent one.
+    // Rounded (not truncated) to 3 decimals -- consistent with
+    // computeScoreDifferential's own rounding for an individual round's
+    // differential (scoring.service.ts); truncation is specifically a
+    // final-index-level requirement (Rule 5.2a), not a general precision
+    // policy for every intermediate sum (caught in review).
     resolved.push({
       value: Number((pending.scoreDifferential + round.scoreDifferential).toFixed(3)),
       source: "paired_9_hole",
       roundIds: [pending.roundId, round.roundId],
-      playedAt: pending.playedAt,
+      playedAt: round.playedAt,
     });
     pending = null;
   }

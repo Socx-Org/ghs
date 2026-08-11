@@ -179,20 +179,37 @@ test("9-hole: an unpaired round still within the 20th-oldest-18-hole window is r
   assert.equal(discardedNineHoleRoundId, null, "not strictly older than the cutoff -- still retained");
 });
 
-test("9-hole: a paired 9-hole set counts toward the 20-score cutoff too, not just real 18-hole rounds (PR #29 review fix)", () => {
+test("9-hole: a paired 9-hole set counts toward the 20-score total too, not just real 18-hole rounds (PR #29 review fix)", () => {
   // 19 real 18-hole rounds + one already-paired 9-hole set = 20 resolved
   // 18-hole-equivalent scores. A version of this function that only
   // counted real 18-hole rounds toward the cutoff (19 < 20) would wrongly
-  // report no cutoff at all and retain the lone round below indefinitely.
+  // conclude there were only 19 -- never reaching the threshold at all.
   const fullRounds = Array.from({ length: 19 }, (_, i) => round(`full-${i}`, i + 1, 10.0 + i, false)); // days 1..19
-  const pairA = round("pair-a", 20, 8.0, true);
-  const pairB = round("pair-b", 21, 7.0, true);
-  const lone = round("lone-nine", 25, 6.0, true); // older than the paired set, which is the 20th resolved score
+  const pairA = round("pair-a", 21, 8.0, true);
+  const pairB = round("pair-b", 20, 7.0, true);
 
-  const { effectiveDifferentials, discardedNineHoleRoundId } = buildEffectiveDifferentials([...fullRounds, pairA, pairB, lone]);
+  const { effectiveDifferentials, discardedNineHoleRoundId } = buildEffectiveDifferentials([...fullRounds, pairA, pairB]);
 
   assert.equal(effectiveDifferentials.length, 20, "19 full rounds + 1 paired-9 set = 20 resolved scores");
-  assert.equal(discardedNineHoleRoundId, "lone-nine", "the lone round is older than the 20th resolved score -- discarded, not retained");
+  assert.equal(discardedNineHoleRoundId, null, "nothing left pending here -- both 9-hole rounds paired with each other");
+});
+
+test("9-hole: with an odd number of 9-hole rounds, the two oldest pair together and the most recent one is left pending -- not the reverse (PR #29 review fix)", () => {
+  // Chronological pairing: a live system pairs each new 9-hole round
+  // with whichever round has been waiting longest. Pairing newest-first
+  // would incorrectly pair the two most recent rounds and strand the
+  // oldest one as "pending" -- backwards from how ageing is meant to work.
+  const oldest = round("oldest-nine", 30, 9.0, true);
+  const middle = round("middle-nine", 20, 8.0, true);
+  const mostRecent = round("recent-nine", 10, 7.0, true);
+
+  const { effectiveDifferentials, discardedNineHoleRoundId } = buildEffectiveDifferentials([oldest, middle, mostRecent]);
+
+  assert.equal(effectiveDifferentials.length, 1);
+  assert.equal(effectiveDifferentials[0]!.source, "paired_9_hole");
+  assert.deepEqual(effectiveDifferentials[0]!.roundIds.sort(), ["middle-nine", "oldest-nine"], "the two OLDEST rounds pair together");
+  assert.equal(effectiveDifferentials.some((d) => d.roundIds.includes("recent-nine")), false, "the most recent round is not part of any pair");
+  assert.equal(discardedNineHoleRoundId, null, "too few resolved scores on record yet for any cutoff to apply -- the most recent round is simply still pending");
 });
 
 test("9-hole: paired-differential sum is rounded, not truncated, to 3 decimals -- consistent with computeScoreDifferential's own precision policy (PR #29 review fix)", () => {
