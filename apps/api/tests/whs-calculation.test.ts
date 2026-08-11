@@ -179,6 +179,34 @@ test("9-hole: an unpaired round still within the 20th-oldest-18-hole window is r
   assert.equal(discardedNineHoleRoundId, null, "not strictly older than the cutoff -- still retained");
 });
 
+test("9-hole: a paired 9-hole set counts toward the 20-score cutoff too, not just real 18-hole rounds (PR #29 review fix)", () => {
+  // 19 real 18-hole rounds + one already-paired 9-hole set = 20 resolved
+  // 18-hole-equivalent scores. A version of this function that only
+  // counted real 18-hole rounds toward the cutoff (19 < 20) would wrongly
+  // report no cutoff at all and retain the lone round below indefinitely.
+  const fullRounds = Array.from({ length: 19 }, (_, i) => round(`full-${i}`, i + 1, 10.0 + i, false)); // days 1..19
+  const pairA = round("pair-a", 20, 8.0, true);
+  const pairB = round("pair-b", 21, 7.0, true);
+  const lone = round("lone-nine", 25, 6.0, true); // older than the paired set, which is the 20th resolved score
+
+  const { effectiveDifferentials, discardedNineHoleRoundId } = buildEffectiveDifferentials([...fullRounds, pairA, pairB, lone]);
+
+  assert.equal(effectiveDifferentials.length, 20, "19 full rounds + 1 paired-9 set = 20 resolved scores");
+  assert.equal(discardedNineHoleRoundId, "lone-nine", "the lone round is older than the 20th resolved score -- discarded, not retained");
+});
+
+test("9-hole: paired-differential sum is rounded, not truncated, to 3 decimals -- consistent with computeScoreDifferential's own precision policy (PR #29 review fix)", () => {
+  const rounds: RoundDifferentialInput[] = [
+    round("nine-a", 2, 8.1236, true),
+    round("nine-b", 2, 7.0001, true),
+  ];
+  const { effectiveDifferentials } = buildEffectiveDifferentials(rounds);
+  // 8.1236 + 7.0001 = 15.1237 -> rounds to 15.124; truncation would give
+  // 15.123 instead -- verified numerically (floating-point sums don't
+  // always land where hand arithmetic suggests) before relying on it.
+  assert.equal(effectiveDifferentials[0]!.value, 15.124);
+});
+
 test("9-hole: an unpaired round older than the 20th-oldest 18-hole score is discarded", () => {
   const fullRounds = Array.from({ length: 20 }, (_, i) => round(`full-${i}`, i + 1, 10.0 + i, false)); // days 1..20
   const agedOut = round("aged-nine", 21, 8.0, true); // one day older than the 20th (oldest) full round

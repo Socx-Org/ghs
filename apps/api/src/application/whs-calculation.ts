@@ -113,26 +113,28 @@ export interface BuildEffectiveDifferentialsResult {
 // The "20th-oldest 18-hole score" cutoff is a genuine interpretation
 // call, not independently re-verified beyond the rule text already
 // fetched (see file header) -- implemented here as: among the player's
-// real, full 18-hole rounds (not counting paired 9s), if there are at
-// least 20, the cutoff is the played_at of the 20th most recent one;
-// anything older than that is outside the range WHS ever considers
-// anyway (Rule 5.1's own most-recent-20 window), so an unpaired 9 older
-// than it is discarded. With fewer than 20 full rounds on record, no
-// cutoff applies yet and the pending 9 is simply retained.
+// resolved 18-hole-equivalent scores (real full 18-hole rounds AND
+// already-paired 9-hole sets -- a paired 9-hole score is an 18-hole-
+// equivalent score for every other purpose, so it counts here too; a
+// still-pending, unpaired 9 obviously cannot, since it isn't one yet),
+// if there are at least 20, the cutoff is the played_at of the 20th most
+// recent one; anything older than that is outside the range WHS ever
+// considers anyway (Rule 5.1's own most-recent-20 window), so a pending
+// 9 older than it is discarded. With fewer than 20 resolved scores on
+// record, no cutoff applies yet and the pending 9 is simply retained.
+// (Caught in review: an earlier version of this function derived the
+// cutoff from real 18-hole rounds only, which meant 19 full rounds plus
+// one already-paired 9-hole set -- 20 resolved scores in total -- would
+// wrongly still report no cutoff at all.)
 export function buildEffectiveDifferentials(rounds: RoundDifferentialInput[]): BuildEffectiveDifferentialsResult {
   const sortedDesc = [...rounds].sort((a, b) => (a.playedAt < b.playedAt ? 1 : a.playedAt > b.playedAt ? -1 : 0));
 
-  const fullRoundsDesc = sortedDesc.filter((r) => !r.is9Hole);
-  const cutoffDate = fullRoundsDesc.length >= MAX_EFFECTIVE_DIFFERENTIALS
-    ? fullRoundsDesc[MAX_EFFECTIVE_DIFFERENTIALS - 1]!.playedAt
-    : null;
-
-  const effective: EffectiveDifferential[] = [];
+  const resolved: EffectiveDifferential[] = [];
   let pending: RoundDifferentialInput | null = null;
 
   for (const round of sortedDesc) {
     if (!round.is9Hole) {
-      effective.push({ value: round.scoreDifferential, source: "full_round", roundIds: [round.roundId], playedAt: round.playedAt });
+      resolved.push({ value: round.scoreDifferential, source: "full_round", roundIds: [round.roundId], playedAt: round.playedAt });
       continue;
     }
 
@@ -142,9 +144,14 @@ export function buildEffectiveDifferentials(rounds: RoundDifferentialInput[]): B
     }
 
     // `pending` was encountered first while walking most-recent-first,
-    // so it's the more recent of the pair.
-    effective.push({
-      value: truncateToDecimals(pending.scoreDifferential + round.scoreDifferential, 3),
+    // so it's the more recent of the pair. Rounded (not truncated) to 3
+    // decimals -- consistent with computeScoreDifferential's own
+    // rounding for an individual round's differential (scoring.
+    // service.ts); truncation is specifically a final-index-level
+    // requirement (Rule 5.2a), not a general precision policy for every
+    // intermediate sum (caught in review).
+    resolved.push({
+      value: Number((pending.scoreDifferential + round.scoreDifferential).toFixed(3)),
       source: "paired_9_hole",
       roundIds: [pending.roundId, round.roundId],
       playedAt: pending.playedAt,
@@ -152,16 +159,17 @@ export function buildEffectiveDifferentials(rounds: RoundDifferentialInput[]): B
     pending = null;
   }
 
+  const resolvedDesc = [...resolved].sort((a, b) => (a.playedAt < b.playedAt ? 1 : a.playedAt > b.playedAt ? -1 : 0));
+  const cutoffDate = resolvedDesc.length >= MAX_EFFECTIVE_DIFFERENTIALS
+    ? resolvedDesc[MAX_EFFECTIVE_DIFFERENTIALS - 1]!.playedAt
+    : null;
+
   let discardedNineHoleRoundId: string | null = null;
   if (pending !== null && cutoffDate !== null && pending.playedAt < cutoffDate) {
     discardedNineHoleRoundId = pending.roundId;
   }
 
-  const cappedEffective = [...effective]
-    .sort((a, b) => (a.playedAt < b.playedAt ? 1 : a.playedAt > b.playedAt ? -1 : 0))
-    .slice(0, MAX_EFFECTIVE_DIFFERENTIALS);
-
-  return { effectiveDifferentials: cappedEffective, discardedNineHoleRoundId };
+  return { effectiveDifferentials: resolvedDesc.slice(0, MAX_EFFECTIVE_DIFFERENTIALS), discardedNineHoleRoundId };
 }
 
 export interface HandicapSelectionResult {
