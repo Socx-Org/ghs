@@ -67,7 +67,7 @@ function buildOrchestrator() {
   const handicapHistoryRepo = createHandicapHistoryRepository(pool);
   const handicapHistoryService = createHandicapHistoryService(handicapHistoryRepo);
   const pccService = createPccService(createPccRepository(pool));
-  const orchestrator = createRecalculationOrchestrator(roundsRepo, handicapHistoryService, pccService, logger);
+  const orchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, logger);
   return { roundsRepo, handicapHistoryRepo, handicapHistoryService, pccService, orchestrator };
 }
 
@@ -257,4 +257,49 @@ test("recalculatePlayerHandicap without a client still self-manages its own tran
   const result = await orchestrator.recalculatePlayerHandicap("not-a-real-uuid", "round_approved");
   assert.equal(result.status, "failed", "no client provided -- the error is caught and reported, not thrown");
   assert.match(result.error!, /invalid input syntax for type uuid/);
+});
+
+// PR #31, second review fix: self-managed mode previously read via the
+// plain pool with no lock at all, and only the final write step was
+// transactional -- the Low Handicap Index used for cap application could
+// already be stale by the time it was read, and there was no real
+// transaction spanning the whole sequence. This test proves the fix
+// deterministically: a lock manually held on the player row genuinely
+// blocks recalculatePlayerHandicap's self-managed path from progressing
+// at all, not just from committing at the end.
+test("recalculatePlayerHandicap (self-managed) locks the player row from its very first read -- a concurrent holder of the same lock blocks it until released", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Locked", lastName: "Row" });
+
+  await createApprovedRound(player.id, teeConfigurationId, "2026-05-01T09:00:00.000Z", 10.0);
+  await createApprovedRound(player.id, teeConfigurationId, "2026-05-02T09:00:00.000Z", 12.0);
+  await createApprovedRound(player.id, teeConfigurationId, "2026-05-03T09:00:00.000Z", 14.0);
+
+  const { orchestrator } = buildOrchestrator();
+
+  // Manually hold exactly the row lock recalculatePlayerHandicap's very
+  // first read (getCurrentIndexForUpdate) needs to acquire.
+  const holdingClient = await pool.connect();
+  await holdingClient.query("BEGIN");
+  await holdingClient.query("SELECT handicap_index FROM players WHERE id = $1 FOR UPDATE", [player.id]);
+
+  let completed = false;
+  const recalcPromise = orchestrator.recalculatePlayerHandicap(player.id, "round_approved").then((result) => {
+    completed = true;
+    return result;
+  });
+
+  // Give the recalculation every real chance to run if it were (wrongly)
+  // not actually blocked by the held lock -- if this were still reading
+  // via the plain, unlocked pool, it would complete well within this
+  // window.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(completed, false, "still blocked -- the row lock is real from the first read, not just at the final write");
+
+  await holdingClient.query("COMMIT");
+  holdingClient.release();
+
+  const result = await recalcPromise;
+  assert.equal(result.status, "eligible", "proceeds correctly, using fresh state, once the lock is released");
 });

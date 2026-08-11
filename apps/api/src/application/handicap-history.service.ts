@@ -16,6 +16,10 @@ export class InvalidHandicapChangeError extends Error {}
 
 export interface HandicapHistoryService {
   getCurrentIndex(playerId: string, client?: PoolClient): Promise<CurrentHandicapIndex | null>;
+  // Locked read -- see HandicapHistoryRepository.getCurrentIndexForUpdate.
+  // Requires a real transaction client; use this, not getCurrentIndex,
+  // whenever the result feeds a calculation that will be written back.
+  getCurrentIndexForUpdate(playerId: string, client: PoolClient): Promise<CurrentHandicapIndex | null>;
   listHistoryForPlayer(playerId: string): Promise<HandicapHistoryRecord[]>;
 
   // client: when provided, threaded straight through to
@@ -46,6 +50,10 @@ export function createHandicapHistoryService(repo: HandicapHistoryRepository): H
   return {
     async getCurrentIndex(playerId, client) {
       return repo.getCurrentIndex(playerId, client);
+    },
+
+    async getCurrentIndexForUpdate(playerId, client) {
+      return repo.getCurrentIndexForUpdate(playerId, client);
     },
 
     async listHistoryForPlayer(playerId) {

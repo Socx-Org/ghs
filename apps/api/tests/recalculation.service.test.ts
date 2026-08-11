@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { Pool, PoolClient } from "pg";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
 import { createLogger } from "../src/logger.ts";
 import type { RoundDifferentialRow, RoundsRepository } from "../src/data/rounds.repository.ts";
@@ -30,6 +31,20 @@ function fakeRoundsRepository(differentialsByPlayer: Record<string, RoundDiffere
   };
 }
 
+// A minimal fake pg.Pool -- only used for the self-managed-mode
+// transaction wrapper's own BEGIN/COMMIT/ROLLBACK calls. The fake
+// HandicapHistoryService/RoundsRepository below ignore whatever client
+// they're given entirely (they're not real repositories), so this fake
+// client is never actually queried for real data -- it only needs to
+// tolerate being asked to run those three statements and to be released.
+function fakePool(): Pool {
+  const fakeClient = {
+    query: async () => ({ rows: [], rowCount: 0 }),
+    release: () => { /* no-op */ },
+  } as unknown as PoolClient;
+  return { connect: async () => fakeClient } as unknown as Pool;
+}
+
 function fakeHandicapHistoryService(
   currentIndexByPlayer: Record<string, CurrentHandicapIndex | null>,
   recordCalls: Array<{ playerId: string; newIndex: number; snapshot: Record<string, unknown> }>,
@@ -38,6 +53,9 @@ function fakeHandicapHistoryService(
   let nextId = 1;
   return {
     async getCurrentIndex(playerId) {
+      return currentIndexByPlayer[playerId] ?? null;
+    },
+    async getCurrentIndexForUpdate(playerId) {
       return currentIndexByPlayer[playerId] ?? null;
     },
     async listHistoryForPlayer(): Promise<HandicapHistoryRecord[]> {
@@ -86,6 +104,7 @@ function makeDifferentials(count: number, baseValue = 10): RoundDifferentialRow[
 
 test("recalculatePlayerHandicap: player_not_found when the player doesn't exist (or is soft-deleted)", async () => {
   const orchestrator = createRecalculationOrchestrator(
+    fakePool(),
     fakeRoundsRepository({}),
     fakeHandicapHistoryService({}, []),
     unusedPccService(),
@@ -98,6 +117,7 @@ test("recalculatePlayerHandicap: player_not_found when the player doesn't exist 
 
 test("recalculatePlayerHandicap: insufficient_holes when fewer than 3 effective differentials exist", async () => {
   const orchestrator = createRecalculationOrchestrator(
+    fakePool(),
     fakeRoundsRepository({ "player-1": makeDifferentials(2) }),
     fakeHandicapHistoryService({ "player-1": { handicapIndex: null, lowHandicapIndex: null } }, []),
     unusedPccService(),
@@ -111,6 +131,7 @@ test("recalculatePlayerHandicap: insufficient_holes when fewer than 3 effective 
 test("recalculatePlayerHandicap: eligible writes through handicap-history's shared path and returns the applied index", async () => {
   const recordCalls: Array<{ playerId: string; newIndex: number; snapshot: Record<string, unknown> }> = [];
   const orchestrator = createRecalculationOrchestrator(
+    fakePool(),
     fakeRoundsRepository({ "player-1": makeDifferentials(3, 10) }),
     fakeHandicapHistoryService({ "player-1": { handicapIndex: null, lowHandicapIndex: null } }, recordCalls),
     unusedPccService(),
@@ -131,13 +152,17 @@ test("recalculatePlayerHandicap: an unchanged recalculation surfaces a null hist
   // recordCalculatedResult report a null history (mirrors ghs#21's real
   // change-only behaviour without needing a real database here).
   const orchestrator = createRecalculationOrchestrator(
+    fakePool(),
     fakeRoundsRepository({ "player-1": makeDifferentials(3, 10) }),
     {
       async getCurrentIndex() {
         return { handicapIndex: 7.6, lowHandicapIndex: 7.6 };
       },
+      async getCurrentIndexForUpdate() {
+        return { handicapIndex: 7.6, lowHandicapIndex: 7.6 };
+      },
       async listHistoryForPlayer() { return []; },
-      async recordCalculatedResult(playerId, newIndex) {
+      async recordCalculatedResult(playerId: string, newIndex: number) {
         return { history: null, handicapIndex: newIndex, lowHandicapIndex: 7.6 };
       },
       async recordManualOverride() { throw new Error("not used"); },
@@ -153,6 +178,7 @@ test("recalculatePlayerHandicap: an unchanged recalculation surfaces a null hist
 
 test("recalculatePlayerHandicap: a thrown error is caught and reported as a 'failed' outcome, not propagated", async () => {
   const orchestrator = createRecalculationOrchestrator(
+    fakePool(),
     fakeRoundsRepository({ "player-1": makeDifferentials(3, 10) }),
     fakeHandicapHistoryService(
       { "player-1": { handicapIndex: null, lowHandicapIndex: null } },
@@ -188,6 +214,7 @@ test("recalculatePccForTeeConfigDay: one player's thrown failure does not preven
   };
 
   const orchestrator = createRecalculationOrchestrator(
+    fakePool(),
     fakeRoundsRepository({
       "player-1": makeDifferentials(3, 10),
       "player-2": makeDifferentials(3, 12),

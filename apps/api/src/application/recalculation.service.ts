@@ -1,4 +1,4 @@
-import type { PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 import type { Logger } from "../logger.ts";
 import type { RoundsRepository } from "../data/rounds.repository.ts";
 import type { DailyPcc } from "../data/pcc.repository.ts";
@@ -45,23 +45,24 @@ export interface RecalculationOrchestrator {
   // approved rounds (ghs#22), and -- only if the resulting index
   // actually changed -- writes a handicap_history row and updates
   // players.handicap_index/low_handicap_index (ghs#21's shared write
-  // path).
+  // path). The player row is locked (SELECT ... FOR UPDATE) from the
+  // very first read, so the Low Handicap Index used for cap application
+  // is guaranteed consistent with whatever gets written -- not a value
+  // that could have changed in between (caught in review, PR #31).
   //
   // client: two distinct modes, not just a performance optimisation --
-  //   - Omitted (self-managed): every read/write here runs in its own
-  //     connection, and any error is caught and reported as a "failed"
-  //     outcome rather than thrown. Used by recalculatePccForTeeConfigDay
-  //     below, where each affected player is deliberately independent.
+  //   - Omitted (self-managed): this method opens its own connection and
+  //     a real transaction spanning the entire read -> compute -> write
+  //     sequence (not just the final write), commits on success, rolls
+  //     back and reports a "failed" outcome on error. Used by
+  //     recalculatePccForTeeConfigDay below, where each affected player
+  //     is deliberately independent of the others.
   //   - Provided (caller-managed): every read/write runs on the given
   //     client, no transaction is opened or committed here, and errors
   //     PROPAGATE (are not caught) so the caller's own transaction can
   //     roll back. This is what lets ghs#23's round-approval/rejection/
   //     amendment handlers bundle "update rounds.status" and "recalculate
-  //     this player's handicap" into one real, atomic commit -- exactly
-  //     what Issue 24's own acceptance criteria requires and what an
-  //     earlier version of this orchestrator could not actually do
-  //     (caught in review, PR #31: there was no way for a caller to
-  //     participate in this method's transaction at all).
+  //     this player's handicap" into one real, atomic commit.
   recalculatePlayerHandicap(
     playerId: string,
     trigger: RecalculationTrigger,
@@ -70,7 +71,7 @@ export interface RecalculationOrchestrator {
 
   // Recalculates PCC for a tee-configuration/day (ghs#19's atomic
   // upsert-and-bulk-rewrite), then recalculates every distinctly
-  // affected player's handicap independently -- one transaction per
+  // affected player's handicap independently -- one real transaction per
   // player (self-managed mode, above), not one giant transaction for all
   // of them, so a single player's failure can never block or roll back
   // another player's already-correct recalculation from the same PCC
@@ -84,13 +85,24 @@ export interface RecalculationOrchestrator {
 }
 
 export function createRecalculationOrchestrator(
+  pool: Pool,
   rounds: RoundsRepository,
   handicapHistory: HandicapHistoryService,
   pcc: PccService,
   logger: Logger,
 ): RecalculationOrchestrator {
-  async function runRecalculation(playerId: string, trigger: RecalculationTrigger, client: PoolClient | undefined): Promise<RecalculationOutcome> {
-    const current = await handicapHistory.getCurrentIndex(playerId, client);
+  // Runs entirely on the given client -- every read and the eventual
+  // write are all part of whatever transaction that client belongs to.
+  // No BEGIN/COMMIT/ROLLBACK here; the caller (either
+  // recalculatePlayerHandicap's own self-managed wrapper below, or an
+  // external caller) owns that.
+  async function runRecalculation(playerId: string, trigger: RecalculationTrigger, client: PoolClient): Promise<RecalculationOutcome> {
+    // Locked from this first read, not just at the final write -- the
+    // Low Handicap Index used for cap application below is guaranteed
+    // consistent with whatever recordCalculatedResult later writes,
+    // because no other transaction can modify this row until this one
+    // commits or rolls back.
+    const current = await handicapHistory.getCurrentIndexForUpdate(playerId, client);
     if (current === null) {
       return { playerId, trigger, status: "player_not_found" };
     }
@@ -142,21 +154,35 @@ export function createRecalculationOrchestrator(
   async function recalculatePlayerHandicap(
     playerId: string,
     trigger: RecalculationTrigger,
-    client?: PoolClient,
+    externalClient?: PoolClient,
   ): Promise<RecalculationOutcome> {
-    if (client) {
+    if (externalClient) {
       // Caller-managed: let errors propagate so the caller's own
       // transaction rolls back instead of committing a state change
       // whose recalculation silently failed.
-      return runRecalculation(playerId, trigger, client);
+      return runRecalculation(playerId, trigger, externalClient);
     }
 
+    // Self-managed: this call owns a real, single transaction spanning
+    // the entire read -> compute -> write sequence -- not just the final
+    // write (caught in review, PR #31: an earlier version of this method
+    // read via the plain pool with no lock at all, then only the very
+    // last write step was transactional/locked, leaving a real race
+    // window and letting cap application use a Low Handicap Index that
+    // could already be stale by the time it was read).
+    const ownClient = await pool.connect();
     try {
-      return await runRecalculation(playerId, trigger, undefined);
+      await ownClient.query("BEGIN");
+      const result = await runRecalculation(playerId, trigger, ownClient);
+      await ownClient.query("COMMIT");
+      return result;
     } catch (err) {
+      await ownClient.query("ROLLBACK");
       const message = err instanceof Error ? err.message : String(err);
       logger.error("handicap recalculation failed", { playerId, trigger, error: message });
       return { playerId, trigger, status: "failed", error: message };
+    } finally {
+      ownClient.release();
     }
   }
 
@@ -172,8 +198,8 @@ export function createRecalculationOrchestrator(
       );
 
       // Each player is recalculated in self-managed mode (no client) --
-      // its own independent transaction, its own caught errors. One
-      // player's failure is recorded in its own outcome and does not
+      // its own independent, real transaction, its own caught errors.
+      // One player's failure is recorded in its own outcome and does not
       // prevent the remaining players from being processed or their
       // results from committing.
       const playerRecalculations: RecalculationOutcome[] = [];

@@ -49,10 +49,21 @@ export interface RecordHandicapChangeResult {
 }
 
 export interface HandicapHistoryRepository {
-  // client: when provided, the read runs on it instead of opening a new
-  // connection -- lets a caller (ghs#24's orchestrator, given an external
-  // client) keep this inside its own transaction.
+  // Plain, unlocked read -- for observation (e.g. "what is this player's
+  // index right now" for a response or a test assertion), not for
+  // driving a calculation whose result will be written back. client:
+  // when provided, the read runs on it instead of opening a new
+  // connection.
   getCurrentIndex(playerId: string, client?: Pool | PoolClient): Promise<CurrentHandicapIndex | null>;
+  // SELECT ... FOR UPDATE -- requires a real transaction client (a lock
+  // taken outside an explicit multi-statement transaction is released
+  // before the caller could ever use it, so accepting a plain Pool here
+  // wouldn't do anything useful). Use this, not getCurrentIndex above,
+  // whenever the returned lowHandicapIndex will feed into a calculation
+  // that gets written back -- otherwise the value driving that
+  // calculation (e.g. cap application) can be stale by the time the
+  // write actually happens (caught in review, PR #31).
+  getCurrentIndexForUpdate(playerId: string, client: PoolClient): Promise<CurrentHandicapIndex | null>;
   listForPlayer(playerId: string): Promise<HandicapHistoryRecord[]>;
   // client: when provided, every read/write here runs on it and this
   // method does NOT open, commit, or roll back a transaction -- the
@@ -171,6 +182,19 @@ export function createHandicapHistoryRepository(pool: Pool): HandicapHistoryRepo
     async getCurrentIndex(playerId, client) {
       const result = await (client ?? pool).query<{ handicap_index: string | null; low_handicap_index: string | null }>(
         "SELECT handicap_index, low_handicap_index FROM players WHERE id = $1 AND deleted_at IS NULL",
+        [playerId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        handicapIndex: row.handicap_index === null ? null : Number(row.handicap_index),
+        lowHandicapIndex: row.low_handicap_index === null ? null : Number(row.low_handicap_index),
+      };
+    },
+
+    async getCurrentIndexForUpdate(playerId, client) {
+      const result = await client.query<{ handicap_index: string | null; low_handicap_index: string | null }>(
+        "SELECT handicap_index, low_handicap_index FROM players WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
         [playerId],
       );
       const row = result.rows[0];

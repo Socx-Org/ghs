@@ -61,7 +61,7 @@ const handicapOverridesService = createHandicapOverridesService(handicapOverride
 // amendment handlers are this orchestrator's first real caller.
 // Constructed here now so ghs#23 only has to wire it into the app, not
 // also assemble it.
-const recalculationOrchestrator = createRecalculationOrchestrator(roundsRepository, handicapHistoryService, pccService, logger);
+const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepository, handicapHistoryService, pccService, logger);
 const coursesService = createCoursesService(coursesRepository, logger);
 const authProvider = createLocalAuthProvider(config.auth, refreshTokensRepository);
 const mfaService = createMfaService(mfaRepository, config.auth.mfaEncryptionKey);

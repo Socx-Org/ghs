@@ -43,6 +43,9 @@ function fakeHandicapHistoryService(): HandicapHistoryService & { recordedCalls:
     async getCurrentIndex(): Promise<CurrentHandicapIndex | null> {
       return null;
     },
+    async getCurrentIndexForUpdate(): Promise<CurrentHandicapIndex | null> {
+      return null;
+    },
     async listHistoryForPlayer(): Promise<HandicapHistoryRecord[]> {
       return [];
     },

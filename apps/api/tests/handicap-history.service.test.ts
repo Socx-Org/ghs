@@ -20,6 +20,9 @@ function fakeRepository(): HandicapHistoryRepository & { calls: RecordHandicapCh
     async getCurrentIndex() {
       return null;
     },
+    async getCurrentIndexForUpdate() {
+      return null;
+    },
     async listForPlayer() {
       return [];
     },
