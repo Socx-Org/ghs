@@ -24,6 +24,8 @@ import { createSystemSettingsService } from "../src/application/system-settings.
 import { createRoundsService } from "../src/application/rounds.service.ts";
 import { createHandicapOverridesRepository } from "../src/data/handicap-overrides.repository.ts";
 import { createHandicapOverridesService } from "../src/application/handicap-overrides.service.ts";
+import { createPccRepository } from "../src/data/pcc.repository.ts";
+import { createPccService } from "../src/application/pcc.service.ts";
 import { createApp } from "../src/interface/http/app.ts";
 import type { AuthConfig } from "../src/config.ts";
 import type { FairwayResult } from "../src/data/rounds.repository.ts";
@@ -191,10 +193,11 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens);
   const roundsService = createRoundsService(roundsRepo, logger);
   const handicapOverridesService = createHandicapOverridesService(createHandicapOverridesRepository(pool), logger);
+  const pccService = createPccService(createPccRepository(pool));
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);

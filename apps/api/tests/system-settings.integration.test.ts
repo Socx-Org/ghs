@@ -24,6 +24,8 @@ import { createRoundsRepository } from "../src/data/rounds.repository.ts";
 import { createRoundsService } from "../src/application/rounds.service.ts";
 import { createHandicapOverridesRepository } from "../src/data/handicap-overrides.repository.ts";
 import { createHandicapOverridesService } from "../src/application/handicap-overrides.service.ts";
+import { createPccRepository } from "../src/data/pcc.repository.ts";
+import { createPccService } from "../src/application/pcc.service.ts";
 import { createApp } from "../src/interface/http/app.ts";
 import type { AuthConfig } from "../src/config.ts";
 
@@ -45,17 +47,17 @@ after(async () => {
 test("system_settings round-trips through a real database (APP-020's generic key/value shape)", async () => {
   const repo = createSystemSettingsRepository(pool);
 
-  const created = await repo.upsert("pcc_override", "2", "Playing Conditions Calculation override", null);
+  const created = await repo.upsert("example_setting", "2", "An arbitrary example key -- the repository is generic", null);
   assert.equal(created.value, "2");
 
-  const fetched = await repo.get("pcc_override");
+  const fetched = await repo.get("example_setting");
   assert.equal(fetched!.value, "2");
 
-  const updated = await repo.upsert("pcc_override", "-1", "Playing Conditions Calculation override", null);
+  const updated = await repo.upsert("example_setting", "-1", "An arbitrary example key -- the repository is generic", null);
   assert.equal(updated.value, "-1");
 
-  await repo.delete("pcc_override");
-  assert.equal(await repo.get("pcc_override"), null);
+  await repo.delete("example_setting");
+  assert.equal(await repo.get("example_setting"), null);
 });
 
 test("settings are read live, not cached -- two independent service instances see the same write immediately (APP-020's core requirement)", async () => {
@@ -71,12 +73,9 @@ test("settings are read live, not cached -- two independent service instances se
   assert.equal(await serviceB.getMaintenanceMode(), true);
 });
 
-test("pcc_override's out-of-range rejection holds against a real database too, not just the fake repository in unit tests", async () => {
-  const service = createSystemSettingsService(createSystemSettingsRepository(pool));
-  await assert.rejects(() => service.setPccOverride(4, "admin-1"));
-
+test("pcc_override no longer exists as a system_settings key -- confirmed absent after migration (ghs#19)", async () => {
   const row = await createSystemSettingsRepository(pool).get("pcc_override");
-  assert.equal(row, null, "a rejected write must never reach the database");
+  assert.equal(row, null);
 });
 
 test("self-registration gate: POST /auth/register is 403 when off, 201 when on -- real HTTP, real app.ts wiring", async () => {
@@ -110,10 +109,11 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on -
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens);
   const roundsService = createRoundsService(createRoundsRepository(pool), logger);
   const handicapOverridesService = createHandicapOverridesService(createHandicapOverridesRepository(pool), logger);
+  const pccService = createPccService(createPccRepository(pool));
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);

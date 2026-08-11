@@ -1,6 +1,5 @@
 import { Router } from "express";
 import type { SystemSettingsService, NotificationSettings } from "../../../application/system-settings.service.ts";
-import { InvalidSettingValueError } from "../../../application/system-settings.service.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth, requireRole } from "../middleware/require-auth.ts";
 
@@ -17,37 +16,13 @@ export function adminSettingsRouter(settings: SystemSettingsService, authProvide
 
   router.get("/admin/settings", ...requireAdmin, async (_req, res, next) => {
     try {
-      const [pccOverride, maintenanceMode, selfRegistrationEnabled, notifications] = await Promise.all([
-        settings.getPccOverride(),
+      const [maintenanceMode, selfRegistrationEnabled, notifications] = await Promise.all([
         settings.getMaintenanceMode(),
         settings.getSelfRegistrationEnabled(),
         settings.getNotificationSettings(),
       ]);
-      res.status(200).json({ pccOverride, maintenanceMode, selfRegistrationEnabled, notifications });
+      res.status(200).json({ maintenanceMode, selfRegistrationEnabled, notifications });
     } catch (err) {
-      next(err);
-    }
-  });
-
-  router.put("/admin/settings/pcc-override", ...requireAdmin, async (req, res, next) => {
-    try {
-      const { value } = req.body as Record<string, unknown>;
-      if (value === null) {
-        await settings.clearPccOverride(req.identity!.sub);
-        res.status(200).json({ pccOverride: null });
-        return;
-      }
-      if (typeof value !== "number") {
-        res.status(400).json({ error: "value must be a number or null" });
-        return;
-      }
-      await settings.setPccOverride(value, req.identity!.sub);
-      res.status(200).json({ pccOverride: value });
-    } catch (err) {
-      if (err instanceof InvalidSettingValueError) {
-        res.status(400).json({ error: err.message });
-        return;
-      }
       next(err);
     }
   });

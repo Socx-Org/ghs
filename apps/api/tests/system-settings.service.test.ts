@@ -1,13 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createSystemSettingsService, InvalidSettingValueError } from "../src/application/system-settings.service.ts";
+import { createSystemSettingsService } from "../src/application/system-settings.service.ts";
 import type { SettingRow, SystemSettingsRepository } from "../src/data/system-settings.repository.ts";
 
-// Pure unit tests (ENG-030.3) -- no HTTP, no real database. Proves the
-// pcc_override domain invariant (-1..3) is enforced here, in application
-// code, now that the database CHECK constraint legacy GHS had is gone
-// (ghs#11, platform owner decision: APP-020's generic key/value shape
-// over legacy's fixed-column singleton).
+// Pure unit tests (ENG-030.3) -- no HTTP, no real database.
 function fakeRepository(): SystemSettingsRepository & { rows: Map<string, SettingRow> } {
   const rows = new Map<string, SettingRow>();
   return {
@@ -29,44 +25,11 @@ function fakeRepository(): SystemSettingsRepository & { rows: Map<string, Settin
   };
 }
 
-test("pcc_override accepts every value in the valid -1..3 range", async () => {
+test("pcc_override has no surviving method on SystemSettingsService -- confirmed dead legacy configuration, removed rather than repurposed (ghs#19, platform owner decision 2026-08-12)", async () => {
   const service = createSystemSettingsService(fakeRepository());
-  for (const value of [-1, 0, 1, 2, 3]) {
-    await service.setPccOverride(value, "admin-1");
-    assert.equal(await service.getPccOverride(), value);
-  }
-});
-
-test("pcc_override rejects every value outside -1..3", async () => {
-  const service = createSystemSettingsService(fakeRepository());
-  for (const value of [-2, 4, 10, -100]) {
-    await assert.rejects(() => service.setPccOverride(value, "admin-1"), InvalidSettingValueError);
-  }
-});
-
-test("pcc_override rejects non-integer values", async () => {
-  const service = createSystemSettingsService(fakeRepository());
-  await assert.rejects(() => service.setPccOverride(1.5, "admin-1"), InvalidSettingValueError);
-});
-
-test("pcc_override defaults to null (no override) when never set", async () => {
-  const service = createSystemSettingsService(fakeRepository());
-  assert.equal(await service.getPccOverride(), null);
-});
-
-test("pcc_override can be cleared back to null", async () => {
-  const service = createSystemSettingsService(fakeRepository());
-  await service.setPccOverride(2, "admin-1");
-  assert.equal(await service.getPccOverride(), 2);
-  await service.clearPccOverride("admin-1");
-  assert.equal(await service.getPccOverride(), null);
-});
-
-test("an out-of-range write never reaches the repository -- rejected before any upsert", async () => {
-  const repo = fakeRepository();
-  const service = createSystemSettingsService(repo);
-  await assert.rejects(() => service.setPccOverride(99, "admin-1"));
-  assert.equal(repo.rows.size, 0);
+  assert.equal("getPccOverride" in service, false);
+  assert.equal("setPccOverride" in service, false);
+  assert.equal("clearPccOverride" in service, false);
 });
 
 test("maintenance_mode and self_registration_enabled default to false; self_registration_enabled is off-by-default matching legacy's conservative posture", async () => {
