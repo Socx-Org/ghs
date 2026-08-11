@@ -14,7 +14,12 @@ import type { ScoringService } from "./scoring.service.ts";
 
 export interface RoundsService {
   createRound(input: CreateRoundInput): Promise<Round>;
-  addHoleScore(roundId: string, input: CreateHoleScoreInput): Promise<HoleScore>;
+  // preloadedRound: callers that already have the round (e.g. the HTTP
+  // route, which fetches it for its own authorization check) can pass it
+  // through to skip a second, redundant repository.get() here. Omitted,
+  // it's fetched as before -- existing callers are unaffected (caught in
+  // review, PR #27).
+  addHoleScore(roundId: string, input: CreateHoleScoreInput, preloadedRound?: Round): Promise<HoleScore>;
   // Not exposed over HTTP in this issue -- computing these values is
   // Phase 2's WHS calculation logic. Exists so the repository layer isn't
   // write-only-by-nobody for columns this schema already has.
@@ -62,8 +67,8 @@ export function createRoundsService(
       return round;
     },
 
-    async addHoleScore(roundId, input) {
-      const round = await repository.get(roundId);
+    async addHoleScore(roundId, input, preloadedRound) {
+      const round = preloadedRound ?? await repository.get(roundId);
       if (!round) throw new Error("round not found");
 
       const teeConfiguration = await courses.getTeeConfiguration(round.teeConfigurationId);

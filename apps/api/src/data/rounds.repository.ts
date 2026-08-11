@@ -85,6 +85,7 @@ export interface RoundScoreUpdate {
   grossScore?: number;
   adjustedGrossScore?: number;
   scoreDifferential?: number;
+  pcc?: number;
   totalPutts?: number;
   totalGir?: number;
   totalFairwaysHit?: number;
@@ -256,6 +257,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         grossScore: "gross_score",
         adjustedGrossScore: "adjusted_gross_score",
         scoreDifferential: "score_differential",
+        pcc: "pcc",
         totalPutts: "total_putts",
         totalGir: "total_gir",
         totalFairwaysHit: "total_fairways_hit",
