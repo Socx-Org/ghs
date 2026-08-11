@@ -24,6 +24,8 @@ import { createSystemSettingsService } from "../src/application/system-settings.
 import { createRoundsService } from "../src/application/rounds.service.ts";
 import { createHandicapOverridesRepository } from "../src/data/handicap-overrides.repository.ts";
 import { createHandicapOverridesService } from "../src/application/handicap-overrides.service.ts";
+import { createHandicapHistoryRepository } from "../src/data/handicap-history.repository.ts";
+import { createHandicapHistoryService } from "../src/application/handicap-history.service.ts";
 import { createPccRepository } from "../src/data/pcc.repository.ts";
 import { createPccService } from "../src/application/pcc.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
@@ -195,7 +197,8 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
   const pccService = createPccService(createPccRepository(pool));
   const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
   const roundsService = createRoundsService(roundsRepo, coursesRepo, scoringService, logger);
-  const handicapOverridesService = createHandicapOverridesService(createHandicapOverridesRepository(pool), logger);
+  const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
+  const handicapOverridesService = createHandicapOverridesService(createHandicapOverridesRepository(pool), handicapHistoryService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
