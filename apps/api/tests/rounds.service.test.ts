@@ -29,6 +29,7 @@ function fakeRepository(): RoundsRepository {
         grossScore: null,
         adjustedGrossScore: null,
         scoreDifferential: null,
+        pcc: null,
         totalPutts: null,
         totalGir: null,
         totalFairwaysHit: null,

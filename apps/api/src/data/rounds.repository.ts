@@ -24,6 +24,7 @@ export interface Round {
   grossScore: number | null;
   adjustedGrossScore: number | null;
   scoreDifferential: number | null;
+  pcc: number | null;
   totalPutts: number | null;
   totalGir: number | null;
   totalFairwaysHit: number | null;
@@ -111,6 +112,7 @@ interface RoundRow {
   gross_score: number | null;
   adjusted_gross_score: number | null;
   score_differential: string | null;
+  pcc: number | null;
   total_putts: number | null;
   total_gir: number | null;
   total_fairways_hit: number | null;
@@ -165,6 +167,7 @@ function toRound(row: RoundRow, holeScores: HoleScore[]): Round {
     grossScore: row.gross_score,
     adjustedGrossScore: row.adjusted_gross_score,
     scoreDifferential: row.score_differential === null ? null : Number(row.score_differential),
+    pcc: row.pcc,
     totalPutts: row.total_putts,
     totalGir: row.total_gir,
     totalFairwaysHit: row.total_fairways_hit,
@@ -177,7 +180,7 @@ function toRound(row: RoundRow, holeScores: HoleScore[]): Round {
 }
 
 const ROUND_COLUMNS = `id, player_id, tee_configuration_id, played_at, playing_handicap, gross_score,
-  adjusted_gross_score, score_differential, total_putts, total_gir, total_fairways_hit, total_penalties,
+  adjusted_gross_score, score_differential, pcc, total_putts, total_gir, total_fairways_hit, total_penalties,
   is_tournament, is_9_hole, status, rejection_reason`;
 
 const HOLE_SCORE_COLUMNS = `id, round_id, hole_number, strokes, putts, gir, fairway_result, in_sand,

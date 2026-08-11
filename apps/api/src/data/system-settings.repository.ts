@@ -2,10 +2,9 @@ import type { Pool } from "pg";
 
 // APP-020's Configuration Management pattern: a single generic key/value
 // table. This repository is deliberately generic -- it knows nothing
-// about pcc_override, maintenance_mode, or any other specific GHS
-// setting. GHS-specific meaning, defaults, and validation (including the
-// pcc_override -1..3 domain invariant) live one layer up, in
-// system-settings.service.ts -- not here.
+// about maintenance_mode, self_registration_enabled, or any other
+// specific GHS setting. GHS-specific meaning, defaults, and validation
+// live one layer up, in system-settings.service.ts -- not here.
 
 export interface SettingRow {
   key: string;

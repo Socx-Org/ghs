@@ -9,6 +9,7 @@ import type { AdminUsersService } from "../../application/admin-users.service.ts
 import type { SystemSettingsService } from "../../application/system-settings.service.ts";
 import type { RoundsService } from "../../application/rounds.service.ts";
 import type { HandicapOverridesService } from "../../application/handicap-overrides.service.ts";
+import type { PccService } from "../../application/pcc.service.ts";
 import type { PlayersRepository } from "../../data/players.repository.ts";
 import type { AuthProvider } from "../../application/auth-provider.ts";
 import { healthRouter } from "./routes/health.ts";
@@ -18,6 +19,7 @@ import { authRouter } from "./routes/auth.ts";
 import { mfaRouter } from "./routes/mfa.ts";
 import { adminUsersRouter } from "./routes/admin-users.ts";
 import { adminSettingsRouter } from "./routes/admin-settings.ts";
+import { adminPccRouter } from "./routes/admin-pcc.ts";
 import { roundsRouter } from "./routes/rounds.ts";
 import { handicapOverridesRouter } from "./routes/handicap-overrides.ts";
 
@@ -31,6 +33,7 @@ export interface AppDeps {
   systemSettingsService: SystemSettingsService;
   roundsService: RoundsService;
   handicapOverridesService: HandicapOverridesService;
+  pccService: PccService;
   playersRepository: PlayersRepository;
   authProvider: AuthProvider;
 }
@@ -51,6 +54,7 @@ export function createApp(deps: AppDeps): Express {
   app.use(mfaRouter(deps.mfaService, deps.authProvider));
   app.use(adminUsersRouter(deps.adminUsersService, deps.mfaService, deps.authProvider));
   app.use(adminSettingsRouter(deps.systemSettingsService, deps.authProvider));
+  app.use(adminPccRouter(deps.pccService, deps.authProvider));
   app.use(clubsRouter(deps.clubsService, deps.authProvider));
   app.use(coursesRouter(deps.coursesService, deps.authProvider));
   app.use(roundsRouter(deps.roundsService, deps.playersRepository, deps.authProvider));
