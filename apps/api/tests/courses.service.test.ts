@@ -32,6 +32,13 @@ function fakeRepository(initial: Course[] = []): CoursesRepository {
     async get(id) {
       return courses.find((c) => c.id === id) ?? null;
     },
+    async getTeeConfiguration(id) {
+      for (const course of courses) {
+        const found = course.teeConfigurations.find((tc) => tc.id === id);
+        if (found) return found;
+      }
+      return null;
+    },
   };
 }
 

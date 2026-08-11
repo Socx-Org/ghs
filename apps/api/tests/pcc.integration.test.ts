@@ -9,6 +9,7 @@ import { createRoundsRepository } from "../src/data/rounds.repository.ts";
 import { createPlayersRepository } from "../src/data/players.repository.ts";
 import { createPccRepository } from "../src/data/pcc.repository.ts";
 import { createPccService } from "../src/application/pcc.service.ts";
+import { createScoringService } from "../src/application/scoring.service.ts";
 import { createUsersRepository } from "../src/data/users.repository.ts";
 import { createActivationTokenRepository } from "../src/data/activation-tokens.repository.ts";
 import { createPasswordResetTokenRepository } from "../src/data/password-reset-tokens.repository.ts";
@@ -190,9 +191,10 @@ test("HTTP: admin can calculate/override PCC for a tee-configuration/day; a play
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens);
-  const roundsService = createRoundsService(roundsRepo, logger);
-  const handicapOverridesService = createHandicapOverridesService(createHandicapOverridesRepository(pool), logger);
   const pccService = createPccService(createPccRepository(pool));
+  const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
+  const roundsService = createRoundsService(roundsRepo, coursesRepo, scoringService, logger);
+  const handicapOverridesService = createHandicapOverridesService(createHandicapOverridesRepository(pool), logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
