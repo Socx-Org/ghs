@@ -5,6 +5,7 @@ import type { CreateHoleScoreInput, FairwayResult } from "../../../data/rounds.r
 import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth, requireRole } from "../middleware/require-auth.ts";
 import { ADMIN_ROLES, createPlayerAccessAuthorizer } from "../authorization.ts";
+import { HoleMetadataNotFoundError } from "../../../application/scoring.service.ts";
 
 const FAIRWAY_RESULTS: FairwayResult[] = ["hit", "missed_left", "missed_right"];
 
@@ -138,9 +139,22 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         penalties: typeof penalties === "number" ? penalties : undefined,
         netDoubleBogeyAdjusted: typeof netDoubleBogeyAdjusted === "number" ? netDoubleBogeyAdjusted : undefined,
       };
-      const holeScore = await service.addHoleScore(roundId, input);
+      // `round` was already fetched above for the authorization check --
+      // passed through so the service doesn't re-fetch it a second time
+      // (caught in review, PR #27). The 1-18 check above is a cheap
+      // structural bound; whether this specific tee configuration
+      // actually has this hole is a real business rule the service
+      // itself enforces (it has the tee configuration's actual hole
+      // data, which this route deliberately doesn't also fetch just to
+      // duplicate that check) -- surfaced here as a 400, not left to
+      // fall through to the generic 500 handler.
+      const holeScore = await service.addHoleScore(roundId, input, round);
       res.status(201).json(holeScore);
     } catch (err) {
+      if (err instanceof HoleMetadataNotFoundError) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });

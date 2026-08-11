@@ -94,11 +94,16 @@ test("recomputeRoundAggregates sums gross/adjusted gross score and totals from t
 
   // score_differential = (113/113) * (adjustedGross - 72 - pcc(=0, no other rounds that day))
   assert.equal(updated.scoreDifferential, Number((expectedAdjusted - 72).toFixed(3)));
+  // pcc itself is persisted too, not just the differential it fed into
+  // (PR #27 review fix -- previously left null even though the
+  // differential reflected a real PCC value).
+  assert.equal(updated.pcc, 0);
 
   // Round-trips through a fresh read, not just the UPDATE...RETURNING.
   const fetched = await roundsRepo.get(round.id);
   assert.equal(fetched!.scoreDifferential, updated.scoreDifferential);
   assert.equal(fetched!.adjustedGrossScore, expectedAdjusted);
+  assert.equal(fetched!.pcc, 0);
 });
 
 test("recomputeRoundAggregates reflects the tee-configuration/day's real PCC when other rounds have already set it", async () => {
@@ -123,7 +128,13 @@ test("recomputeRoundAggregates reflects the tee-configuration/day's real PCC whe
   // (113/113) * (72 - 72 - 2) = -2.
   assert.equal(updated.adjustedGrossScore, 72);
   assert.equal(updated.scoreDifferential, -2);
+  // rounds.pcc must agree with the differential it was computed from --
+  // never left null while score_differential reflects a real PCC value
+  // (PR #27 review fix; matches pcc.repository.upsertAndApply's own
+  // invariant, ghs#19).
+  assert.equal(updated.pcc, 2);
 
   const fetched = await roundsRepo.get(round.id);
   assert.equal(fetched!.scoreDifferential, -2);
+  assert.equal(fetched!.pcc, 2);
 });

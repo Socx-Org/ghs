@@ -63,12 +63,16 @@ function roundsService(repository: RoundsRepository) {
   return createRoundsService(repository, courses, scoring, silentLogger);
 }
 
-function fakeRepository(): RoundsRepository {
+function fakeRepository(): RoundsRepository & { getCallCount: number } {
   const rounds = new Map<string, Round>();
   let nextRoundId = 1;
   let nextHoleId = 1;
+  const state = { getCallCount: 0 };
 
   return {
+    get getCallCount() {
+      return state.getCallCount;
+    },
     async create(input: CreateRoundInput) {
       const round: Round = {
         id: String(nextRoundId++),
@@ -125,6 +129,7 @@ function fakeRepository(): RoundsRepository {
       return round;
     },
     async get(id: string) {
+      state.getCallCount += 1;
       return rounds.get(id) ?? null;
     },
     async listByPlayer(playerId: string): Promise<RoundSummary[]> {
@@ -203,6 +208,55 @@ test("addHoleScore computes net_double_bogey_adjusted for the incrementally-adde
 
   const holeScore = await service.addHoleScore(round.id, { holeNumber: 1, strokes: 9 });
   assert.equal(holeScore.netDoubleBogeyAdjusted, 7);
+});
+
+test("addHoleScore skips its own repository fetch when the caller already has the round -- avoids the redundant query the HTTP route used to trigger (PR #27 review fix)", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+  const round = await service.createRound({
+    playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z", playingHandicap: 10,
+  });
+
+  const fetched = await service.getRound(round.id); // e.g. the route's own auth-check fetch
+  const getCallsBeforeAddHoleScore = repo.getCallCount;
+
+  const holeScore = await service.addHoleScore(round.id, { holeNumber: 1, strokes: 9 }, fetched!);
+  assert.equal(holeScore.netDoubleBogeyAdjusted, 7, "still computes correctly using the preloaded round");
+  assert.equal(repo.getCallCount, getCallsBeforeAddHoleScore, "no additional repository.get() call was made");
+});
+
+test("addHoleScore still fetches the round itself when no preloaded round is given -- existing callers are unaffected", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+  const round = await service.createRound({
+    playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z", playingHandicap: 10,
+  });
+
+  const getCallsBefore = repo.getCallCount;
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 9 });
+  assert.equal(repo.getCallCount, getCallsBefore + 1, "falls back to fetching when no preloaded round is passed");
+});
+
+test("addHoleScore ignores a preloaded round whose id doesn't match roundId and fetches the correct one instead (PR #30 review fix)", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+
+  // Two real rounds with different playing handicaps -- if the mismatched
+  // preloaded round were wrongly trusted, the adjustment below would be
+  // computed against handicap 0 (wrongRound's) instead of 10 (the real
+  // target round's), producing a different, wrong result.
+  const wrongRound = await service.createRound({
+    playerId: "player-2", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z", playingHandicap: 0,
+  });
+  const targetRound = await service.createRound({
+    playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z", playingHandicap: 10,
+  });
+
+  const getCallsBefore = repo.getCallCount;
+  const holeScore = await service.addHoleScore(targetRound.id, { holeNumber: 1, strokes: 9 }, wrongRound);
+
+  assert.equal(repo.getCallCount, getCallsBefore + 1, "fell back to fetching the real round rather than trusting the mismatched one");
+  assert.equal(holeScore.netDoubleBogeyAdjusted, 7, "computed against the real target round's handicap (10), not the mismatched one's (0, which would give 6)");
 });
 
 test("listRoundsForPlayer only returns that player's rounds", async () => {

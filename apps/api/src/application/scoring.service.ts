@@ -15,16 +15,27 @@ export class HoleMetadataNotFoundError extends Error {}
 // rather than receiving them, starting from the easiest holes (highest
 // stroke index) -- confirmed against legacy's live rounds.ts, which
 // implements the same reverse allocation.
+//
+// playingHandicap is rounded to the nearest integer here, inside the
+// pure function itself, rather than relying on every caller to remember
+// to do it first -- a fractional handicap (e.g. 10.6) would otherwise
+// silently misallocate strokes via % and / on a non-integer (caught in
+// review, PR #27: this function is exported and callable directly, not
+// only through ScoringService.computeHoleAdjustment, which did round
+// before this fix but nothing enforced that at this function's own
+// boundary).
 export function computeStrokesReceived(playingHandicap: number, holeStrokeIndex: number, holeCount: number): number {
   if (holeCount <= 0) return 0;
 
-  if (playingHandicap >= 0) {
-    const base = Math.floor(playingHandicap / holeCount);
-    const remainder = playingHandicap % holeCount;
+  const handicap = Math.round(playingHandicap);
+
+  if (handicap >= 0) {
+    const base = Math.floor(handicap / holeCount);
+    const remainder = handicap % holeCount;
     return base + (holeStrokeIndex <= remainder ? 1 : 0);
   }
 
-  const abs = Math.abs(playingHandicap);
+  const abs = Math.abs(handicap);
   const base = -Math.floor(abs / holeCount);
   const remainder = abs % holeCount;
   if (remainder === 0) return base;
@@ -105,7 +116,9 @@ export function createScoringService(rounds: RoundsRepository, courses: CoursesR
   return {
     computeHoleAdjustment({ holeNumber, strokes, playingHandicap, holes, holeCount }) {
       const hole = findHole(holes, holeNumber);
-      return computeNetDoubleBogeyAdjustedScore(strokes, Math.round(playingHandicap), hole, holeCount);
+      // Rounding now happens inside computeStrokesReceived itself, not
+      // here -- no longer duplicated at this call site.
+      return computeNetDoubleBogeyAdjustedScore(strokes, playingHandicap, hole, holeCount);
     },
 
     async recomputeRoundAggregates(roundId) {
@@ -133,6 +146,19 @@ export function createScoringService(rounds: RoundsRepository, courses: CoursesR
       return rounds.updateScores(roundId, {
         grossScore,
         adjustedGrossScore,
+        // pcc is persisted unconditionally -- it comes from
+        // pcc.getOrCreateDailyPcc and doesn't depend on course/slope
+        // rating, unlike scoreDifferential below. The real invariant
+        // this fixes (PR #27) is one-directional, not "always together":
+        // whenever scoreDifferential IS persisted, pcc is guaranteed to
+        // already be persisted alongside it in this same call, so the
+        // two can never disagree the way they could before this fix
+        // (scoreDifferential written while rounds.pcc stayed null).
+        // Corrected wording, caught in review, PR #30 -- the previous
+        // comment claimed a strict "never one without the other"
+        // invariant that doesn't hold in the other direction, since pcc
+        // has no equivalent null-guard condition.
+        pcc: dailyPcc.pcc,
         totalPutts,
         totalGir,
         totalFairwaysHit,

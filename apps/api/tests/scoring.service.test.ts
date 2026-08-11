@@ -52,6 +52,15 @@ test("computeStrokesReceived: a plus-handicap that divides evenly gives back the
   assert.equal(computeStrokesReceived(-18, 18, 18), -1);
 });
 
+test("computeStrokesReceived: rounds a fractional playing handicap itself -- not just when called through computeHoleAdjustment (PR #27 review fix)", () => {
+  // This function is exported and callable directly, not only via
+  // ScoringService.computeHoleAdjustment. Before this fix, a fractional
+  // handicap passed straight to % and / would silently misallocate
+  // (10.6 % 18 = 10.6, not the rounded 11 used elsewhere).
+  assert.equal(computeStrokesReceived(10.6, 11, 18), 1, "10.6 rounds to 11 -> remainder 11 -> stroke index 11 receives a stroke");
+  assert.equal(computeStrokesReceived(10.4, 11, 18), 0, "10.4 rounds to 10 -> remainder 10 -> stroke index 11 does not");
+});
+
 test("computeNetDoubleBogeyAdjustedScore: caps strokes at par+2+strokesReceived, never raises a lower score", () => {
   const hole = { par: 4, strokeIndex: 7 };
   // 0 handicap -> cap = 4+2+0 = 6

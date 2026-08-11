@@ -253,6 +253,20 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
       body: JSON.stringify({ status: "approved" }),
     });
     assert.equal(statusResponse.status, 403);
+
+    // Submitting a hole number the tee configuration has no metadata for
+    // is a validation error (400), not an unhandled 500 -- the tee
+    // configuration created by createTeeConfiguration() above has no
+    // hole metadata at all, so any hole number reaches
+    // HoleMetadataNotFoundError (PR #27 review fix).
+    const invalidHoleResponse = await fetch(`${baseUrl}/rounds/${ownRound.id}/holes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ holeNumber: 1, strokes: 4 }),
+    });
+    assert.equal(invalidHoleResponse.status, 400);
+    const invalidHoleBody = await invalidHoleResponse.json() as { error: string };
+    assert.match(invalidHoleBody.error, /no hole metadata/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
