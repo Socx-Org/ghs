@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRoundsService } from "../src/application/rounds.service.ts";
+import { createScoringService } from "../src/application/scoring.service.ts";
 import { createLogger } from "../src/logger.ts";
 import type {
   CreateHoleScoreInput,
@@ -12,6 +13,55 @@ import type {
   RoundStatus,
   RoundSummary,
 } from "../src/data/rounds.repository.ts";
+import type { CoursesRepository, TeeConfiguration } from "../src/data/courses.repository.ts";
+import type { PccService } from "../src/application/pcc.service.ts";
+
+// A single 18-hole tee configuration, reused by every test below --
+// enough hole metadata (hole 1, par 4, stroke index 7) for the
+// net-double-bogey computation rounds.service.ts now performs at
+// hole-insertion time.
+const FAKE_TEE_CONFIGURATION: TeeConfiguration = {
+  id: "tee-1",
+  name: "White",
+  holeCount: 18,
+  courseRating: 72.0,
+  slopeRating: 113,
+  holes: [{ id: "hole-1", holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 7 }],
+};
+
+function fakeCoursesRepository(): CoursesRepository {
+  return {
+    async list() {
+      return [];
+    },
+    async create() {
+      throw new Error("not used by these tests");
+    },
+    async get() {
+      return null;
+    },
+    async getTeeConfiguration(id) {
+      return id === FAKE_TEE_CONFIGURATION.id ? FAKE_TEE_CONFIGURATION : null;
+    },
+  };
+}
+
+function unusedPccService(): PccService {
+  return {
+    async getOrCreateDailyPcc() {
+      throw new Error("not used by these tests -- only computeHoleAdjustment is exercised here");
+    },
+    async calculateOrOverride() {
+      throw new Error("not used by these tests -- only computeHoleAdjustment is exercised here");
+    },
+  };
+}
+
+function roundsService(repository: RoundsRepository) {
+  const courses = fakeCoursesRepository();
+  const scoring = createScoringService(repository, courses, unusedPccService());
+  return createRoundsService(repository, courses, scoring, silentLogger);
+}
 
 function fakeRepository(): RoundsRepository {
   const rounds = new Map<string, Round>();
@@ -93,7 +143,7 @@ function fakeRepository(): RoundsRepository {
 const silentLogger = createLogger("test");
 
 test("createRound persists via the repository, including nested hole scores", async () => {
-  const service = createRoundsService(fakeRepository(), silentLogger);
+  const service = roundsService(fakeRepository());
 
   const round = await service.createRound({
     playerId: "player-1",
@@ -108,7 +158,7 @@ test("createRound persists via the repository, including nested hole scores", as
 });
 
 test("addHoleScore appends to an existing round -- the real incremental-entry workflow", async () => {
-  const service = createRoundsService(fakeRepository(), silentLogger);
+  const service = roundsService(fakeRepository());
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
 
   assert.equal(round.holeScores.length, 0);
@@ -119,7 +169,7 @@ test("addHoleScore appends to an existing round -- the real incremental-entry wo
 });
 
 test("setRoundStatus updates status and rejection reason", async () => {
-  const service = createRoundsService(fakeRepository(), silentLogger);
+  const service = roundsService(fakeRepository());
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
 
   await service.setRoundStatus(round.id, "rejected", "Incomplete scorecard");
@@ -128,8 +178,35 @@ test("setRoundStatus updates status and rejection reason", async () => {
   assert.equal(updated!.rejectionReason, "Incomplete scorecard");
 });
 
+test("createRound computes net_double_bogey_adjusted per hole at insertion time -- the ghs#20 wiring, not left at the repository's default of 0", async () => {
+  const service = roundsService(fakeRepository());
+  // hole 1: par 4, stroke index 7. playingHandicap 10 on an 18-hole
+  // round -> base 0, remainder 10, stroke index 7 <= 10 -> 1 stroke
+  // received. Net double bogey cap = 4 + 2 + 1 = 7. strokes=9 is capped
+  // down to 7.
+  const round = await service.createRound({
+    playerId: "player-1",
+    teeConfigurationId: "tee-1",
+    playedAt: "2026-05-01T09:00:00.000Z",
+    playingHandicap: 10,
+    holeScores: [{ holeNumber: 1, strokes: 9 }],
+  });
+
+  assert.equal(round.holeScores[0]!.netDoubleBogeyAdjusted, 7);
+});
+
+test("addHoleScore computes net_double_bogey_adjusted for the incrementally-added hole, using the round's own playing handicap", async () => {
+  const service = roundsService(fakeRepository());
+  const round = await service.createRound({
+    playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z", playingHandicap: 10,
+  });
+
+  const holeScore = await service.addHoleScore(round.id, { holeNumber: 1, strokes: 9 });
+  assert.equal(holeScore.netDoubleBogeyAdjusted, 7);
+});
+
 test("listRoundsForPlayer only returns that player's rounds", async () => {
-  const service = createRoundsService(fakeRepository(), silentLogger);
+  const service = roundsService(fakeRepository());
   await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
   await service.createRound({ playerId: "player-2", teeConfigurationId: "tee-1", playedAt: "2026-05-02T09:00:00.000Z" });
 

@@ -23,6 +23,7 @@ import { createHandicapOverridesRepository } from "./data/handicap-overrides.rep
 import { createHandicapOverridesService } from "./application/handicap-overrides.service.ts";
 import { createPccRepository } from "./data/pcc.repository.ts";
 import { createPccService } from "./application/pcc.service.ts";
+import { createScoringService } from "./application/scoring.service.ts";
 import { createApp } from "./interface/http/app.ts";
 
 // Composition root: config and secrets are read exactly once, here, and
@@ -47,9 +48,10 @@ const handicapOverridesRepository = createHandicapOverridesRepository(pool);
 const pccRepository = createPccRepository(pool);
 
 const clubsService = createClubsService(clubsRepository, logger);
-const roundsService = createRoundsService(roundsRepository, logger);
-const handicapOverridesService = createHandicapOverridesService(handicapOverridesRepository, logger);
 const pccService = createPccService(pccRepository);
+const scoringService = createScoringService(roundsRepository, coursesRepository, pccService);
+const roundsService = createRoundsService(roundsRepository, coursesRepository, scoringService, logger);
+const handicapOverridesService = createHandicapOverridesService(handicapOverridesRepository, logger);
 const coursesService = createCoursesService(coursesRepository, logger);
 const authProvider = createLocalAuthProvider(config.auth, refreshTokensRepository);
 const mfaService = createMfaService(mfaRepository, config.auth.mfaEncryptionKey);

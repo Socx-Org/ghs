@@ -67,6 +67,11 @@ export interface CoursesRepository {
   list(): Promise<CourseSummary[]>;
   create(input: CreateCourseInput): Promise<Course>;
   get(id: string): Promise<Course | null>;
+  // Rounds only know their tee_configuration_id, not the owning course --
+  // scoring (net double bogey, differential) needs hole metadata and
+  // ratings by tee-configuration directly, not nested under a course
+  // lookup.
+  getTeeConfiguration(id: string): Promise<TeeConfiguration | null>;
 }
 
 interface CourseRow {
@@ -202,6 +207,24 @@ export function createCoursesRepository(pool: Pool): CoursesRepository {
       }
 
       return { ...toSummary(courseRow), teeConfigurations };
+    },
+
+    async getTeeConfiguration(id) {
+      const teeResult = await pool.query<TeeConfigRow>(
+        `SELECT id, course_id, name, hole_count, course_rating, slope_rating
+         FROM tee_configurations WHERE id = $1`,
+        [id],
+      );
+      const teeRow = teeResult.rows[0];
+      if (!teeRow) return null;
+
+      const holeResult = await pool.query<HoleRow>(
+        `SELECT id, tee_configuration_id, hole_number, distance_yards, par, stroke_index
+         FROM holes WHERE tee_configuration_id = $1 ORDER BY hole_number`,
+        [teeRow.id],
+      );
+
+      return toTeeConfiguration(teeRow, holeResult.rows.map(toHole));
     },
   };
 }

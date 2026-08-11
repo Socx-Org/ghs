@@ -18,6 +18,7 @@ import { createSystemSettingsRepository } from "../src/data/system-settings.repo
 import { createRoundsRepository } from "../src/data/rounds.repository.ts";
 import { createPccRepository } from "../src/data/pcc.repository.ts";
 import { createPccService } from "../src/application/pcc.service.ts";
+import { createScoringService } from "../src/application/scoring.service.ts";
 import { createLocalAuthProvider } from "../src/application/auth-provider.ts";
 import { createAuthService } from "../src/application/auth.service.ts";
 import { createMfaService } from "../src/application/mfa.service.ts";
@@ -135,9 +136,10 @@ test("HTTP: a player can view their own handicap override history but not anothe
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens);
-  const roundsService = createRoundsService(roundsRepo, logger);
-  const handicapOverridesService = createHandicapOverridesService(overridesRepo, logger);
   const pccService = createPccService(createPccRepository(pool));
+  const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
+  const roundsService = createRoundsService(roundsRepo, coursesRepo, scoringService, logger);
+  const handicapOverridesService = createHandicapOverridesService(overridesRepo, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,

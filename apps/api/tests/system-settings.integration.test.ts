@@ -26,6 +26,7 @@ import { createHandicapOverridesRepository } from "../src/data/handicap-override
 import { createHandicapOverridesService } from "../src/application/handicap-overrides.service.ts";
 import { createPccRepository } from "../src/data/pcc.repository.ts";
 import { createPccService } from "../src/application/pcc.service.ts";
+import { createScoringService } from "../src/application/scoring.service.ts";
 import { createApp } from "../src/interface/http/app.ts";
 import type { AuthConfig } from "../src/config.ts";
 
@@ -107,9 +108,11 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on -
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens);
-  const roundsService = createRoundsService(createRoundsRepository(pool), logger);
-  const handicapOverridesService = createHandicapOverridesService(createHandicapOverridesRepository(pool), logger);
+  const roundsRepo = createRoundsRepository(pool);
   const pccService = createPccService(createPccRepository(pool));
+  const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
+  const roundsService = createRoundsService(roundsRepo, coursesRepo, scoringService, logger);
+  const handicapOverridesService = createHandicapOverridesService(createHandicapOverridesRepository(pool), logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
