@@ -26,6 +26,7 @@ import { createHandicapHistoryService } from "./application/handicap-history.ser
 import { createPccRepository } from "./data/pcc.repository.ts";
 import { createPccService } from "./application/pcc.service.ts";
 import { createScoringService } from "./application/scoring.service.ts";
+import { createRecalculationOrchestrator } from "./application/recalculation.service.ts";
 import { createApp } from "./interface/http/app.ts";
 
 // Composition root: config and secrets are read exactly once, here, and
@@ -56,6 +57,11 @@ const scoringService = createScoringService(roundsRepository, coursesRepository,
 const roundsService = createRoundsService(roundsRepository, coursesRepository, scoringService, logger);
 const handicapHistoryService = createHandicapHistoryService(handicapHistoryRepository);
 const handicapOverridesService = createHandicapOverridesService(handicapOverridesRepository, handicapHistoryService, logger);
+// Not yet wired into createApp/HTTP -- ghs#23's round approval/rejection/
+// amendment handlers are this orchestrator's first real caller.
+// Constructed here now so ghs#23 only has to wire it into the app, not
+// also assemble it.
+const recalculationOrchestrator = createRecalculationOrchestrator(roundsRepository, handicapHistoryService, pccService, logger);
 const coursesService = createCoursesService(coursesRepository, logger);
 const authProvider = createLocalAuthProvider(config.auth, refreshTokensRepository);
 const mfaService = createMfaService(mfaRepository, config.auth.mfaEncryptionKey);

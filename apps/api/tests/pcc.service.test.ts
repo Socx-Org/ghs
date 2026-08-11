@@ -110,7 +110,7 @@ function fakeRepository(): PccRepository & {
         updatedAt: new Date().toISOString(),
       };
       dailyPccRows.set(`${teeConfigurationId}:${playedOn}`, dailyPcc);
-      return { dailyPcc, updatedRounds: roundInputs.length };
+      return { dailyPcc, updatedRounds: roundInputs.length, affectedPlayerIds: [...new Set(roundInputs.map((r) => r.roundId))] };
     },
   };
 }

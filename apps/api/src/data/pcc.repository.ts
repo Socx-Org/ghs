@@ -37,13 +37,17 @@ export interface PccRepository {
   // must never disagree with its tee-configuration/day's finalised PCC --
   // that invariant is what makes this one atomic operation rather than
   // two independent writes.
+  // affectedPlayerIds: the distinct players whose rounds were just
+  // rewritten -- ghs#24's orchestrator uses this to know exactly which
+  // players need a handicap recalculation after a PCC correction,
+  // without a second query.
   upsertAndApply(
     teeConfigurationId: string,
     playedOn: string,
     pcc: number,
     source: PccSource,
     updatedBy: string | null,
-  ): Promise<{ dailyPcc: DailyPcc; updatedRounds: number }>;
+  ): Promise<{ dailyPcc: DailyPcc; updatedRounds: number; affectedPlayerIds: string[] }>;
 }
 
 interface DailyPccRow {
@@ -128,7 +132,7 @@ export function createPccRepository(pool: Pool): PccRepository {
           [teeConfigurationId, playedOn, pcc, source, updatedBy],
         );
 
-        const applyResult = await client.query(
+        const applyResult = await client.query<{ player_id: string }>(
           `UPDATE rounds r
            SET pcc = $3::smallint,
                score_differential = ROUND(
@@ -140,7 +144,8 @@ export function createPccRepository(pool: Pool): PccRepository {
            WHERE tc.id = r.tee_configuration_id
              AND r.tee_configuration_id = $1
              AND r.played_at::date = $2::date
-             AND r.adjusted_gross_score IS NOT NULL`,
+             AND r.adjusted_gross_score IS NOT NULL
+           RETURNING r.player_id`,
           [teeConfigurationId, playedOn, pcc],
         );
 
@@ -148,6 +153,7 @@ export function createPccRepository(pool: Pool): PccRepository {
         return {
           dailyPcc: toDailyPcc(dailyPccResult.rows[0]!),
           updatedRounds: applyResult.rowCount ?? 0,
+          affectedPlayerIds: [...new Set(applyResult.rows.map((row) => row.player_id))],
         };
       } catch (err) {
         await client.query("ROLLBACK");
