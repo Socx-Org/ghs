@@ -146,17 +146,23 @@ export function createScoringService(rounds: RoundsRepository, courses: CoursesR
       return rounds.updateScores(roundId, {
         grossScore,
         adjustedGrossScore,
+        // pcc is persisted unconditionally -- it comes from
+        // pcc.getOrCreateDailyPcc and doesn't depend on course/slope
+        // rating, unlike scoreDifferential below. The real invariant
+        // this fixes (PR #27) is one-directional, not "always together":
+        // whenever scoreDifferential IS persisted, pcc is guaranteed to
+        // already be persisted alongside it in this same call, so the
+        // two can never disagree the way they could before this fix
+        // (scoreDifferential written while rounds.pcc stayed null).
+        // Corrected wording, caught in review, PR #30 -- the previous
+        // comment claimed a strict "never one without the other"
+        // invariant that doesn't hold in the other direction, since pcc
+        // has no equivalent null-guard condition.
         pcc: dailyPcc.pcc,
         totalPutts,
         totalGir,
         totalFairwaysHit,
         totalPenalties,
-        // pcc is always persisted alongside score_differential -- never
-        // one without the other, matching pcc.repository.upsertAndApply
-        // (ghs#19)'s own invariant that a round's differential must
-        // never disagree with the PCC it was computed from. Caught in
-        // review, PR #27: this previously persisted scoreDifferential
-        // (which reflects the PCC) while leaving rounds.pcc itself null.
         ...(scoreDifferential !== null ? { scoreDifferential } : {}),
       });
     },

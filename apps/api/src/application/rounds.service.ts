@@ -68,7 +68,13 @@ export function createRoundsService(
     },
 
     async addHoleScore(roundId, input, preloadedRound) {
-      const round = preloadedRound ?? await repository.get(roundId);
+      // Only trust the preloaded round when its id genuinely matches --
+      // a caller passing a mismatched round (a copy-paste mistake, or a
+      // stale object from an earlier request) would otherwise silently
+      // compute this hole's adjustment against the wrong playing
+      // handicap/tee configuration instead of failing loudly. Caught in
+      // review, PR #30.
+      const round = (preloadedRound && preloadedRound.id === roundId) ? preloadedRound : await repository.get(roundId);
       if (!round) throw new Error("round not found");
 
       const teeConfiguration = await courses.getTeeConfiguration(round.teeConfigurationId);
