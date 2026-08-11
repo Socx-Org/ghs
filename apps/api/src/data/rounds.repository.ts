@@ -115,7 +115,11 @@ export interface RoundsRepository {
   // score_differential yet (unscored, or scoring not yet run) and
   // anything not currently 'approved' -- a round's contribution to a
   // player's handicap only counts while it's in that state.
-  listApprovedDifferentialsForPlayer(playerId: string): Promise<RoundDifferentialRow[]>;
+  // client: when provided, the read runs on it instead of the pool --
+  // lets a caller (ghs#24's orchestrator, given an external client) keep
+  // this inside its own transaction, so the approved-round set can't
+  // change between this read and the recalculation it feeds into.
+  listApprovedDifferentialsForPlayer(playerId: string, client?: Pool | PoolClient): Promise<RoundDifferentialRow[]>;
   // Bare status transition only -- no recalculation, no notification.
   // Those are real behaviour, explicitly Phase 2's scope, not this
   // repository's.
@@ -330,8 +334,8 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       return result.rows.map(toRoundSummary);
     },
 
-    async listApprovedDifferentialsForPlayer(playerId) {
-      const result = await pool.query<{ id: string; played_at: Date; score_differential: string; is_9_hole: boolean }>(
+    async listApprovedDifferentialsForPlayer(playerId, client) {
+      const result = await (client ?? pool).query<{ id: string; played_at: Date; score_differential: string; is_9_hole: boolean }>(
         `SELECT id, played_at, score_differential, is_9_hole
          FROM rounds
          WHERE player_id = $1

@@ -195,3 +195,66 @@ test("recalculatePccForTeeConfigDay: one affected player being unrecoverable (so
     assert.ok(current!.handicapIndex !== null, "a real handicap index was persisted for this surviving player");
   }
 });
+
+// PR #31 review fix: recalculatePlayerHandicap previously had no way to
+// participate in a caller-owned transaction at all -- it always opened
+// its own connection internally. These two tests prove the fix for
+// real, against a real database, not just by inspecting the code.
+
+test("recalculatePlayerHandicap, given an external client, genuinely participates in the caller's transaction -- rolling back the caller's transaction rolls back the recalculation too", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Atomic", lastName: "Rollback" });
+
+  await createApprovedRound(player.id, teeConfigurationId, "2026-05-01T09:00:00.000Z", 10.0);
+  await createApprovedRound(player.id, teeConfigurationId, "2026-05-02T09:00:00.000Z", 12.0);
+  await createApprovedRound(player.id, teeConfigurationId, "2026-05-03T09:00:00.000Z", 14.0);
+
+  const { orchestrator, handicapHistoryService } = buildOrchestrator();
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await orchestrator.recalculatePlayerHandicap(player.id, "round_approved", client);
+    assert.equal(result.status, "eligible", "the recalculation itself succeeded, within the transaction");
+    // The caller decides to abort -- simulating, e.g., a subsequent step
+    // in ghs#23's approval handler failing after the recalculation ran.
+    await client.query("ROLLBACK");
+  } finally {
+    client.release();
+  }
+
+  // Nothing committed -- the player's cached index and history must be
+  // exactly as if recalculatePlayerHandicap were never called.
+  const current = await handicapHistoryService.getCurrentIndex(player.id);
+  assert.equal(current!.handicapIndex, null, "rolled back -- no cached index was persisted");
+  const history = await handicapHistoryService.listHistoryForPlayer(player.id);
+  assert.equal(history.length, 0, "rolled back -- no handicap_history row was persisted");
+});
+
+test("recalculatePlayerHandicap, given an external client, lets a real database error propagate instead of swallowing it into a 'failed' outcome", async () => {
+  const { orchestrator } = buildOrchestrator();
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Deliberately invalid UUID -- a real Postgres error, not a
+    // constructed/mocked one, so this proves the real repository layer's
+    // error genuinely reaches the caller.
+    await assert.rejects(
+      () => orchestrator.recalculatePlayerHandicap("not-a-real-uuid", "round_approved", client),
+      /invalid input syntax for type uuid/,
+    );
+    await client.query("ROLLBACK");
+  } finally {
+    client.release();
+  }
+});
+
+test("recalculatePlayerHandicap without a client still self-manages its own transaction and catches its own errors, exactly as before -- existing (no-client) callers are unaffected", async () => {
+  const { orchestrator } = buildOrchestrator();
+
+  const result = await orchestrator.recalculatePlayerHandicap("not-a-real-uuid", "round_approved");
+  assert.equal(result.status, "failed", "no client provided -- the error is caught and reported, not thrown");
+  assert.match(result.error!, /invalid input syntax for type uuid/);
+});

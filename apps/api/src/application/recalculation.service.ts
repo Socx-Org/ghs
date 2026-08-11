@@ -1,3 +1,4 @@
+import type { PoolClient } from "pg";
 import type { Logger } from "../logger.ts";
 import type { RoundsRepository } from "../data/rounds.repository.ts";
 import type { DailyPcc } from "../data/pcc.repository.ts";
@@ -44,17 +45,36 @@ export interface RecalculationOrchestrator {
   // approved rounds (ghs#22), and -- only if the resulting index
   // actually changed -- writes a handicap_history row and updates
   // players.handicap_index/low_handicap_index (ghs#21's shared write
-  // path). The round read happens before handicap-history's own write
-  // transaction, the same shape already established by
-  // PccService.calculateOrOverride (ghs#19) -- not a new pattern.
-  recalculatePlayerHandicap(playerId: string, trigger: RecalculationTrigger): Promise<RecalculationOutcome>;
+  // path).
+  //
+  // client: two distinct modes, not just a performance optimisation --
+  //   - Omitted (self-managed): every read/write here runs in its own
+  //     connection, and any error is caught and reported as a "failed"
+  //     outcome rather than thrown. Used by recalculatePccForTeeConfigDay
+  //     below, where each affected player is deliberately independent.
+  //   - Provided (caller-managed): every read/write runs on the given
+  //     client, no transaction is opened or committed here, and errors
+  //     PROPAGATE (are not caught) so the caller's own transaction can
+  //     roll back. This is what lets ghs#23's round-approval/rejection/
+  //     amendment handlers bundle "update rounds.status" and "recalculate
+  //     this player's handicap" into one real, atomic commit -- exactly
+  //     what Issue 24's own acceptance criteria requires and what an
+  //     earlier version of this orchestrator could not actually do
+  //     (caught in review, PR #31: there was no way for a caller to
+  //     participate in this method's transaction at all).
+  recalculatePlayerHandicap(
+    playerId: string,
+    trigger: RecalculationTrigger,
+    client?: PoolClient,
+  ): Promise<RecalculationOutcome>;
 
   // Recalculates PCC for a tee-configuration/day (ghs#19's atomic
   // upsert-and-bulk-rewrite), then recalculates every distinctly
   // affected player's handicap independently -- one transaction per
-  // player, not one giant transaction for all of them, so a single
-  // player's failure can never block or roll back another player's
-  // already-correct recalculation from the same PCC correction.
+  // player (self-managed mode, above), not one giant transaction for all
+  // of them, so a single player's failure can never block or roll back
+  // another player's already-correct recalculation from the same PCC
+  // correction.
   recalculatePccForTeeConfigDay(
     teeConfigurationId: string,
     playedOnRaw: string,
@@ -69,54 +89,70 @@ export function createRecalculationOrchestrator(
   pcc: PccService,
   logger: Logger,
 ): RecalculationOrchestrator {
-  async function recalculatePlayerHandicap(playerId: string, trigger: RecalculationTrigger): Promise<RecalculationOutcome> {
+  async function runRecalculation(playerId: string, trigger: RecalculationTrigger, client: PoolClient | undefined): Promise<RecalculationOutcome> {
+    const current = await handicapHistory.getCurrentIndex(playerId, client);
+    if (current === null) {
+      return { playerId, trigger, status: "player_not_found" };
+    }
+
+    const differentials = await rounds.listApprovedDifferentialsForPlayer(playerId, client);
+    const outcome = calculateHandicapIndex(differentials);
+
+    if (outcome.status !== "eligible") {
+      return { playerId, trigger, status: outcome.status };
+    }
+
+    const capApplication = applyWhsCaps(outcome.selection.rawHandicapIndex, current.lowHandicapIndex);
+
+    const snapshot = {
+      trigger,
+      roundsConsidered: outcome.selection.roundsConsidered,
+      countUsed: outcome.selection.countUsed,
+      adjustment: outcome.selection.adjustment,
+      differentialsUsed: outcome.selection.selected.map((d) => d.value),
+      roundIdsUsed: outcome.selection.selected.flatMap((d) => d.roundIds),
+      averageDifferential: outcome.selection.averageDifferential,
+      multiplier: outcome.selection.multiplier,
+      rawHandicapIndex: capApplication.rawHandicapIndex,
+      appliedHandicapIndex: capApplication.appliedHandicapIndex,
+      softCapTriggered: capApplication.softCapTriggered,
+      hardCapTriggered: capApplication.hardCapTriggered,
+      softCapThreshold: capApplication.softCapThreshold,
+      hardCapThreshold: capApplication.hardCapThreshold,
+      lowHandicapIndexUsed: capApplication.lowHandicapIndexUsed,
+    };
+
+    const result = await handicapHistory.recordCalculatedResult(
+      playerId,
+      capApplication.appliedHandicapIndex,
+      new Date().toISOString(),
+      snapshot,
+      client,
+    );
+
+    return {
+      playerId,
+      trigger,
+      status: "eligible",
+      handicapIndex: result.handicapIndex,
+      historyRecordId: result.history?.id ?? null,
+    };
+  }
+
+  async function recalculatePlayerHandicap(
+    playerId: string,
+    trigger: RecalculationTrigger,
+    client?: PoolClient,
+  ): Promise<RecalculationOutcome> {
+    if (client) {
+      // Caller-managed: let errors propagate so the caller's own
+      // transaction rolls back instead of committing a state change
+      // whose recalculation silently failed.
+      return runRecalculation(playerId, trigger, client);
+    }
+
     try {
-      const current = await handicapHistory.getCurrentIndex(playerId);
-      if (current === null) {
-        return { playerId, trigger, status: "player_not_found" };
-      }
-
-      const differentials = await rounds.listApprovedDifferentialsForPlayer(playerId);
-      const outcome = calculateHandicapIndex(differentials);
-
-      if (outcome.status !== "eligible") {
-        return { playerId, trigger, status: outcome.status };
-      }
-
-      const capApplication = applyWhsCaps(outcome.selection.rawHandicapIndex, current.lowHandicapIndex);
-
-      const snapshot = {
-        trigger,
-        roundsConsidered: outcome.selection.roundsConsidered,
-        countUsed: outcome.selection.countUsed,
-        adjustment: outcome.selection.adjustment,
-        differentialsUsed: outcome.selection.selected.map((d) => d.value),
-        roundIdsUsed: outcome.selection.selected.flatMap((d) => d.roundIds),
-        averageDifferential: outcome.selection.averageDifferential,
-        multiplier: outcome.selection.multiplier,
-        rawHandicapIndex: capApplication.rawHandicapIndex,
-        appliedHandicapIndex: capApplication.appliedHandicapIndex,
-        softCapTriggered: capApplication.softCapTriggered,
-        hardCapTriggered: capApplication.hardCapTriggered,
-        softCapThreshold: capApplication.softCapThreshold,
-        hardCapThreshold: capApplication.hardCapThreshold,
-        lowHandicapIndexUsed: capApplication.lowHandicapIndexUsed,
-      };
-
-      const result = await handicapHistory.recordCalculatedResult(
-        playerId,
-        capApplication.appliedHandicapIndex,
-        new Date().toISOString(),
-        snapshot,
-      );
-
-      return {
-        playerId,
-        trigger,
-        status: "eligible",
-        handicapIndex: result.handicapIndex,
-        historyRecordId: result.history?.id ?? null,
-      };
+      return await runRecalculation(playerId, trigger, undefined);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error("handicap recalculation failed", { playerId, trigger, error: message });
@@ -135,9 +171,8 @@ export function createRecalculationOrchestrator(
         actorUserId,
       );
 
-      // Each player's recalculation is awaited in its own turn, but each
-      // is independently transactional (recalculatePlayerHandicap above
-      // already catches its own errors and never throws) -- one
+      // Each player is recalculated in self-managed mode (no client) --
+      // its own independent transaction, its own caught errors. One
       // player's failure is recorded in its own outcome and does not
       // prevent the remaining players from being processed or their
       // results from committing.
