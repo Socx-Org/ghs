@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 export interface HandicapOverride {
   id: string;
@@ -23,7 +23,16 @@ export interface CreateHandicapOverrideInput {
 // all -- not merely unused, structurally absent, so a future caller
 // cannot accidentally mutate override history.
 export interface HandicapOverridesRepository {
-  create(input: CreateHandicapOverrideInput): Promise<HandicapOverride>;
+  // client: when provided, the insert runs on it and no transaction is
+  // opened/committed here -- the caller owns that. This is what lets
+  // handicap-overrides.service.ts's createOverride (ghs#25) bundle this
+  // write, handicap_history's recordManualOverride, and the
+  // manual_override notification write into one atomic commit -- the
+  // same client-threading convention already established elsewhere
+  // (rounds.repository.ts's setStatus/softDelete/create, handicap-
+  // history.repository.ts's recordChange). Omitted, this method issues
+  // its own single-statement insert exactly as before.
+  create(input: CreateHandicapOverrideInput, client?: Pool | PoolClient): Promise<HandicapOverride>;
   listForPlayer(playerId: string): Promise<HandicapOverride[]>;
 }
 
@@ -53,8 +62,8 @@ const COLUMNS = "id, player_id, admin_user_id, previous_index, new_index, reason
 
 export function createHandicapOverridesRepository(pool: Pool): HandicapOverridesRepository {
   return {
-    async create(input) {
-      const result = await pool.query<HandicapOverrideRow>(
+    async create(input, client) {
+      const result = await (client ?? pool).query<HandicapOverrideRow>(
         `INSERT INTO handicap_overrides (player_id, admin_user_id, previous_index, new_index, reason)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING ${COLUMNS}`,

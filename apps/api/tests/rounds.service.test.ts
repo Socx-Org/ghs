@@ -19,6 +19,7 @@ import type { CoursesRepository, TeeConfiguration } from "../src/data/courses.re
 import type { DailyPcc } from "../src/data/pcc.repository.ts";
 import type { PccService } from "../src/application/pcc.service.ts";
 import type { RecalculationOrchestrator, RecalculationOutcome, RecalculationTrigger } from "../src/application/recalculation.service.ts";
+import type { NotificationHistoryRecord, NotificationsRepository, RecordNotificationInput } from "../src/data/notifications.repository.ts";
 
 // A single 18-hole tee configuration, reused by every test below --
 // enough hole metadata (hole 1, par 4, stroke index 7) for the
@@ -120,14 +121,30 @@ function fakeRecalculationOrchestrator(): RecalculationOrchestrator & {
   };
 }
 
+function fakeNotificationsRepository(): NotificationsRepository & { recordedCalls: RecordNotificationInput[] } {
+  const recordedCalls: RecordNotificationInput[] = [];
+  return {
+    recordedCalls,
+    async record(input) {
+      recordedCalls.push(input);
+      const record: NotificationHistoryRecord = { id: String(recordedCalls.length), playerId: input.playerId, eventType: input.eventType, payload: input.payload, createdAt: new Date().toISOString() };
+      return record;
+    },
+    async listForPlayer() {
+      return [];
+    },
+  };
+}
+
 function roundsService(
   repository: RoundsRepository,
   recalculation: RecalculationOrchestrator = fakeRecalculationOrchestrator(),
   pccService: PccService = unusedPccService(),
+  notifications: NotificationsRepository = fakeNotificationsRepository(),
 ) {
   const courses = fakeCoursesRepository();
   const scoring = createScoringService(repository, courses, pccService);
-  return createRoundsService(fakePool(), repository, courses, scoring, recalculation, silentLogger);
+  return createRoundsService(fakePool(), repository, courses, scoring, recalculation, notifications, silentLogger);
 }
 
 function fakeRepository(): RoundsRepository & { getCallCount: number } {
@@ -250,6 +267,50 @@ test("createRound persists via the repository, including nested hole scores", as
   assert.equal(round.status, "pending");
   assert.equal(round.holeScores.length, 1);
   assert.equal(round.holeScores[0]!.fairwayResult, "hit");
+});
+
+test("createRound writes a round_submitted notification (ghs#25)", async () => {
+  const notifications = fakeNotificationsRepository();
+  const service = roundsService(fakeRepository(), fakeRecalculationOrchestrator(), unusedPccService(), notifications);
+
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+
+  assert.equal(notifications.recordedCalls.length, 1);
+  const call = notifications.recordedCalls[0]!;
+  assert.equal(call.playerId, "player-1");
+  assert.equal(call.eventType, "round_submitted");
+  assert.equal(call.payload.roundId, round.id);
+});
+
+test("approveRound writes a round_approved notification, and rejectRound writes a round_rejected notification with the reason (ghs#25)", async () => {
+  const notifications = fakeNotificationsRepository();
+  const service = roundsService(fakeRepository(), fakeRecalculationOrchestrator(), zeroPccService(), notifications);
+
+  const approvedRound = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.addHoleScore(approvedRound.id, { holeNumber: 1, strokes: 4 });
+  await service.approveRound(approvedRound.id);
+
+  const rejectedRound = await service.createRound({ playerId: "player-2", teeConfigurationId: "tee-1", playedAt: "2026-05-02T09:00:00.000Z" });
+  await service.rejectRound(rejectedRound.id, "Incomplete scorecard");
+
+  const eventTypes = notifications.recordedCalls.map((c) => c.eventType);
+  assert.deepEqual(eventTypes, ["round_submitted", "round_approved", "round_submitted", "round_rejected"]);
+
+  const rejectedCall = notifications.recordedCalls.find((c) => c.eventType === "round_rejected")!;
+  assert.equal(rejectedCall.payload.reason, "Incomplete scorecard");
+});
+
+test("reopenForAmendment writes no notification at all (platform owner decision, 2026-08-12)", async () => {
+  const repo = fakeRepository();
+  const notifications = fakeNotificationsRepository();
+  const service = roundsService(repo, fakeRecalculationOrchestrator(), unusedPccService(), notifications);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.setStatus(round.id, "approved");
+  notifications.recordedCalls.length = 0; // discard the round_submitted call above
+
+  await service.reopenForAmendment(round.id, "Scorecard under review");
+
+  assert.equal(notifications.recordedCalls.length, 0);
 });
 
 test("addHoleScore appends to an existing round -- the real incremental-entry workflow", async () => {

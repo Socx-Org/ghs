@@ -8,6 +8,7 @@ import { createHandicapHistoryRepository } from "../src/data/handicap-history.re
 import { createHandicapHistoryService } from "../src/application/handicap-history.service.ts";
 import { createHandicapOverridesRepository } from "../src/data/handicap-overrides.repository.ts";
 import { createHandicapOverridesService } from "../src/application/handicap-overrides.service.ts";
+import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
 import { createLogger } from "../src/logger.ts";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -92,7 +93,8 @@ test("a manual override writes to both handicap_overrides (ghs#10's admin-action
   const overridesRepo = createHandicapOverridesRepository(pool);
   const historyRepo = createHandicapHistoryRepository(pool);
   const historyService = createHandicapHistoryService(historyRepo);
-  const overridesService = createHandicapOverridesService(overridesRepo, historyService, logger);
+  const notificationsRepository = createNotificationsRepository(pool);
+  const overridesService = createHandicapOverridesService(pool, overridesRepo, historyService, notificationsRepository, logger);
 
   await overridesService.createOverride({
     playerId: player.id,
@@ -129,7 +131,8 @@ test("a manual override without a reason is rejected before reaching either tabl
 
   const overridesRepo = createHandicapOverridesRepository(pool);
   const historyService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
-  const overridesService = createHandicapOverridesService(overridesRepo, historyService, logger);
+  const notificationsRepository = createNotificationsRepository(pool);
+  const overridesService = createHandicapOverridesService(pool, overridesRepo, historyService, notificationsRepository, logger);
 
   await assert.rejects(() =>
     overridesService.createOverride({ playerId: player.id, adminUserId: admin.id, newIndex: 10.0, reason: "" }),

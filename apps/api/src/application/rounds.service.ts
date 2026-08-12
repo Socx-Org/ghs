@@ -13,6 +13,7 @@ import type {
 import type { CoursesRepository } from "../data/courses.repository.ts";
 import type { ScoringService } from "./scoring.service.ts";
 import type { RecalculationOrchestrator, RecalculationOutcome } from "./recalculation.service.ts";
+import type { NotificationsRepository } from "../data/notifications.repository.ts";
 import type { Logger } from "../logger.ts";
 
 export class RoundNotFoundError extends Error {}
@@ -104,6 +105,7 @@ export function createRoundsService(
   courses: CoursesRepository,
   scoring: ScoringService,
   recalculation: RecalculationOrchestrator,
+  notifications: NotificationsRepository,
   logger: Logger,
 ): RoundsService {
   // recomputeRoundAggregates runs as its own, separate step before the
@@ -181,9 +183,29 @@ export function createRoundsService(
         }));
       }
 
-      const round = await repository.create({ ...input, holeScores });
-      logger.info("round created", { roundId: round.id, playerId: round.playerId, holeCount: round.holeScores.length });
-      return round;
+      // Opens its own transaction (new for ghs#25 -- repository.create()
+      // previously self-managed its own, entirely invisible to this
+      // layer) so the "round_submitted" notification lands in the SAME
+      // transaction as the round's own creation (ADR-210 point 1), not
+      // as an unrelated follow-up write that could succeed or fail
+      // independently of the round actually being created.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const round = await repository.create({ ...input, holeScores }, client);
+        await notifications.record(
+          { playerId: round.playerId, eventType: "round_submitted", payload: { roundId: round.id, teeConfigurationId: round.teeConfigurationId, playedAt: round.playedAt } },
+          client,
+        );
+        await client.query("COMMIT");
+        logger.info("round created", { roundId: round.id, playerId: round.playerId, holeCount: round.holeScores.length });
+        return round;
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
     },
 
     async addHoleScore(roundId, input, preloadedRound) {
@@ -245,6 +267,12 @@ export function createRoundsService(
         async (client, existing) => {
           const trigger = existing.status === "amending" ? "amendment_approved" : "round_approved";
           await repository.setStatus(id, "approved", undefined, client);
+          // Notification event_type is always "round_approved", even for
+          // an amendment re-approval -- "same as ordinary approval", per
+          // ghs#25's own domain trigger table. The recalculation trigger
+          // tag (amendment_approved vs round_approved) still distinguishes
+          // them internally, just not in what the player is told.
+          await notifications.record({ playerId: existing.playerId, eventType: "round_approved", payload: { roundId: id, trigger } }, client);
           const result = await recalculation.recalculatePlayerHandicap(existing.playerId, trigger, client);
           logger.info("round approved", { roundId: id, playerId: existing.playerId, trigger, recalculationStatus: result.status });
           return result;
@@ -267,6 +295,12 @@ export function createRoundsService(
         },
         async (client, existing) => {
           await repository.setStatus(id, "rejected", trimmedReason, client);
+          // Always fires, including the mandatory reason (ghs#25's own
+          // domain trigger table) -- unlike recalculation below, this is
+          // not conditioned on the round having ever had a differential:
+          // rejecting IS the business event regardless of whether there
+          // was anything to recalculate as a result.
+          await notifications.record({ playerId: existing.playerId, eventType: "round_rejected", payload: { roundId: id, reason: trimmedReason } }, client);
           // Legacy bug fix: only logged as "requested", never actually
           // recalculated, when rejecting a round that had already
           // contributed a differential (ghs#23's own confirmed finding).

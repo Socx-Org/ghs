@@ -1,3 +1,4 @@
+import type { Pool } from "pg";
 import type { Logger } from "../logger.ts";
 import type {
   CreateHandicapOverrideInput,
@@ -6,6 +7,7 @@ import type {
 } from "../data/handicap-overrides.repository.ts";
 import type { HandicapHistoryService } from "./handicap-history.service.ts";
 import { InvalidHandicapChangeError } from "./handicap-history.service.ts";
+import type { NotificationsRepository } from "../data/notifications.repository.ts";
 
 export interface HandicapOverridesService {
   createOverride(input: CreateHandicapOverrideInput): Promise<HandicapOverride>;
@@ -19,43 +21,85 @@ export interface HandicapOverridesService {
 // shared recordManualOverride -- the same function the calculated-
 // recalculation path (ghs#22) will use, not a second implementation.
 export function createHandicapOverridesService(
+  pool: Pool,
   repository: HandicapOverridesRepository,
   handicapHistory: HandicapHistoryService,
+  notifications: NotificationsRepository,
   logger: Logger,
 ): HandicapOverridesService {
   return {
     async createOverride(input) {
-      // Validated here, before either write, not after the first one
-      // succeeds -- handicap_overrides and handicap_history are two
-      // separate repositories with no shared transaction, so failing
-      // validation between the two writes would leave a real,
-      // inconsistent handicap_overrides row behind. Found while writing
-      // this issue's own tests (calling the service directly, bypassing
-      // the route's own equivalent check), fixed here rather than only
-      // in the route.
-      if (!input.reason.trim()) {
+      // Trimmed once, here, and used for every downstream write
+      // (handicap_overrides, handicap_history, the notification payload)
+      // -- previously only the validation check was trimmed, so a
+      // whitespace-padded reason still reached storage and the
+      // notification untouched (caught in review, PR #33; matches the
+      // same fix already applied to rounds.service.ts's rejectRound/
+      // reopenForAmendment).
+      const trimmedReason = input.reason.trim();
+      if (!trimmedReason) {
         throw new InvalidHandicapChangeError("reason is required for a manual override");
       }
 
-      const override = await repository.create(input);
-      logger.info("handicap override recorded", {
-        overrideId: override.id,
-        playerId: override.playerId,
-        adminUserId: override.adminUserId,
-        previousIndex: override.previousIndex,
-        newIndex: override.newIndex,
-      });
+      // A real, single transaction now spans all three writes
+      // (handicap_overrides, handicap_history, and ghs#25's
+      // manual_override notification) -- previously handicap_overrides
+      // and handicap_history were two independent, unthreaded calls (a
+      // known gap flagged in this file's own prior comment: failing
+      // validation between the two writes could leave a real,
+      // inconsistent handicap_overrides row behind). ghs#25's own
+      // transactional requirement for the notification write is what
+      // finally forced fixing this, rather than adding a third
+      // independent write on top of an already-known gap.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
 
-      await handicapHistory.recordManualOverride(
-        override.playerId,
-        override.newIndex,
-        override.previousIndex,
-        override.reason,
-        override.adminUserId,
-        override.createdAt,
-      );
+        const override = await repository.create({ ...input, reason: trimmedReason }, client);
+        logger.info("handicap override recorded", {
+          overrideId: override.id,
+          playerId: override.playerId,
+          adminUserId: override.adminUserId,
+          previousIndex: override.previousIndex,
+          newIndex: override.newIndex,
+        });
 
-      return override;
+        await handicapHistory.recordManualOverride(
+          override.playerId,
+          override.newIndex,
+          override.previousIndex,
+          override.reason,
+          override.adminUserId,
+          override.createdAt,
+          client,
+        );
+
+        // Always fires, distinct from the general "handicap_changed"
+        // (calculated-only) event -- ghs#25's own domain trigger table:
+        // "Manual handicap override -- Yes, distinct message including
+        // the admin's reason." Unlike the calculated path, this is not
+        // conditioned on the index actually differing from before:
+        // handicap_overrides is itself deliberately append-only/always-
+        // writes regardless of value (ghs#10), and the trigger table
+        // doesn't qualify this row with "if changed" the way it does for
+        // the calculated path.
+        await notifications.record(
+          {
+            playerId: override.playerId,
+            eventType: "manual_override",
+            payload: { overrideId: override.id, previousIndex: override.previousIndex, newIndex: override.newIndex, reason: override.reason, adminUserId: override.adminUserId },
+          },
+          client,
+        );
+
+        await client.query("COMMIT");
+        return override;
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
     },
 
     async listOverridesForPlayer(playerId) {
