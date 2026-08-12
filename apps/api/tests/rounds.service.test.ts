@@ -137,6 +137,11 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
         .filter((r) => r.playerId === playerId)
         .map(({ id, playerId: p, teeConfigurationId, playedAt, status }) => ({ id, playerId: p, teeConfigurationId, playedAt, status }));
     },
+    async listApprovedDifferentialsForPlayer(playerId: string) {
+      return [...rounds.values()]
+        .filter((r) => r.playerId === playerId && r.status === "approved" && r.scoreDifferential !== null)
+        .map((r) => ({ roundId: r.id, playedAt: r.playedAt, scoreDifferential: r.scoreDifferential!, is9Hole: r.is9Hole }));
+    },
     async setStatus(id: string, status: RoundStatus, rejectionReason?: string) {
       const round = rounds.get(id)!;
       round.status = status;

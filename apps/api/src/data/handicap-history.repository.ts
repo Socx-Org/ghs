@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 export type HandicapChangeMethod = "calculated" | "manual_override";
 
@@ -49,9 +49,34 @@ export interface RecordHandicapChangeResult {
 }
 
 export interface HandicapHistoryRepository {
-  getCurrentIndex(playerId: string): Promise<CurrentHandicapIndex | null>;
+  // Plain, unlocked read -- for observation (e.g. "what is this player's
+  // index right now" for a response or a test assertion), not for
+  // driving a calculation whose result will be written back. client:
+  // when provided, the read runs on it instead of opening a new
+  // connection.
+  getCurrentIndex(playerId: string, client?: Pool | PoolClient): Promise<CurrentHandicapIndex | null>;
+  // SELECT ... FOR UPDATE -- requires a real transaction client (a lock
+  // taken outside an explicit multi-statement transaction is released
+  // before the caller could ever use it, so accepting a plain Pool here
+  // wouldn't do anything useful). Use this, not getCurrentIndex above,
+  // whenever the returned lowHandicapIndex will feed into a calculation
+  // that gets written back -- otherwise the value driving that
+  // calculation (e.g. cap application) can be stale by the time the
+  // write actually happens (caught in review, PR #31).
+  getCurrentIndexForUpdate(playerId: string, client: PoolClient): Promise<CurrentHandicapIndex | null>;
   listForPlayer(playerId: string): Promise<HandicapHistoryRecord[]>;
-  recordChange(input: RecordHandicapChangeInput): Promise<RecordHandicapChangeResult>;
+  // client: when provided, every read/write here runs on it and this
+  // method does NOT open, commit, or roll back a transaction -- the
+  // caller owns the entire transaction lifecycle. This is what makes
+  // ghs#23's "state change + recalculation, one atomic commit" possible
+  // (caught in review, PR #31 -- recalculatePlayerHandicap could not
+  // previously participate in a caller's transaction at all, leaving a
+  // real race window between reading approved rounds and writing the
+  // result, and making the single-player-trigger atomicity Issue 24's
+  // own acceptance criteria requires structurally impossible). When
+  // omitted, this method manages its own self-contained transaction
+  // exactly as before -- existing callers are unaffected.
+  recordChange(input: RecordHandicapChangeInput, client?: PoolClient): Promise<RecordHandicapChangeResult>;
 }
 
 interface HandicapHistoryRow {
@@ -84,11 +109,92 @@ function toRecord(row: HandicapHistoryRow): HandicapHistoryRecord {
   };
 }
 
+// Runs the read-lock/compare/insert/update sequence on whichever
+// client/pool it's given -- no transaction boundaries of its own. The
+// caller (either recordChange's own self-managed wrapper below, or an
+// external caller holding its own client) decides when to BEGIN/COMMIT/
+// ROLLBACK.
+async function runRecordChange(
+  client: Pool | PoolClient,
+  input: RecordHandicapChangeInput,
+): Promise<RecordHandicapChangeResult> {
+  // Locks the player row for the duration of the enclosing transaction so
+  // two concurrent recalculations for the same player (e.g. two round
+  // approvals landing at once) can't both read the same "current" value
+  // and each think their own write is the only change.
+  const playerResult = await client.query<{ handicap_index: string | null; low_handicap_index: string | null }>(
+    "SELECT handicap_index, low_handicap_index FROM players WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
+    [input.playerId],
+  );
+  const playerRow = playerResult.rows[0];
+  if (!playerRow) throw new Error("player not found");
+
+  const currentIndex = playerRow.handicap_index === null ? null : Number(playerRow.handicap_index);
+  const currentLow = playerRow.low_handicap_index === null ? null : Number(playerRow.low_handicap_index);
+
+  if (currentIndex !== null && currentIndex === input.newIndex) {
+    return { history: null, handicapIndex: currentIndex, lowHandicapIndex: currentLow };
+  }
+
+  const historyResult = await client.query<HandicapHistoryRow>(
+    `INSERT INTO handicap_history
+     (player_id, method, handicap_index, previous_index, reason, created_by, calculation_snapshot, calculation_date)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+     RETURNING ${HISTORY_COLUMNS}`,
+    [
+      input.playerId,
+      input.method,
+      input.newIndex,
+      input.previousIndex,
+      input.reason,
+      input.createdBy,
+      input.calculationSnapshot === null ? null : JSON.stringify(input.calculationSnapshot),
+      input.calculationDate,
+    ],
+  );
+
+  // Rolling 365-day Low Handicap Index, anchored to this change's own
+  // calculation_date -- not a monotonic running minimum (confirmed
+  // against the real, authoritative WHS rule during Phase 2 discovery;
+  // legacy's all-time-low is not preserved). The row just inserted above
+  // is visible to this query within the same transaction, so it's
+  // already included in the MIN without needing a separate Math.min
+  // against input.newIndex.
+  const lowResult = await client.query<{ low: string | null }>(
+    `SELECT MIN(handicap_index) AS low
+     FROM handicap_history
+     WHERE player_id = $1
+       AND calculation_date >= $2::timestamptz - INTERVAL '365 days'`,
+    [input.playerId, input.calculationDate],
+  );
+  const lowHandicapIndex = lowResult.rows[0]!.low === null ? input.newIndex : Number(lowResult.rows[0]!.low);
+
+  await client.query(
+    `UPDATE players SET handicap_index = $2, low_handicap_index = $3, updated_at = now() WHERE id = $1`,
+    [input.playerId, input.newIndex, lowHandicapIndex],
+  );
+
+  return { history: toRecord(historyResult.rows[0]!), handicapIndex: input.newIndex, lowHandicapIndex };
+}
+
 export function createHandicapHistoryRepository(pool: Pool): HandicapHistoryRepository {
   return {
-    async getCurrentIndex(playerId) {
-      const result = await pool.query<{ handicap_index: string | null; low_handicap_index: string | null }>(
+    async getCurrentIndex(playerId, client) {
+      const result = await (client ?? pool).query<{ handicap_index: string | null; low_handicap_index: string | null }>(
         "SELECT handicap_index, low_handicap_index FROM players WHERE id = $1 AND deleted_at IS NULL",
+        [playerId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        handicapIndex: row.handicap_index === null ? null : Number(row.handicap_index),
+        lowHandicapIndex: row.low_handicap_index === null ? null : Number(row.low_handicap_index),
+      };
+    },
+
+    async getCurrentIndexForUpdate(playerId, client) {
+      const result = await client.query<{ handicap_index: string | null; low_handicap_index: string | null }>(
+        "SELECT handicap_index, low_handicap_index FROM players WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
         [playerId],
       );
       const row = result.rows[0];
@@ -107,76 +213,22 @@ export function createHandicapHistoryRepository(pool: Pool): HandicapHistoryRepo
       return result.rows.map(toRecord);
     },
 
-    async recordChange(input) {
-      const client = await pool.connect();
+    async recordChange(input, client) {
+      if (client) {
+        return runRecordChange(client, input);
+      }
+
+      const ownClient = await pool.connect();
       try {
-        await client.query("BEGIN");
-
-        // Locks the player row for the duration of this transaction so
-        // two concurrent recalculations for the same player (e.g. two
-        // round approvals landing at once) can't both read the same
-        // "current" value and each think their own write is the only
-        // change.
-        const playerResult = await client.query<{ handicap_index: string | null; low_handicap_index: string | null }>(
-          "SELECT handicap_index, low_handicap_index FROM players WHERE id = $1 AND deleted_at IS NULL FOR UPDATE",
-          [input.playerId],
-        );
-        const playerRow = playerResult.rows[0];
-        if (!playerRow) throw new Error("player not found");
-
-        const currentIndex = playerRow.handicap_index === null ? null : Number(playerRow.handicap_index);
-        const currentLow = playerRow.low_handicap_index === null ? null : Number(playerRow.low_handicap_index);
-
-        if (currentIndex !== null && currentIndex === input.newIndex) {
-          await client.query("COMMIT");
-          return { history: null, handicapIndex: currentIndex, lowHandicapIndex: currentLow };
-        }
-
-        const historyResult = await client.query<HandicapHistoryRow>(
-          `INSERT INTO handicap_history
-           (player_id, method, handicap_index, previous_index, reason, created_by, calculation_snapshot, calculation_date)
-           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
-           RETURNING ${HISTORY_COLUMNS}`,
-          [
-            input.playerId,
-            input.method,
-            input.newIndex,
-            input.previousIndex,
-            input.reason,
-            input.createdBy,
-            input.calculationSnapshot === null ? null : JSON.stringify(input.calculationSnapshot),
-            input.calculationDate,
-          ],
-        );
-
-        // Rolling 365-day Low Handicap Index, anchored to this change's
-        // own calculation_date -- not a monotonic running minimum
-        // (confirmed against the real, authoritative WHS rule during
-        // Phase 2 discovery; legacy's all-time-low is not preserved).
-        // The row just inserted above is visible to this query within
-        // the same transaction, so it's already included in the MIN
-        // without needing a separate Math.min against input.newIndex.
-        const lowResult = await client.query<{ low: string | null }>(
-          `SELECT MIN(handicap_index) AS low
-           FROM handicap_history
-           WHERE player_id = $1
-             AND calculation_date >= $2::timestamptz - INTERVAL '365 days'`,
-          [input.playerId, input.calculationDate],
-        );
-        const lowHandicapIndex = lowResult.rows[0]!.low === null ? input.newIndex : Number(lowResult.rows[0]!.low);
-
-        await client.query(
-          `UPDATE players SET handicap_index = $2, low_handicap_index = $3, updated_at = now() WHERE id = $1`,
-          [input.playerId, input.newIndex, lowHandicapIndex],
-        );
-
-        await client.query("COMMIT");
-        return { history: toRecord(historyResult.rows[0]!), handicapIndex: input.newIndex, lowHandicapIndex };
+        await ownClient.query("BEGIN");
+        const result = await runRecordChange(ownClient, input);
+        await ownClient.query("COMMIT");
+        return result;
       } catch (err) {
-        await client.query("ROLLBACK");
+        await ownClient.query("ROLLBACK");
         throw err;
       } finally {
-        client.release();
+        ownClient.release();
       }
     },
   };

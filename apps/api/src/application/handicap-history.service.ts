@@ -1,3 +1,4 @@
+import type { PoolClient } from "pg";
 import type {
   CurrentHandicapIndex,
   HandicapHistoryRecord,
@@ -14,14 +15,24 @@ import type {
 export class InvalidHandicapChangeError extends Error {}
 
 export interface HandicapHistoryService {
-  getCurrentIndex(playerId: string): Promise<CurrentHandicapIndex | null>;
+  getCurrentIndex(playerId: string, client?: PoolClient): Promise<CurrentHandicapIndex | null>;
+  // Locked read -- see HandicapHistoryRepository.getCurrentIndexForUpdate.
+  // Requires a real transaction client; use this, not getCurrentIndex,
+  // whenever the result feeds a calculation that will be written back.
+  getCurrentIndexForUpdate(playerId: string, client: PoolClient): Promise<CurrentHandicapIndex | null>;
   listHistoryForPlayer(playerId: string): Promise<HandicapHistoryRecord[]>;
 
+  // client: when provided, threaded straight through to
+  // HandicapHistoryRepository.recordChange -- no transaction is opened
+  // or committed here, the caller owns that (ghs#24's orchestrator,
+  // given a caller-supplied client from ghs#23's approval/rejection/
+  // amendment handlers).
   recordCalculatedResult(
     playerId: string,
     newIndex: number,
     calculationDate: string,
     snapshot: Record<string, unknown>,
+    client?: PoolClient,
   ): Promise<RecordHandicapChangeResult>;
 
   recordManualOverride(
@@ -31,46 +42,57 @@ export interface HandicapHistoryService {
     reason: string,
     createdBy: string,
     calculationDate?: string,
+    client?: PoolClient,
   ): Promise<RecordHandicapChangeResult>;
 }
 
 export function createHandicapHistoryService(repo: HandicapHistoryRepository): HandicapHistoryService {
   return {
-    async getCurrentIndex(playerId) {
-      return repo.getCurrentIndex(playerId);
+    async getCurrentIndex(playerId, client) {
+      return repo.getCurrentIndex(playerId, client);
+    },
+
+    async getCurrentIndexForUpdate(playerId, client) {
+      return repo.getCurrentIndexForUpdate(playerId, client);
     },
 
     async listHistoryForPlayer(playerId) {
       return repo.listForPlayer(playerId);
     },
 
-    async recordCalculatedResult(playerId, newIndex, calculationDate, snapshot) {
-      return repo.recordChange({
-        playerId,
-        method: "calculated",
-        newIndex,
-        previousIndex: null,
-        reason: null,
-        createdBy: null,
-        calculationSnapshot: snapshot,
-        calculationDate,
-      });
+    async recordCalculatedResult(playerId, newIndex, calculationDate, snapshot, client) {
+      return repo.recordChange(
+        {
+          playerId,
+          method: "calculated",
+          newIndex,
+          previousIndex: null,
+          reason: null,
+          createdBy: null,
+          calculationSnapshot: snapshot,
+          calculationDate,
+        },
+        client,
+      );
     },
 
-    async recordManualOverride(playerId, newIndex, previousIndex, reason, createdBy, calculationDate) {
+    async recordManualOverride(playerId, newIndex, previousIndex, reason, createdBy, calculationDate, client) {
       if (!reason.trim()) {
         throw new InvalidHandicapChangeError("reason is required for a manual override");
       }
-      return repo.recordChange({
-        playerId,
-        method: "manual_override",
-        newIndex,
-        previousIndex,
-        reason,
-        createdBy,
-        calculationSnapshot: null,
-        calculationDate: calculationDate ?? new Date().toISOString(),
-      });
+      return repo.recordChange(
+        {
+          playerId,
+          method: "manual_override",
+          newIndex,
+          previousIndex,
+          reason,
+          createdBy,
+          calculationSnapshot: null,
+          calculationDate: calculationDate ?? new Date().toISOString(),
+        },
+        client,
+      );
     },
   };
 }

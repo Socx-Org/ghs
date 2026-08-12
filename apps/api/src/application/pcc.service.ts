@@ -51,7 +51,7 @@ export interface PccService {
     playedOnRaw: string,
     pccOverride: number | null,
     updatedBy: string | null,
-  ): Promise<{ dailyPcc: DailyPcc; updatedRounds: number }>;
+  ): Promise<{ dailyPcc: DailyPcc; updatedRounds: number; affectedPlayerIds: string[] }>;
 }
 
 function assertValidOverride(value: number): void {
