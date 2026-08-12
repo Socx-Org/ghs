@@ -1,16 +1,36 @@
-import type { Logger } from "../logger.ts";
+import type { Pool, PoolClient } from "pg";
 import type {
   CreateHoleScoreInput,
   CreateRoundInput,
   HoleScore,
   Round,
+  RoundForUpdate,
   RoundScoreUpdate,
   RoundsRepository,
-  RoundStatus,
   RoundSummary,
 } from "../data/rounds.repository.ts";
 import type { CoursesRepository } from "../data/courses.repository.ts";
 import type { ScoringService } from "./scoring.service.ts";
+import type { RecalculationOrchestrator, RecalculationOutcome } from "./recalculation.service.ts";
+import type { Logger } from "../logger.ts";
+
+export class RoundNotFoundError extends Error {}
+export class InvalidRoundTransitionError extends Error {}
+
+export interface RoundWorkflowResult {
+  // null only after deleteRound: a soft-deleted round is, by the same
+  // deleted_at IS NULL filter every other read already applies,
+  // immediately invisible to repository.get() -- there is no post-delete
+  // round to return, so null communicates that rather than the deletion
+  // being misreported as "not found" (a real bug caught while testing
+  // this).
+  round: Round | null;
+  // null when no recalculation was warranted at all (reject/delete on a
+  // round that never had a differential in the first place) --
+  // undefined never appears here, only null, so callers don't have to
+  // distinguish "not attempted" from "not applicable".
+  recalculation: RecalculationOutcome | null;
+}
 
 export interface RoundsService {
   createRound(input: CreateRoundInput): Promise<Round>;
@@ -26,7 +46,47 @@ export interface RoundsService {
   updateScores(id: string, update: RoundScoreUpdate): Promise<Round>;
   getRound(id: string): Promise<Round | null>;
   listRoundsForPlayer(playerId: string): Promise<RoundSummary[]>;
-  setRoundStatus(id: string, status: RoundStatus, rejectionReason?: string): Promise<void>;
+
+  // Every method below is a real workflow transition (ghs#23): each
+  // opens its own transaction, locks the round row first
+  // (RoundsRepository.getForUpdate), validates the transition is legal
+  // from the round's current status, applies the state change, and --
+  // through the SAME transaction/client -- calls the recalculation
+  // orchestrator (ghs#24) so the state change and its recalculation
+  // commit or roll back together. No recalculation logic is duplicated
+  // here; this layer only decides *which* trigger applies and *whether*
+  // to attempt one at all.
+
+  // pending|amending -> approved. Always recalculates (a newly-approved
+  // round is expected to matter to the player's handicap; if it turns
+  // out not to yet -- insufficient_holes -- that's still a real,
+  // reported outcome, not something to skip). Re-scoring
+  // (ScoringService.recomputeRoundAggregates) runs first, as its own
+  // preliminary step -- see the file-level note below on why that isn't
+  // inside the same transaction as the status change.
+  approveRound(id: string): Promise<RoundWorkflowResult>;
+
+  // pending|amending -> rejected, mandatory reason. Fixes the confirmed
+  // legacy bug: rejecting a round that had already contributed a
+  // differential (i.e. was previously approved, then reopened, then
+  // rejected instead of re-approved) now actually recalculates -- legacy
+  // only logged that it should have.
+  rejectRound(id: string, reason: string): Promise<RoundWorkflowResult>;
+
+  // Soft delete, any status. Recalculates only if the round had a real
+  // differential (matches the same "did this round ever actually
+  // contribute" check rejectRound uses).
+  deleteRound(id: string): Promise<RoundWorkflowResult>;
+
+  // approved -> amending, mandatory reason. The round is excluded from
+  // the player's effective differentials the moment its status changes
+  // (RoundsRepository.listApprovedDifferentialsForPlayer only ever reads
+  // status='approved') -- no separate "retraction" step is needed here,
+  // recalculating after the status change picks it up automatically.
+  // Never notifies (platform owner decision, Phase 2 planning,
+  // 2026-08-12) -- ghs#25's concern, not enforced here, just not
+  // triggered here either.
+  reopenForAmendment(id: string, reason: string): Promise<RoundWorkflowResult>;
 }
 
 // A hole's net_double_bogey_adjusted only depends on that hole's own
@@ -38,11 +98,60 @@ export interface RoundsService {
 // immediately, at the moment a hole score is known -- not deferred to a
 // later recompute step.
 export function createRoundsService(
+  pool: Pool,
   repository: RoundsRepository,
   courses: CoursesRepository,
   scoring: ScoringService,
+  recalculation: RecalculationOrchestrator,
   logger: Logger,
 ): RoundsService {
+  // recomputeRoundAggregates runs as its own, separate step before the
+  // approval transaction opens -- not threaded into the same client. This
+  // mirrors the precedent PccService.calculateOrOverride (ghs#19) already
+  // set (reading round inputs outside its own bulk-update transaction):
+  // an admin-driven, low-concurrency workflow, where the cost of fully
+  // threading a client through ScoringService's own chain of repository
+  // calls (RoundsRepository.get, CoursesRepository.getTeeConfiguration,
+  // PccService.getOrCreateDailyPcc, RoundsRepository.updateScores) would
+  // be real, ongoing complexity for a race window that's already
+  // acceptably small in practice. The genuinely atomic unit -- state
+  // transition + recalculation -- is what Issue 23/24's acceptance
+  // criteria actually requires, and that part is fully transactional
+  // below.
+  async function rescoreBeforeApproval(roundId: string): Promise<void> {
+    await scoring.recomputeRoundAggregates(roundId);
+  }
+
+  async function runWorkflowTransition(
+    id: string,
+    validate: (existing: RoundForUpdate) => void,
+    apply: (client: PoolClient, existing: RoundForUpdate) => Promise<RecalculationOutcome | null>,
+  ): Promise<RoundWorkflowResult> {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const existing = await repository.getForUpdate(id, client);
+      if (!existing) throw new RoundNotFoundError(`round ${id} not found`);
+      validate(existing);
+
+      const recalculationResult = await apply(client, existing);
+
+      await client.query("COMMIT");
+
+      // null after deleteRound (the round is now correctly invisible to
+      // this same filtered read) -- not an error condition, see
+      // RoundWorkflowResult.round's own comment.
+      const round = await repository.get(id);
+      return { round, recalculation: recalculationResult };
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   return {
     async createRound(input) {
       let holeScores = input.holeScores ?? [];
@@ -68,12 +177,6 @@ export function createRoundsService(
     },
 
     async addHoleScore(roundId, input, preloadedRound) {
-      // Only trust the preloaded round when its id genuinely matches --
-      // a caller passing a mismatched round (a copy-paste mistake, or a
-      // stale object from an earlier request) would otherwise silently
-      // compute this hole's adjustment against the wrong playing
-      // handicap/tee configuration instead of failing loudly. Caught in
-      // review, PR #30.
       const round = (preloadedRound && preloadedRound.id === roundId) ? preloadedRound : await repository.get(roundId);
       if (!round) throw new Error("round not found");
 
@@ -107,9 +210,107 @@ export function createRoundsService(
       return repository.listByPlayer(playerId);
     },
 
-    async setRoundStatus(id, status, rejectionReason) {
-      await repository.setStatus(id, status, rejectionReason);
-      logger.info("round status changed", { roundId: id, status });
+    async approveRound(id) {
+      // Checked before rescoring, not left to surface from inside it: without
+      // this, a missing round would throw ScoringService's generic "round not
+      // found" Error instead of RoundNotFoundError, and the HTTP route (which
+      // only translates RoundNotFoundError/InvalidRoundTransitionError to a
+      // real status code) would report a 500 instead of 404 (caught while
+      // testing this).
+      const existing = await repository.get(id);
+      if (!existing) throw new RoundNotFoundError(`round ${id} not found`);
+
+      await rescoreBeforeApproval(id);
+
+      return runWorkflowTransition(
+        id,
+        (existing) => {
+          if (existing.status !== "pending" && existing.status !== "amending") {
+            throw new InvalidRoundTransitionError(`cannot approve a round in status '${existing.status}'`);
+          }
+        },
+        async (client, existing) => {
+          const trigger = existing.status === "amending" ? "amendment_approved" : "round_approved";
+          await repository.setStatus(id, "approved", undefined, client);
+          const result = await recalculation.recalculatePlayerHandicap(existing.playerId, trigger, client);
+          logger.info("round approved", { roundId: id, playerId: existing.playerId, trigger, recalculationStatus: result.status });
+          return result;
+        },
+      );
+    },
+
+    async rejectRound(id, reason) {
+      if (!reason.trim()) {
+        throw new InvalidRoundTransitionError("rejectionReason is required");
+      }
+
+      return runWorkflowTransition(
+        id,
+        (existing) => {
+          if (existing.status !== "pending" && existing.status !== "amending") {
+            throw new InvalidRoundTransitionError(`cannot reject a round in status '${existing.status}'`);
+          }
+        },
+        async (client, existing) => {
+          await repository.setStatus(id, "rejected", reason, client);
+          // Legacy bug fix: only logged as "requested", never actually
+          // recalculated, when rejecting a round that had already
+          // contributed a differential (ghs#23's own confirmed finding).
+          if (existing.scoreDifferential === null) {
+            logger.info("round rejected", { roundId: id, playerId: existing.playerId, recalculation: "not applicable -- round never had a differential" });
+            return null;
+          }
+          const result = await recalculation.recalculatePlayerHandicap(existing.playerId, "round_rejected", client);
+          logger.info("round rejected", { roundId: id, playerId: existing.playerId, recalculationStatus: result.status });
+          return result;
+        },
+      );
+    },
+
+    async deleteRound(id) {
+      return runWorkflowTransition(
+        id,
+        () => { /* deletion is allowed from any status */ },
+        async (client, existing) => {
+          await repository.softDelete(id, client);
+          if (existing.scoreDifferential === null) {
+            logger.info("round deleted", { roundId: id, playerId: existing.playerId, recalculation: "not applicable -- round never had a differential" });
+            return null;
+          }
+          const result = await recalculation.recalculatePlayerHandicap(existing.playerId, "round_deleted", client);
+          logger.info("round deleted", { roundId: id, playerId: existing.playerId, recalculationStatus: result.status });
+          return result;
+        },
+      );
+    },
+
+    async reopenForAmendment(id, reason) {
+      if (!reason.trim()) {
+        throw new InvalidRoundTransitionError("reason is required to reopen a round for amendment");
+      }
+
+      const result = await runWorkflowTransition(
+        id,
+        (existing) => {
+          if (existing.status !== "approved") {
+            throw new InvalidRoundTransitionError(
+              `only an approved round can be reopened for amendment (current status: '${existing.status}')`,
+            );
+          }
+        },
+        async (client, existing) => {
+          await repository.setStatus(id, "amending", undefined, client);
+          const recalcResult = await recalculation.recalculatePlayerHandicap(existing.playerId, "amendment_reopened", client);
+          logger.info("round reopened for amendment", { roundId: id, playerId: existing.playerId, reason, recalculationStatus: recalcResult.status });
+          return recalcResult;
+        },
+      );
+
+      // No notification on reopen (platform owner decision, Phase 2
+      // planning, 2026-08-12) -- nothing to do here; this comment exists
+      // so the absence reads as deliberate, not an oversight, for
+      // whoever wires ghs#25's triggers against this method later.
+      return result;
     },
   };
 }
