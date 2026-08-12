@@ -178,18 +178,23 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
     try {
       const roundId = String(req.params.id);
       const { status, rejectionReason, reason } = req.body as Record<string, unknown>;
-      const effectiveReason = typeof rejectionReason === "string"
-        ? rejectionReason
-        : typeof reason === "string"
-          ? reason
-          : undefined;
+      // Trimmed before the fallback, not after: a blank rejectionReason
+      // ("") must not shadow a real value in reason (caught in review, PR
+      // #32 -- the untrimmed version picked whichever field was merely a
+      // string, so rejectionReason: "" alongside a valid reason: "..."
+      // was wrongly rejected as missing). The trimmed value is also what
+      // gets persisted, so stray leading/trailing whitespace never reaches
+      // rounds.rejection_reason.
+      const rejectionReasonTrimmed = typeof rejectionReason === "string" ? rejectionReason.trim() : "";
+      const reasonTrimmed = typeof reason === "string" ? reason.trim() : "";
+      const effectiveReason = rejectionReasonTrimmed || reasonTrimmed || undefined;
 
       if (status === "approved") {
         res.status(200).json(await service.approveRound(roundId));
         return;
       }
       if (status === "rejected") {
-        if (!effectiveReason || !effectiveReason.trim()) {
+        if (!effectiveReason) {
           res.status(400).json({ error: "rejectionReason is required" });
           return;
         }
@@ -197,7 +202,7 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         return;
       }
       if (status === "amending") {
-        if (!effectiveReason || !effectiveReason.trim()) {
+        if (!effectiveReason) {
           res.status(400).json({ error: "reason is required to reopen a round for amendment" });
           return;
         }

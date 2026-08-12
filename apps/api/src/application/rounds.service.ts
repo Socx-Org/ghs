@@ -7,6 +7,7 @@ import type {
   RoundForUpdate,
   RoundScoreUpdate,
   RoundsRepository,
+  RoundStatus,
   RoundSummary,
 } from "../data/rounds.repository.ts";
 import type { CoursesRepository } from "../data/courses.repository.ts";
@@ -122,6 +123,15 @@ export function createRoundsService(
     await scoring.recomputeRoundAggregates(roundId);
   }
 
+  // Shared by approveRound's pre-rescore check and runWorkflowTransition's
+  // own locked validate() below -- both need to reject the exact same set
+  // of statuses with the exact same message.
+  function assertApprovableStatus(status: RoundStatus): void {
+    if (status !== "pending" && status !== "amending") {
+      throw new InvalidRoundTransitionError(`cannot approve a round in status '${status}'`);
+    }
+  }
+
   async function runWorkflowTransition(
     id: string,
     validate: (existing: RoundForUpdate) => void,
@@ -211,24 +221,27 @@ export function createRoundsService(
     },
 
     async approveRound(id) {
-      // Checked before rescoring, not left to surface from inside it: without
-      // this, a missing round would throw ScoringService's generic "round not
-      // found" Error instead of RoundNotFoundError, and the HTTP route (which
-      // only translates RoundNotFoundError/InvalidRoundTransitionError to a
-      // real status code) would report a 500 instead of 404 (caught while
-      // testing this).
+      // Checked before rescoring, not left to surface from inside it:
+      // without this, a missing round would throw ScoringService's generic
+      // "round not found" Error instead of RoundNotFoundError (500 instead
+      // of 404), and a round in a non-approvable status would still have
+      // rescoreBeforeApproval persist new score/differential values via
+      // recomputeRoundAggregates before the transition below ever gets a
+      // chance to reject it -- a real, unwanted side effect on a call that
+      // ultimately fails (caught in review, PR #32).
       const existing = await repository.get(id);
       if (!existing) throw new RoundNotFoundError(`round ${id} not found`);
+      assertApprovableStatus(existing.status);
 
       await rescoreBeforeApproval(id);
 
       return runWorkflowTransition(
         id,
-        (existing) => {
-          if (existing.status !== "pending" && existing.status !== "amending") {
-            throw new InvalidRoundTransitionError(`cannot approve a round in status '${existing.status}'`);
-          }
-        },
+        // Re-checked here too, under the row lock: the status above was
+        // read outside any transaction, so it could in principle have
+        // changed between that check and this one (e.g. a concurrent
+        // reject) -- this is the authoritative check.
+        (existing) => assertApprovableStatus(existing.status),
         async (client, existing) => {
           const trigger = existing.status === "amending" ? "amendment_approved" : "round_approved";
           await repository.setStatus(id, "approved", undefined, client);
@@ -240,7 +253,8 @@ export function createRoundsService(
     },
 
     async rejectRound(id, reason) {
-      if (!reason.trim()) {
+      const trimmedReason = reason.trim();
+      if (!trimmedReason) {
         throw new InvalidRoundTransitionError("rejectionReason is required");
       }
 
@@ -252,7 +266,7 @@ export function createRoundsService(
           }
         },
         async (client, existing) => {
-          await repository.setStatus(id, "rejected", reason, client);
+          await repository.setStatus(id, "rejected", trimmedReason, client);
           // Legacy bug fix: only logged as "requested", never actually
           // recalculated, when rejecting a round that had already
           // contributed a differential (ghs#23's own confirmed finding).
@@ -285,7 +299,8 @@ export function createRoundsService(
     },
 
     async reopenForAmendment(id, reason) {
-      if (!reason.trim()) {
+      const trimmedReason = reason.trim();
+      if (!trimmedReason) {
         throw new InvalidRoundTransitionError("reason is required to reopen a round for amendment");
       }
 
@@ -301,7 +316,7 @@ export function createRoundsService(
         async (client, existing) => {
           await repository.setStatus(id, "amending", undefined, client);
           const recalcResult = await recalculation.recalculatePlayerHandicap(existing.playerId, "amendment_reopened", client);
-          logger.info("round reopened for amendment", { roundId: id, playerId: existing.playerId, reason, recalculationStatus: recalcResult.status });
+          logger.info("round reopened for amendment", { roundId: id, playerId: existing.playerId, reason: trimmedReason, recalculationStatus: recalcResult.status });
           return recalcResult;
         },
       );

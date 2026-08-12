@@ -370,6 +370,17 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
     const missingDelete = await fetch(`${baseUrl}/rounds/${missingId}`, { method: "DELETE", headers: asAdmin });
     assert.equal(missingDelete.status, 404);
 
+    // A blank rejectionReason must not shadow a real value in reason, and
+    // both are trimmed before persisting (caught in review, PR #32).
+    const thirdRound = await roundsRepo.create({ playerId: playerRecord!.id, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
+    const reasonFallbackResponse = await fetch(`${baseUrl}/rounds/${thirdRound.id}/status`, {
+      method: "PATCH", headers: asAdmin, body: JSON.stringify({ status: "rejected", rejectionReason: "", reason: "  Scorecard illegible  " }),
+    });
+    assert.equal(reasonFallbackResponse.status, 200);
+    const reasonFallback = await reasonFallbackResponse.json() as RoundWorkflowResult;
+    assert.equal(reasonFallback.round!.status, "rejected");
+    assert.equal(reasonFallback.round!.rejectionReason, "Scorecard illegible", "falls back to reason when rejectionReason is blank, trimmed before persisting");
+
     // Admin can delete a round outright; the response's round is null
     // (soft-deleted, no longer a visible resource) but the call itself
     // succeeds.

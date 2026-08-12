@@ -294,6 +294,21 @@ test("approveRound on a missing round throws RoundNotFoundError", async () => {
   await assert.rejects(() => service.approveRound("does-not-exist"), RoundNotFoundError);
 });
 
+test("approveRound validates status before rescoring -- a non-approvable round is never rescored as a side effect of the failed attempt (caught in review, PR #32)", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo, fakeRecalculationOrchestrator(), zeroPccService());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+  await repo.setStatus(round.id, "rejected", "already handled");
+
+  await assert.rejects(() => service.approveRound(round.id), InvalidRoundTransitionError);
+
+  const afterFailedApproval = await repo.get(round.id);
+  assert.equal(afterFailedApproval!.status, "rejected", "status must remain unchanged");
+  assert.equal(afterFailedApproval!.scoreDifferential, null, "rescoreBeforeApproval must not run -- no score fields should be persisted for a round that can't be approved");
+  assert.equal(afterFailedApproval!.grossScore, null);
+});
+
 test("rejectRound requires a non-empty reason", async () => {
   const service = roundsService(fakeRepository());
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
