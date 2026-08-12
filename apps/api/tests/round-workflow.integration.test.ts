@@ -20,6 +20,7 @@ import { createScoringService } from "../src/application/scoring.service.ts";
 import { createHandicapHistoryRepository } from "../src/data/handicap-history.repository.ts";
 import { createHandicapHistoryService } from "../src/application/handicap-history.service.ts";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
+import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
 import { createRoundsService } from "../src/application/rounds.service.ts";
 import { createHandicapOverridesRepository } from "../src/data/handicap-overrides.repository.ts";
 import { createHandicapOverridesService } from "../src/application/handicap-overrides.service.ts";
@@ -89,9 +90,10 @@ function buildServices() {
   const pccService = createPccService(createPccRepository(pool));
   const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
-  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, logger);
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, logger);
-  return { roundsRepo, coursesRepo, handicapHistoryService, recalculationOrchestrator, roundsService };
+  const notificationsRepository = createNotificationsRepository(pool);
+  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, logger);
+  return { roundsRepo, coursesRepo, handicapHistoryService, notificationsRepository, recalculationOrchestrator, roundsService };
 }
 
 test("rejectRound recalculates a previously-approved-then-reopened round -- the confirmed legacy bug ghs#23 fixes: legacy only logged 'recalculation requested' here, it never actually recalculated", async () => {
@@ -228,7 +230,7 @@ test("approveRound rolls back the status change if recalculation fails -- state 
   const teeConfigurationId = await createTeeConfiguration();
   const players = createPlayersRepository(pool);
   const player = await players.create({ firstName: "Atomic", lastName: "Rollback" });
-  const { roundsRepo, coursesRepo } = buildServices();
+  const { roundsRepo, coursesRepo, notificationsRepository } = buildServices();
   const scoringService = createScoringService(roundsRepo, coursesRepo, createPccService(createPccRepository(pool)));
 
   const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
@@ -242,7 +244,7 @@ test("approveRound rolls back the status change if recalculation fails -- state 
       throw new Error("not used by this test");
     },
   };
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, failingRecalculation, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, failingRecalculation, notificationsRepository, logger);
 
   await assert.rejects(() => roundsService.approveRound(round.id), /simulated recalculation failure/);
 
@@ -270,7 +272,7 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
   const clubsRepo = createClubsRepository(pool);
   const coursesRepo = createCoursesRepository(pool);
   const settingsRepo = createSystemSettingsRepository(pool);
-  const { roundsRepo, roundsService } = buildServices();
+  const { roundsRepo, roundsService, notificationsRepository } = buildServices();
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
@@ -284,7 +286,7 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens);
   const pccService = createPccService(createPccRepository(pool));
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
-  const handicapOverridesService = createHandicapOverridesService(createHandicapOverridesRepository(pool), handicapHistoryService, logger);
+  const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,

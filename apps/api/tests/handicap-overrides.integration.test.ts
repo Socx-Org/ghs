@@ -22,6 +22,7 @@ import { createPccRepository } from "../src/data/pcc.repository.ts";
 import { createPccService } from "../src/application/pcc.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
+import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
 import { createLocalAuthProvider } from "../src/application/auth-provider.ts";
 import { createAuthService } from "../src/application/auth.service.ts";
 import { createMfaService } from "../src/application/mfa.service.ts";
@@ -142,9 +143,10 @@ test("HTTP: a player can view their own handicap override history but not anothe
   const pccService = createPccService(createPccRepository(pool));
   const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
-  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, logger);
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, logger);
-  const handicapOverridesService = createHandicapOverridesService(overridesRepo, handicapHistoryService, logger);
+  const notificationsRepository = createNotificationsRepository(pool);
+  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, logger);
+  const handicapOverridesService = createHandicapOverridesService(pool, overridesRepo, handicapHistoryService, notificationsRepository, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,

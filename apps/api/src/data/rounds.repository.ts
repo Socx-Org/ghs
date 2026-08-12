@@ -121,7 +121,16 @@ export interface RoundForUpdate {
 }
 
 export interface RoundsRepository {
-  create(input: CreateRoundInput): Promise<Round>;
+  // client: when provided, every statement here (including the round and
+  // its hole scores) runs on it and this method does NOT open, commit,
+  // or roll back a transaction -- the caller owns that. This is what
+  // lets ghs#25's "round_submitted" notification write land in the SAME
+  // transaction as the round's own creation (ADR-210 point 1), the same
+  // client-threading convention already established for setStatus/
+  // softDelete (ghs#23) and recordChange (ghs#24). Omitted, this method
+  // manages its own self-contained transaction exactly as before --
+  // existing callers are unaffected.
+  create(input: CreateRoundInput, client?: PoolClient): Promise<Round>;
   addHoleScore(roundId: string, input: CreateHoleScoreInput): Promise<HoleScore>;
   updateScores(id: string, update: RoundScoreUpdate): Promise<Round>;
   get(id: string): Promise<Round | null>;
@@ -262,35 +271,51 @@ async function insertHoleScore(
   return toHoleScore(result.rows[0]!);
 }
 
+// Runs the round + hole-scores insert sequence on whichever client it's
+// given -- no transaction boundaries of its own (same convention as
+// handicap-history.repository.ts's runRecordChange/recalculation.
+// service.ts's runRecalculation).
+async function runCreate(client: PoolClient, input: CreateRoundInput): Promise<Round> {
+  const roundResult = await client.query<RoundRow>(
+    `INSERT INTO rounds (player_id, tee_configuration_id, played_at, playing_handicap, is_tournament, is_9_hole)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING ${ROUND_COLUMNS}`,
+    [
+      input.playerId,
+      input.teeConfigurationId,
+      input.playedAt,
+      input.playingHandicap ?? null,
+      input.isTournament ?? false,
+      input.is9Hole ?? false,
+    ],
+  );
+  const roundRow = roundResult.rows[0]!;
+
+  const holeScores: HoleScore[] = [];
+  for (const holeInput of input.holeScores ?? []) {
+    holeScores.push(await insertHoleScore(client, roundRow.id, holeInput));
+  }
+
+  return toRound(roundRow, holeScores);
+}
+
 export function createRoundsRepository(pool: Pool): RoundsRepository {
   return {
-    async create(input) {
+    async create(input, externalClient) {
+      if (externalClient) {
+        // Caller-managed: no transaction opened or committed here, and
+        // errors propagate so the caller's own transaction rolls back
+        // (ghs#25's round_submitted notification write joins this same
+        // transaction).
+        return runCreate(externalClient, input);
+      }
+
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-
-        const roundResult = await client.query<RoundRow>(
-          `INSERT INTO rounds (player_id, tee_configuration_id, played_at, playing_handicap, is_tournament, is_9_hole)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING ${ROUND_COLUMNS}`,
-          [
-            input.playerId,
-            input.teeConfigurationId,
-            input.playedAt,
-            input.playingHandicap ?? null,
-            input.isTournament ?? false,
-            input.is9Hole ?? false,
-          ],
-        );
-        const roundRow = roundResult.rows[0]!;
-
-        const holeScores: HoleScore[] = [];
-        for (const holeInput of input.holeScores ?? []) {
-          holeScores.push(await insertHoleScore(client, roundRow.id, holeInput));
-        }
-
+        const round = await runCreate(client, input);
         await client.query("COMMIT");
-        return toRound(roundRow, holeScores);
+        return round;
       } catch (err) {
         await client.query("ROLLBACK");
         throw err;

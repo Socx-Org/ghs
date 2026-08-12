@@ -12,6 +12,7 @@ import { createPccService } from "../src/application/pcc.service.ts";
 import { createHandicapHistoryRepository } from "../src/data/handicap-history.repository.ts";
 import { createHandicapHistoryService } from "../src/application/handicap-history.service.ts";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
+import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const logger = createLogger("test");
@@ -67,8 +68,9 @@ function buildOrchestrator() {
   const handicapHistoryRepo = createHandicapHistoryRepository(pool);
   const handicapHistoryService = createHandicapHistoryService(handicapHistoryRepo);
   const pccService = createPccService(createPccRepository(pool));
-  const orchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, logger);
-  return { roundsRepo, handicapHistoryRepo, handicapHistoryService, pccService, orchestrator };
+  const notificationsRepository = createNotificationsRepository(pool);
+  const orchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, logger);
+  return { roundsRepo, handicapHistoryRepo, handicapHistoryService, pccService, notificationsRepository, orchestrator };
 }
 
 test("recalculatePlayerHandicap computes and persists a real handicap index from a player's real approved rounds, round-tripping through a fresh read", async () => {

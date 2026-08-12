@@ -27,6 +27,7 @@ import { createPccRepository } from "./data/pcc.repository.ts";
 import { createPccService } from "./application/pcc.service.ts";
 import { createScoringService } from "./application/scoring.service.ts";
 import { createRecalculationOrchestrator } from "./application/recalculation.service.ts";
+import { createNotificationsRepository } from "./data/notifications.repository.ts";
 import { createApp } from "./interface/http/app.ts";
 
 // Composition root: config and secrets are read exactly once, here, and
@@ -50,14 +51,15 @@ const roundsRepository = createRoundsRepository(pool);
 const handicapOverridesRepository = createHandicapOverridesRepository(pool);
 const handicapHistoryRepository = createHandicapHistoryRepository(pool);
 const pccRepository = createPccRepository(pool);
+const notificationsRepository = createNotificationsRepository(pool);
 
 const clubsService = createClubsService(clubsRepository, logger);
 const pccService = createPccService(pccRepository);
 const scoringService = createScoringService(roundsRepository, coursesRepository, pccService);
 const handicapHistoryService = createHandicapHistoryService(handicapHistoryRepository);
-const handicapOverridesService = createHandicapOverridesService(handicapOverridesRepository, handicapHistoryService, logger);
-const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepository, handicapHistoryService, pccService, logger);
-const roundsService = createRoundsService(pool, roundsRepository, coursesRepository, scoringService, recalculationOrchestrator, logger);
+const handicapOverridesService = createHandicapOverridesService(pool, handicapOverridesRepository, handicapHistoryService, notificationsRepository, logger);
+const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepository, handicapHistoryService, pccService, notificationsRepository, logger);
+const roundsService = createRoundsService(pool, roundsRepository, coursesRepository, scoringService, recalculationOrchestrator, notificationsRepository, logger);
 const coursesService = createCoursesService(coursesRepository, logger);
 const authProvider = createLocalAuthProvider(config.auth, refreshTokensRepository);
 const mfaService = createMfaService(mfaRepository, config.auth.mfaEncryptionKey);

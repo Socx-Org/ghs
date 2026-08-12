@@ -12,6 +12,7 @@ import type {
 import type { HandicapHistoryService } from "../src/application/handicap-history.service.ts";
 import type { DailyPcc } from "../src/data/pcc.repository.ts";
 import type { PccService } from "../src/application/pcc.service.ts";
+import type { NotificationHistoryRecord, NotificationsRepository, RecordNotificationInput } from "../src/data/notifications.repository.ts";
 
 // Pure unit tests (ENG-030.3) -- no HTTP, no real database.
 
@@ -88,6 +89,21 @@ function fakeHandicapHistoryService(
   };
 }
 
+function fakeNotificationsRepository(): NotificationsRepository & { recordedCalls: RecordNotificationInput[] } {
+  const recordedCalls: RecordNotificationInput[] = [];
+  return {
+    recordedCalls,
+    async record(input) {
+      recordedCalls.push(input);
+      const record: NotificationHistoryRecord = { id: String(recordedCalls.length), playerId: input.playerId, eventType: input.eventType, payload: input.payload, createdAt: new Date().toISOString() };
+      return record;
+    },
+    async listForPlayer() {
+      return [];
+    },
+  };
+}
+
 function unusedPccService(): PccService {
   return {
     async getOrCreateDailyPcc() { throw new Error("not used by these tests"); },
@@ -110,6 +126,7 @@ test("recalculatePlayerHandicap: player_not_found when the player doesn't exist 
     fakeRoundsRepository({}),
     fakeHandicapHistoryService({}, []),
     unusedPccService(),
+    fakeNotificationsRepository(),
     silentLogger,
   );
 
@@ -123,6 +140,7 @@ test("recalculatePlayerHandicap: insufficient_holes when fewer than 3 effective 
     fakeRoundsRepository({ "player-1": makeDifferentials(2) }),
     fakeHandicapHistoryService({ "player-1": { handicapIndex: null, lowHandicapIndex: null } }, []),
     unusedPccService(),
+    fakeNotificationsRepository(),
     silentLogger,
   );
 
@@ -137,6 +155,7 @@ test("recalculatePlayerHandicap: eligible writes through handicap-history's shar
     fakeRoundsRepository({ "player-1": makeDifferentials(3, 10) }),
     fakeHandicapHistoryService({ "player-1": { handicapIndex: null, lowHandicapIndex: null } }, recordCalls),
     unusedPccService(),
+    fakeNotificationsRepository(),
     silentLogger,
   );
 
@@ -147,6 +166,68 @@ test("recalculatePlayerHandicap: eligible writes through handicap-history's shar
   // 3 scores -> lowest 1 (10.0), adjustment -2.0 -> (10-2)*0.96 = 7.68 -> truncated 7.6
   assert.equal(result.handicapIndex, 7.6);
   assert.ok(result.historyRecordId);
+});
+
+test("recalculatePlayerHandicap: an eligible, changed result fires a handicap_changed notification tagged with the trigger (ghs#25)", async () => {
+  const notifications = fakeNotificationsRepository();
+  const orchestrator = createRecalculationOrchestrator(
+    fakePool(),
+    fakeRoundsRepository({ "player-1": makeDifferentials(3, 10) }),
+    fakeHandicapHistoryService({ "player-1": { handicapIndex: null, lowHandicapIndex: null } }, []),
+    unusedPccService(),
+    notifications,
+    silentLogger,
+  );
+
+  await orchestrator.recalculatePlayerHandicap("player-1", "pcc_correction");
+
+  assert.equal(notifications.recordedCalls.length, 1);
+  const call = notifications.recordedCalls[0]!;
+  assert.equal(call.playerId, "player-1");
+  assert.equal(call.eventType, "handicap_changed");
+  assert.equal(call.payload.trigger, "pcc_correction", "tagged with trigger source, per ghs#25's own domain trigger table");
+});
+
+test("recalculatePlayerHandicap: no notification when the recalculation produces no actual index change (ghs#25, matches ghs#21's change-only history policy)", async () => {
+  const notifications = fakeNotificationsRepository();
+  const orchestrator = createRecalculationOrchestrator(
+    fakePool(),
+    fakeRoundsRepository({ "player-1": makeDifferentials(3, 10) }),
+    {
+      async getCurrentIndex() { return { handicapIndex: 7.6, lowHandicapIndex: 7.6 }; },
+      async getCurrentIndexForUpdate() { return { handicapIndex: 7.6, lowHandicapIndex: 7.6 }; },
+      async listHistoryForPlayer() { return []; },
+      async recordCalculatedResult(_playerId: string, newIndex: number) {
+        return { history: null, handicapIndex: newIndex, lowHandicapIndex: 7.6 };
+      },
+      async recordManualOverride() { throw new Error("not used"); },
+    },
+    unusedPccService(),
+    notifications,
+    silentLogger,
+  );
+
+  const result = await orchestrator.recalculatePlayerHandicap("player-1", "round_approved");
+  assert.equal(result.status, "eligible");
+  assert.equal(result.historyRecordId, null);
+  assert.equal(notifications.recordedCalls.length, 0);
+});
+
+test("recalculatePlayerHandicap: no notification for the amendment_reopened trigger, even when the index genuinely changes (platform owner decision, 2026-08-12 -- the player isn't told anything until the correction is finalised)", async () => {
+  const notifications = fakeNotificationsRepository();
+  const orchestrator = createRecalculationOrchestrator(
+    fakePool(),
+    fakeRoundsRepository({ "player-1": makeDifferentials(3, 10) }),
+    fakeHandicapHistoryService({ "player-1": { handicapIndex: null, lowHandicapIndex: null } }, []),
+    unusedPccService(),
+    notifications,
+    silentLogger,
+  );
+
+  const result = await orchestrator.recalculatePlayerHandicap("player-1", "amendment_reopened");
+  assert.equal(result.status, "eligible");
+  assert.ok(result.historyRecordId, "the index change itself still genuinely happens and is recorded");
+  assert.equal(notifications.recordedCalls.length, 0, "just never notified about");
 });
 
 test("recalculatePlayerHandicap: an unchanged recalculation surfaces a null historyRecordId, not a fabricated one", async () => {
@@ -170,6 +251,7 @@ test("recalculatePlayerHandicap: an unchanged recalculation surfaces a null hist
       async recordManualOverride() { throw new Error("not used"); },
     },
     unusedPccService(),
+    fakeNotificationsRepository(),
     silentLogger,
   );
 
@@ -188,6 +270,7 @@ test("recalculatePlayerHandicap: a thrown error is caught and reported as a 'fai
       { throwForPlayerId: "player-1" },
     ),
     unusedPccService(),
+    fakeNotificationsRepository(),
     silentLogger,
   );
 
@@ -224,6 +307,7 @@ test("recalculatePccForTeeConfigDay: one player's thrown failure does not preven
     }),
     fakeHandicapHistoryService(currentIndexByPlayer, recordCalls, { throwForPlayerId: "player-2" }),
     pccService,
+    fakeNotificationsRepository(),
     silentLogger,
   );
 

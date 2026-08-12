@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { Pool, PoolClient } from "pg";
 import { createHandicapOverridesService } from "../src/application/handicap-overrides.service.ts";
 import { createLogger } from "../src/logger.ts";
 import type {
@@ -9,6 +10,34 @@ import type {
 } from "../src/data/handicap-overrides.repository.ts";
 import type { CurrentHandicapIndex, HandicapHistoryRecord } from "../src/data/handicap-history.repository.ts";
 import type { HandicapHistoryService } from "../src/application/handicap-history.service.ts";
+import type { NotificationHistoryRecord, NotificationsRepository, RecordNotificationInput } from "../src/data/notifications.repository.ts";
+
+// A minimal fake pg.Pool -- only used for createOverride's own BEGIN/
+// COMMIT/ROLLBACK calls. The fakes below ignore whatever client they're
+// given, so this fake client is never actually queried for real data
+// (same pattern as rounds.service.test.ts/recalculation.service.test.ts).
+function fakePool(): Pool {
+  const fakeClient = {
+    query: async () => ({ rows: [], rowCount: 0 }),
+    release: () => { /* no-op */ },
+  } as unknown as PoolClient;
+  return { connect: async () => fakeClient } as unknown as Pool;
+}
+
+function fakeNotificationsRepository(): NotificationsRepository & { recordedCalls: RecordNotificationInput[] } {
+  const recordedCalls: RecordNotificationInput[] = [];
+  return {
+    recordedCalls,
+    async record(input) {
+      recordedCalls.push(input);
+      const record: NotificationHistoryRecord = { id: String(recordedCalls.length), playerId: input.playerId, eventType: input.eventType, payload: input.payload, createdAt: new Date().toISOString() };
+      return record;
+    },
+    async listForPlayer() {
+      return [];
+    },
+  };
+}
 
 function fakeRepository(): HandicapOverridesRepository {
   const overrides: HandicapOverride[] = [];
@@ -62,7 +91,7 @@ function fakeHandicapHistoryService(): HandicapHistoryService & { recordedCalls:
 const silentLogger = createLogger("test");
 
 test("createOverride persists via the repository", async () => {
-  const service = createHandicapOverridesService(fakeRepository(), fakeHandicapHistoryService(), silentLogger);
+  const service = createHandicapOverridesService(fakePool(), fakeRepository(), fakeHandicapHistoryService(), fakeNotificationsRepository(), silentLogger);
 
   const override = await service.createOverride({
     playerId: "player-1",
@@ -78,7 +107,7 @@ test("createOverride persists via the repository", async () => {
 
 test("createOverride also records the change through the shared handicap-history write path, not a duplicated implementation", async () => {
   const history = fakeHandicapHistoryService();
-  const service = createHandicapOverridesService(fakeRepository(), history, silentLogger);
+  const service = createHandicapOverridesService(fakePool(), fakeRepository(), history, fakeNotificationsRepository(), silentLogger);
 
   await service.createOverride({
     playerId: "player-1", adminUserId: "admin-1", previousIndex: 12.4, newIndex: 10.1, reason: "Verified correction",
@@ -93,8 +122,24 @@ test("createOverride also records the change through the shared handicap-history
   assert.equal(createdBy, "admin-1");
 });
 
+test("createOverride writes a manual_override notification with the admin's reason (ghs#25)", async () => {
+  const notifications = fakeNotificationsRepository();
+  const service = createHandicapOverridesService(fakePool(), fakeRepository(), fakeHandicapHistoryService(), notifications, silentLogger);
+
+  const override = await service.createOverride({
+    playerId: "player-1", adminUserId: "admin-1", previousIndex: 12.4, newIndex: 10.1, reason: "Verified correction",
+  });
+
+  assert.equal(notifications.recordedCalls.length, 1);
+  const call = notifications.recordedCalls[0]!;
+  assert.equal(call.playerId, "player-1");
+  assert.equal(call.eventType, "manual_override");
+  assert.equal(call.payload.reason, "Verified correction");
+  assert.equal(call.payload.overrideId, override.id);
+});
+
 test("multiple overrides for the same player accumulate as history, not overwrite", async () => {
-  const service = createHandicapOverridesService(fakeRepository(), fakeHandicapHistoryService(), silentLogger);
+  const service = createHandicapOverridesService(fakePool(), fakeRepository(), fakeHandicapHistoryService(), fakeNotificationsRepository(), silentLogger);
 
   await service.createOverride({ playerId: "player-1", adminUserId: "admin-1", newIndex: 10.1, reason: "First correction" });
   await service.createOverride({ playerId: "player-1", adminUserId: "admin-1", newIndex: 9.8, reason: "Second correction" });
@@ -104,7 +149,7 @@ test("multiple overrides for the same player accumulate as history, not overwrit
 });
 
 test("listOverridesForPlayer only returns that player's overrides", async () => {
-  const service = createHandicapOverridesService(fakeRepository(), fakeHandicapHistoryService(), silentLogger);
+  const service = createHandicapOverridesService(fakePool(), fakeRepository(), fakeHandicapHistoryService(), fakeNotificationsRepository(), silentLogger);
   await service.createOverride({ playerId: "player-1", adminUserId: "admin-1", newIndex: 10.1, reason: "A" });
   await service.createOverride({ playerId: "player-2", adminUserId: "admin-1", newIndex: 8.0, reason: "B" });
 

@@ -30,6 +30,7 @@ import { createPccRepository } from "../src/data/pcc.repository.ts";
 import { createPccService } from "../src/application/pcc.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
+import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
 import { createApp } from "../src/interface/http/app.ts";
 import type { AuthConfig } from "../src/config.ts";
 
@@ -115,9 +116,10 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on -
   const pccService = createPccService(createPccRepository(pool));
   const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
-  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, logger);
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, logger);
-  const handicapOverridesService = createHandicapOverridesService(createHandicapOverridesRepository(pool), handicapHistoryService, logger);
+  const notificationsRepository = createNotificationsRepository(pool);
+  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, logger);
+  const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,

@@ -4,6 +4,7 @@ import type { RoundsRepository } from "../data/rounds.repository.ts";
 import type { DailyPcc } from "../data/pcc.repository.ts";
 import type { PccService } from "./pcc.service.ts";
 import type { HandicapHistoryService } from "./handicap-history.service.ts";
+import type { NotificationsRepository } from "../data/notifications.repository.ts";
 import { applyWhsCaps, calculateHandicapIndex } from "./whs-calculation.ts";
 
 // The single recalculation-orchestration boundary (ghs#24). Legacy calls
@@ -89,6 +90,7 @@ export function createRecalculationOrchestrator(
   rounds: RoundsRepository,
   handicapHistory: HandicapHistoryService,
   pcc: PccService,
+  notifications: NotificationsRepository,
   logger: Logger,
 ): RecalculationOrchestrator {
   // Runs entirely on the given client -- every read and the eventual
@@ -141,6 +143,28 @@ export function createRecalculationOrchestrator(
       snapshot,
       client,
     );
+
+    // "Handicap changed (calculated), index actually changed" -- ghs#25's
+    // domain trigger table. Centralised here rather than at every
+    // recalculation call site (round approve/reject/delete, PCC
+    // correction) for the same reason recalculation logic itself isn't
+    // duplicated at those call sites: this is the one place that
+    // authoritatively knows both "did the index actually change"
+    // (result.history !== null -- ghs#21's own change-only write policy)
+    // and the trigger. amendment_reopened is the one explicit exclusion
+    // (platform owner decision, 2026-08-12): the player isn't told
+    // anything about a reopened round, including a transient handicap
+    // change caused by retracting it, until the correction is finalised.
+    if (result.history !== null && trigger !== "amendment_reopened") {
+      await notifications.record(
+        {
+          playerId,
+          eventType: "handicap_changed",
+          payload: { trigger, previousIndex: current.handicapIndex, newIndex: result.handicapIndex, historyRecordId: result.history.id },
+        },
+        client,
+      );
+    }
 
     return {
       playerId,
