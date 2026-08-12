@@ -26,10 +26,18 @@
 -- payload avoids coupling the outbox's future pruning to the history
 -- row still existing.
 
+-- event_type is enum-like on both tables below (the same fixed trigger
+-- table -- rounds.service.ts/recalculation.service.ts/handicap-overrides.
+-- service.ts are the only writers, matching NotificationEventType in
+-- notifications.repository.ts exactly), so both get the same CHECK
+-- constraint every other enum-like column in this schema already has
+-- (e.g. handicap_history.method, rounds.status) -- caught in review, PR
+-- #33.
 CREATE TABLE IF NOT EXISTS notification_history (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   player_id   UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
-  event_type  TEXT NOT NULL,
+  event_type  TEXT NOT NULL
+    CHECK (event_type IN ('round_submitted', 'round_approved', 'round_rejected', 'handicap_changed', 'manual_override')),
   payload     JSONB NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -40,7 +48,8 @@ CREATE INDEX IF NOT EXISTS idx_notification_history_player_created
 CREATE TABLE IF NOT EXISTS notification_outbox (
   id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   notification_history_id UUID NOT NULL REFERENCES notification_history(id) ON DELETE CASCADE,
-  event_type               TEXT NOT NULL,
+  event_type               TEXT NOT NULL
+    CHECK (event_type IN ('round_submitted', 'round_approved', 'round_rejected', 'handicap_changed', 'manual_override')),
   payload                  JSONB NOT NULL,
   -- Minimal shape per this issue's own acceptance criteria -- no
   -- retry_after/attempts/failure-classification columns. Those are

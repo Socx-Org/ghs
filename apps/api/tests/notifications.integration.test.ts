@@ -124,6 +124,26 @@ test("createRound writes notification_history and its child notification_outbox 
   assert.equal(outboxRow.rows[0]!.payload.roundId, round.id);
 });
 
+test("an invalid event_type is rejected at the database level on both notification_history and notification_outbox, not only by the fixed NotificationEventType union (caught in review, PR #33)", async () => {
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Invalid", lastName: "EventType" });
+
+  await assert.rejects(() =>
+    pool.query("INSERT INTO notification_history (player_id, event_type, payload) VALUES ($1, 'not_a_real_event', '{}'::jsonb)", [player.id]),
+  );
+
+  const historyResult = await pool.query<{ id: string }>(
+    "INSERT INTO notification_history (player_id, event_type, payload) VALUES ($1, 'round_submitted', '{}'::jsonb) RETURNING id",
+    [player.id],
+  );
+  await assert.rejects(() =>
+    pool.query(
+      "INSERT INTO notification_outbox (notification_history_id, event_type, payload) VALUES ($1, 'not_a_real_event', '{}'::jsonb)",
+      [historyResult.rows[0]!.id],
+    ),
+  );
+});
+
 test("approveRound writes round_approved, and -- since the round is eligible and the index changes -- a separate handicap_changed notification, real Postgres", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   const players = createPlayersRepository(pool);
@@ -276,6 +296,38 @@ test("createOverride writes a manual_override notification in the same transacti
   assert.equal(outbox.length, 1);
   const payloadResult = await pool.query<{ payload: { reason: string } }>("SELECT payload FROM notification_outbox WHERE id = $1", [outbox[0]!.id]);
   assert.equal(payloadResult.rows[0]!.payload.reason, "Verified against a paper certificate");
+});
+
+test("createOverride trims the reason once and stores the trimmed value consistently -- handicap_overrides, handicap_history, and the notification payload all agree (caught in review, PR #33)", async () => {
+  const players = createPlayersRepository(pool);
+  const users = createUsersRepository(pool);
+  const player = await players.create({ firstName: "Trim", lastName: "Notify" });
+  const admin = await users.create({
+    email: `notify-trim-admin-${Date.now()}@example.com`,
+    passwordHash: "irrelevant-for-this-test",
+    role: "admin",
+    status: "active",
+  });
+
+  const notificationsRepository = createNotificationsRepository(pool);
+  const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
+  const overridesRepo = createHandicapOverridesRepository(pool);
+  const overridesService = createHandicapOverridesService(pool, overridesRepo, handicapHistoryService, notificationsRepository, logger);
+
+  const override = await overridesService.createOverride({
+    playerId: player.id, adminUserId: admin.id, previousIndex: 15.0, newIndex: 12.0, reason: "  Verified against a paper certificate  ",
+  });
+  assert.equal(override.reason, "Verified against a paper certificate", "returned value is already trimmed");
+
+  const stored = await overridesRepo.listForPlayer(player.id);
+  assert.equal(stored[0]!.reason, "Verified against a paper certificate", "handicap_overrides.reason is trimmed, not whitespace-padded");
+
+  const history = await handicapHistoryService.listHistoryForPlayer(player.id);
+  assert.equal(history[0]!.reason, "Verified against a paper certificate", "handicap_history.reason agrees");
+
+  const outbox = await outboxRowsForPlayer(player.id);
+  const payloadResult = await pool.query<{ payload: { reason: string } }>("SELECT payload FROM notification_outbox WHERE id = $1", [outbox[0]!.id]);
+  assert.equal(payloadResult.rows[0]!.payload.reason, "Verified against a paper certificate", "the notification payload agrees too");
 });
 
 test("no code path reachable from ghs#25's notification triggers is capable of a synchronous provider call -- static check, ADR-210", async () => {

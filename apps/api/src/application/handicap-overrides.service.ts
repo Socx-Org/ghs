@@ -29,9 +29,15 @@ export function createHandicapOverridesService(
 ): HandicapOverridesService {
   return {
     async createOverride(input) {
-      // Validated here, before any write, not after the first one
-      // succeeds.
-      if (!input.reason.trim()) {
+      // Trimmed once, here, and used for every downstream write
+      // (handicap_overrides, handicap_history, the notification payload)
+      // -- previously only the validation check was trimmed, so a
+      // whitespace-padded reason still reached storage and the
+      // notification untouched (caught in review, PR #33; matches the
+      // same fix already applied to rounds.service.ts's rejectRound/
+      // reopenForAmendment).
+      const trimmedReason = input.reason.trim();
+      if (!trimmedReason) {
         throw new InvalidHandicapChangeError("reason is required for a manual override");
       }
 
@@ -49,7 +55,7 @@ export function createHandicapOverridesService(
       try {
         await client.query("BEGIN");
 
-        const override = await repository.create(input, client);
+        const override = await repository.create({ ...input, reason: trimmedReason }, client);
         logger.info("handicap override recorded", {
           overrideId: override.id,
           playerId: override.playerId,
