@@ -54,14 +54,10 @@ const pccRepository = createPccRepository(pool);
 const clubsService = createClubsService(clubsRepository, logger);
 const pccService = createPccService(pccRepository);
 const scoringService = createScoringService(roundsRepository, coursesRepository, pccService);
-const roundsService = createRoundsService(roundsRepository, coursesRepository, scoringService, logger);
 const handicapHistoryService = createHandicapHistoryService(handicapHistoryRepository);
 const handicapOverridesService = createHandicapOverridesService(handicapOverridesRepository, handicapHistoryService, logger);
-// Not yet wired into createApp/HTTP -- ghs#23's round approval/rejection/
-// amendment handlers are this orchestrator's first real caller.
-// Constructed here now so ghs#23 only has to wire it into the app, not
-// also assemble it.
 const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepository, handicapHistoryService, pccService, logger);
+const roundsService = createRoundsService(pool, roundsRepository, coursesRepository, scoringService, recalculationOrchestrator, logger);
 const coursesService = createCoursesService(coursesRepository, logger);
 const authProvider = createLocalAuthProvider(config.auth, refreshTokensRepository);
 const mfaService = createMfaService(mfaRepository, config.auth.mfaEncryptionKey);

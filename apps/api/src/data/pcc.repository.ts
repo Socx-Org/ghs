@@ -107,7 +107,8 @@ export function createPccRepository(pool: Pool): PccRepository {
          INNER JOIN tee_configurations tc ON tc.id = r.tee_configuration_id
          WHERE r.tee_configuration_id = $1
            AND r.played_at::date = $2::date
-           AND r.adjusted_gross_score IS NOT NULL`,
+           AND r.adjusted_gross_score IS NOT NULL
+           AND r.deleted_at IS NULL`,
         [teeConfigurationId, playedOn],
       );
       return result.rows.map((row) => ({
@@ -145,6 +146,7 @@ export function createPccRepository(pool: Pool): PccRepository {
              AND r.tee_configuration_id = $1
              AND r.played_at::date = $2::date
              AND r.adjusted_gross_score IS NOT NULL
+             AND r.deleted_at IS NULL
            RETURNING r.player_id`,
           [teeConfigurationId, playedOn, pcc],
         );

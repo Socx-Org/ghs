@@ -10,6 +10,9 @@ import { createPccRepository } from "../src/data/pcc.repository.ts";
 import { createPccService } from "../src/application/pcc.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
 import { createRoundsService } from "../src/application/rounds.service.ts";
+import { createHandicapHistoryRepository } from "../src/data/handicap-history.repository.ts";
+import { createHandicapHistoryService } from "../src/application/handicap-history.service.ts";
+import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const logger = createLogger("test");
@@ -57,7 +60,9 @@ function buildServices() {
   const coursesRepo = createCoursesRepository(pool);
   const pccService = createPccService(createPccRepository(pool));
   const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
-  const roundsService = createRoundsService(roundsRepo, coursesRepo, scoringService, logger);
+  const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
+  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, logger);
   return { roundsRepo, coursesRepo, pccService, scoringService, roundsService };
 }
 

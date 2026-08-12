@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRoundsService } from "../src/application/rounds.service.ts";
+import type { Pool, PoolClient } from "pg";
+import { createRoundsService, InvalidRoundTransitionError, RoundNotFoundError } from "../src/application/rounds.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
 import { createLogger } from "../src/logger.ts";
 import type {
@@ -8,13 +9,16 @@ import type {
   CreateRoundInput,
   HoleScore,
   Round,
+  RoundForUpdate,
   RoundScoreUpdate,
   RoundsRepository,
   RoundStatus,
   RoundSummary,
 } from "../src/data/rounds.repository.ts";
 import type { CoursesRepository, TeeConfiguration } from "../src/data/courses.repository.ts";
+import type { DailyPcc } from "../src/data/pcc.repository.ts";
 import type { PccService } from "../src/application/pcc.service.ts";
+import type { RecalculationOrchestrator, RecalculationOutcome, RecalculationTrigger } from "../src/application/recalculation.service.ts";
 
 // A single 18-hole tee configuration, reused by every test below --
 // enough hole metadata (hole 1, par 4, stroke index 7) for the
@@ -57,14 +61,78 @@ function unusedPccService(): PccService {
   };
 }
 
-function roundsService(repository: RoundsRepository) {
+// A working (not throwing) PCC fake, needed by the approve-workflow tests
+// below: approveRound calls scoring.recomputeRoundAggregates before its own
+// transaction, which unconditionally calls getOrCreateDailyPcc.
+function zeroPccService(): PccService {
+  const daily: DailyPcc = {
+    id: "daily-pcc-1",
+    teeConfigurationId: FAKE_TEE_CONFIGURATION.id,
+    playedOn: "2026-05-01",
+    pcc: 0,
+    source: "calculated",
+    updatedBy: null,
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  };
+  return {
+    async getOrCreateDailyPcc() {
+      return daily;
+    },
+    async calculateOrOverride() {
+      throw new Error("not used by these tests");
+    },
+  };
+}
+
+// A minimal fake pg.Pool -- only used for runWorkflowTransition's own
+// BEGIN/COMMIT/ROLLBACK calls. The fake RoundsRepository below ignores
+// whatever client it's given entirely, so this fake client is never
+// actually queried for real data (same pattern as
+// recalculation.service.test.ts's fakePool).
+function fakePool(): Pool {
+  const fakeClient = {
+    query: async () => ({ rows: [], rowCount: 0 }),
+    release: () => { /* no-op */ },
+  } as unknown as PoolClient;
+  return { connect: async () => fakeClient } as unknown as Pool;
+}
+
+// Records every recalculatePlayerHandicap call so tests can assert on
+// which trigger fired and whether it ran inside the caller's transaction
+// (a client was passed), without re-exercising ghs#24's own recalculation
+// logic -- that's already covered by recalculation.service.test.ts.
+function fakeRecalculationOrchestrator(): RecalculationOrchestrator & {
+  calls: Array<{ playerId: string; trigger: RecalculationTrigger; hadClient: boolean }>;
+} {
+  const calls: Array<{ playerId: string; trigger: RecalculationTrigger; hadClient: boolean }> = [];
+  return {
+    calls,
+    async recalculatePlayerHandicap(playerId, trigger, client) {
+      calls.push({ playerId, trigger, hadClient: client !== undefined });
+      const outcome: RecalculationOutcome = {
+        playerId, trigger, status: "eligible", handicapIndex: 12.3, historyRecordId: "history-1",
+      };
+      return outcome;
+    },
+    async recalculatePccForTeeConfigDay() {
+      throw new Error("not used by these tests");
+    },
+  };
+}
+
+function roundsService(
+  repository: RoundsRepository,
+  recalculation: RecalculationOrchestrator = fakeRecalculationOrchestrator(),
+  pccService: PccService = unusedPccService(),
+) {
   const courses = fakeCoursesRepository();
-  const scoring = createScoringService(repository, courses, unusedPccService());
-  return createRoundsService(repository, courses, scoring, silentLogger);
+  const scoring = createScoringService(repository, courses, pccService);
+  return createRoundsService(fakePool(), repository, courses, scoring, recalculation, silentLogger);
 }
 
 function fakeRepository(): RoundsRepository & { getCallCount: number } {
   const rounds = new Map<string, Round>();
+  const deleted = new Set<string>();
   let nextRoundId = 1;
   let nextHoleId = 1;
   const state = { getCallCount: 0 };
@@ -130,22 +198,39 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
     },
     async get(id: string) {
       state.getCallCount += 1;
+      if (deleted.has(id)) return null;
       return rounds.get(id) ?? null;
     },
     async listByPlayer(playerId: string): Promise<RoundSummary[]> {
       return [...rounds.values()]
-        .filter((r) => r.playerId === playerId)
+        .filter((r) => r.playerId === playerId && !deleted.has(r.id))
         .map(({ id, playerId: p, teeConfigurationId, playedAt, status }) => ({ id, playerId: p, teeConfigurationId, playedAt, status }));
     },
     async listApprovedDifferentialsForPlayer(playerId: string) {
       return [...rounds.values()]
-        .filter((r) => r.playerId === playerId && r.status === "approved" && r.scoreDifferential !== null)
+        .filter((r) => r.playerId === playerId && r.status === "approved" && r.scoreDifferential !== null && !deleted.has(r.id))
         .map((r) => ({ roundId: r.id, playedAt: r.playedAt, scoreDifferential: r.scoreDifferential!, is9Hole: r.is9Hole }));
     },
     async setStatus(id: string, status: RoundStatus, rejectionReason?: string) {
       const round = rounds.get(id)!;
       round.status = status;
       round.rejectionReason = rejectionReason ?? null;
+    },
+    async getForUpdate(id: string): Promise<RoundForUpdate | null> {
+      if (deleted.has(id)) return null;
+      const round = rounds.get(id);
+      if (!round) return null;
+      return {
+        id: round.id,
+        playerId: round.playerId,
+        teeConfigurationId: round.teeConfigurationId,
+        playedAt: round.playedAt,
+        status: round.status,
+        scoreDifferential: round.scoreDifferential,
+      };
+    },
+    async softDelete(id: string) {
+      deleted.add(id);
     },
   };
 }
@@ -178,14 +263,158 @@ test("addHoleScore appends to an existing round -- the real incremental-entry wo
   assert.equal(updated!.holeScores[0]!.fairwayResult, "missed_left");
 });
 
-test("setRoundStatus updates status and rejection reason", async () => {
+test("approveRound rescoring then approves and recalculates via the ghs#24 orchestrator, in caller-managed (client-threaded) mode", async () => {
+  const repo = fakeRepository();
+  const recalculation = fakeRecalculationOrchestrator();
+  const service = roundsService(repo, recalculation, zeroPccService());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+
+  const result = await service.approveRound(round.id);
+
+  assert.equal(result.round!.status, "approved");
+  assert.equal(recalculation.calls.length, 1);
+  assert.equal(recalculation.calls[0]!.playerId, "player-1");
+  assert.equal(recalculation.calls[0]!.trigger, "round_approved");
+  assert.equal(recalculation.calls[0]!.hadClient, true, "the state change and recalculation must run on the same transaction client (ghs#24 atomicity)");
+  assert.equal(result.recalculation!.status, "eligible");
+});
+
+test("approveRound rejects a round that isn't pending or amending", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo, fakeRecalculationOrchestrator(), zeroPccService());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.setStatus(round.id, "rejected", "already handled");
+
+  await assert.rejects(() => service.approveRound(round.id), InvalidRoundTransitionError);
+});
+
+test("approveRound on a missing round throws RoundNotFoundError", async () => {
+  const service = roundsService(fakeRepository(), fakeRecalculationOrchestrator(), zeroPccService());
+  await assert.rejects(() => service.approveRound("does-not-exist"), RoundNotFoundError);
+});
+
+test("approveRound validates status before rescoring -- a non-approvable round is never rescored as a side effect of the failed attempt (caught in review, PR #32)", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo, fakeRecalculationOrchestrator(), zeroPccService());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+  await repo.setStatus(round.id, "rejected", "already handled");
+
+  await assert.rejects(() => service.approveRound(round.id), InvalidRoundTransitionError);
+
+  const afterFailedApproval = await repo.get(round.id);
+  assert.equal(afterFailedApproval!.status, "rejected", "status must remain unchanged");
+  assert.equal(afterFailedApproval!.scoreDifferential, null, "rescoreBeforeApproval must not run -- no score fields should be persisted for a round that can't be approved");
+  assert.equal(afterFailedApproval!.grossScore, null);
+});
+
+test("rejectRound requires a non-empty reason", async () => {
   const service = roundsService(fakeRepository());
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
 
-  await service.setRoundStatus(round.id, "rejected", "Incomplete scorecard");
-  const updated = await service.getRound(round.id);
-  assert.equal(updated!.status, "rejected");
-  assert.equal(updated!.rejectionReason, "Incomplete scorecard");
+  await assert.rejects(() => service.rejectRound(round.id, ""), InvalidRoundTransitionError);
+  await assert.rejects(() => service.rejectRound(round.id, "   "), InvalidRoundTransitionError);
+});
+
+test("rejectRound recalculates when the round already carries a differential -- the legacy bug (ghs#23) this fixes: legacy only logged an audit event here and never actually recalculated", async () => {
+  const repo = fakeRepository();
+  const recalculation = fakeRecalculationOrchestrator();
+  const service = roundsService(repo, recalculation);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.updateScores(round.id, { scoreDifferential: 12.3 });
+  // Simulates the real path this covers: previously approved (so it
+  // carries a differential), then reopened for amendment -- rejectRound
+  // itself only ever accepts 'pending'/'amending', never 'approved'
+  // directly.
+  await repo.setStatus(round.id, "amending");
+
+  const result = await service.rejectRound(round.id, "Scorecard dispute");
+
+  assert.equal(result.round!.status, "rejected");
+  assert.equal(result.round!.rejectionReason, "Scorecard dispute");
+  assert.equal(recalculation.calls.length, 1, "must actually recalculate, not just log");
+  assert.equal(recalculation.calls[0]!.trigger, "round_rejected");
+  assert.equal(recalculation.calls[0]!.hadClient, true);
+});
+
+test("rejectRound skips recalculation when the round never had a differential -- nothing to retract", async () => {
+  const repo = fakeRepository();
+  const recalculation = fakeRecalculationOrchestrator();
+  const service = roundsService(repo, recalculation);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+
+  const result = await service.rejectRound(round.id, "Incomplete scorecard");
+
+  assert.equal(result.round!.status, "rejected");
+  assert.equal(result.recalculation, null);
+  assert.equal(recalculation.calls.length, 0);
+});
+
+test("deleteRound soft-deletes and recalculates when the round had a differential", async () => {
+  const repo = fakeRepository();
+  const recalculation = fakeRecalculationOrchestrator();
+  const service = roundsService(repo, recalculation);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.updateScores(round.id, { scoreDifferential: 8.0 });
+  await repo.setStatus(round.id, "approved");
+
+  const result = await service.deleteRound(round.id);
+
+  assert.equal(await service.getRound(round.id), null, "soft-deleted rounds are excluded from reads");
+  assert.equal(recalculation.calls.length, 1);
+  assert.equal(recalculation.calls[0]!.trigger, "round_deleted");
+  assert.equal(result.recalculation!.status, "eligible");
+});
+
+test("reopenForAmendment requires a non-empty reason", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.setStatus(round.id, "approved");
+
+  await assert.rejects(() => service.reopenForAmendment(round.id, ""), InvalidRoundTransitionError);
+});
+
+test("reopenForAmendment only accepts an approved round", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  // Still "pending" -- never approved.
+
+  await assert.rejects(() => service.reopenForAmendment(round.id, "Scorecard correction needed"), InvalidRoundTransitionError);
+});
+
+test("reopenForAmendment moves an approved round to 'amending' and recalculates -- retraction happens for free via the status change itself, no special-case logic", async () => {
+  const repo = fakeRepository();
+  const recalculation = fakeRecalculationOrchestrator();
+  const service = roundsService(repo, recalculation);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.updateScores(round.id, { scoreDifferential: 10.0 });
+  await repo.setStatus(round.id, "approved");
+
+  const result = await service.reopenForAmendment(round.id, "Hole 7 score disputed");
+
+  assert.equal(result.round!.status, "amending");
+  assert.equal(recalculation.calls.length, 1);
+  assert.equal(recalculation.calls[0]!.trigger, "amendment_reopened");
+  // The round is no longer 'approved', so listApprovedDifferentialsForPlayer
+  // (what the orchestrator reads) already excludes it -- nothing else to do.
+  assert.deepEqual(await repo.listApprovedDifferentialsForPlayer("player-1"), []);
+});
+
+test("re-approving an amending round uses the 'amendment_approved' trigger, not 'round_approved'", async () => {
+  const repo = fakeRepository();
+  const recalculation = fakeRecalculationOrchestrator();
+  const service = roundsService(repo, recalculation, zeroPccService());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+  await repo.setStatus(round.id, "amending");
+
+  const result = await service.approveRound(round.id);
+
+  assert.equal(result.round!.status, "approved");
+  assert.equal(recalculation.calls[0]!.trigger, "amendment_approved");
 });
 
 test("createRound computes net_double_bogey_adjusted per hole at insertion time -- the ghs#20 wiring, not left at the repository's default of 0", async () => {

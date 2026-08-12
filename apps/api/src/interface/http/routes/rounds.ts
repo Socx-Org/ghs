@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { RoundsService } from "../../../application/rounds.service.ts";
+import { InvalidRoundTransitionError, RoundNotFoundError } from "../../../application/rounds.service.ts";
 import type { PlayersRepository } from "../../../data/players.repository.ts";
 import type { CreateHoleScoreInput, FairwayResult } from "../../../data/rounds.repository.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
@@ -159,20 +160,77 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
     }
   });
 
+  // Every transition below is admin-only (matching legacy's real,
+  // unambiguous behaviour, and ghs#9's existing precedent for status
+  // changes) and real workflow behaviour, not a bare field update: each
+  // one triggers the appropriate recalculation via RoundsService, in the
+  // same transaction as the state change (ghs#23/24).
+  //
+  // A single PATCH .../status endpoint dispatches by target status
+  // rather than three separate URLs -- preserves the existing route
+  // shape ghs#9 already shipped and tested (only the behaviour
+  // underneath was the gap), while 'amending' fits the same "target
+  // status" shape as a fourth legal value. Legacy's own 'pending' target
+  // (a bare, no-op-equivalent reversion with no real semantics anywhere
+  // in this design) is not preserved -- no legitimate use case for it
+  // was identified during planning.
   router.patch("/rounds/:id/status", ...requireAdmin, async (req, res, next) => {
     try {
-      const { status, rejectionReason } = req.body as Record<string, unknown>;
-      if (status !== "approved" && status !== "rejected" && status !== "pending") {
-        res.status(400).json({ error: "status must be pending, approved, or rejected" });
+      const roundId = String(req.params.id);
+      const { status, rejectionReason, reason } = req.body as Record<string, unknown>;
+      // Trimmed before the fallback, not after: a blank rejectionReason
+      // ("") must not shadow a real value in reason (caught in review, PR
+      // #32 -- the untrimmed version picked whichever field was merely a
+      // string, so rejectionReason: "" alongside a valid reason: "..."
+      // was wrongly rejected as missing). The trimmed value is also what
+      // gets persisted, so stray leading/trailing whitespace never reaches
+      // rounds.rejection_reason.
+      const rejectionReasonTrimmed = typeof rejectionReason === "string" ? rejectionReason.trim() : "";
+      const reasonTrimmed = typeof reason === "string" ? reason.trim() : "";
+      const effectiveReason = rejectionReasonTrimmed || reasonTrimmed || undefined;
+
+      if (status === "approved") {
+        res.status(200).json(await service.approveRound(roundId));
         return;
       }
-      await service.setRoundStatus(
-        String(req.params.id),
-        status,
-        typeof rejectionReason === "string" ? rejectionReason : undefined,
-      );
-      res.status(200).json({ message: `Round status set to ${status}.` });
+      if (status === "rejected") {
+        if (!effectiveReason) {
+          res.status(400).json({ error: "rejectionReason is required" });
+          return;
+        }
+        res.status(200).json(await service.rejectRound(roundId, effectiveReason));
+        return;
+      }
+      if (status === "amending") {
+        if (!effectiveReason) {
+          res.status(400).json({ error: "reason is required to reopen a round for amendment" });
+          return;
+        }
+        res.status(200).json(await service.reopenForAmendment(roundId, effectiveReason));
+        return;
+      }
+      res.status(400).json({ error: "status must be 'approved', 'rejected', or 'amending'" });
     } catch (err) {
+      if (err instanceof RoundNotFoundError) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      if (err instanceof InvalidRoundTransitionError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  router.delete("/rounds/:id", ...requireAdmin, async (req, res, next) => {
+    try {
+      res.status(200).json(await service.deleteRound(String(req.params.id)));
+    } catch (err) {
+      if (err instanceof RoundNotFoundError) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });

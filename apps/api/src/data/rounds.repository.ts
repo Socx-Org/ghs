@@ -1,7 +1,10 @@
 import type { Pool, PoolClient } from "pg";
 
 export type FairwayResult = "hit" | "missed_left" | "missed_right";
-export type RoundStatus = "pending" | "approved" | "rejected";
+// 'amending': an approved round reopened for correction (ghs#23) --
+// distinct from 'pending' so "awaiting first approval" and "was
+// approved, now under correction" stay distinguishable.
+export type RoundStatus = "pending" | "approved" | "rejected" | "amending";
 
 export interface HoleScore {
   id: string;
@@ -104,6 +107,19 @@ export interface RoundDifferentialRow {
   is9Hole: boolean;
 }
 
+// The minimal shape a workflow transition (approve/reject/delete/reopen)
+// actually needs to decide what to do and what to recalculate --
+// deliberately narrower than Round (no hole_scores fetch, which a
+// workflow decision never needs).
+export interface RoundForUpdate {
+  id: string;
+  playerId: string;
+  teeConfigurationId: string;
+  playedAt: string;
+  status: RoundStatus;
+  scoreDifferential: number | null;
+}
+
 export interface RoundsRepository {
   create(input: CreateRoundInput): Promise<Round>;
   addHoleScore(roundId: string, input: CreateHoleScoreInput): Promise<HoleScore>;
@@ -120,10 +136,23 @@ export interface RoundsRepository {
   // this inside its own transaction, so the approved-round set can't
   // change between this read and the recalculation it feeds into.
   listApprovedDifferentialsForPlayer(playerId: string, client?: Pool | PoolClient): Promise<RoundDifferentialRow[]>;
+  // SELECT ... FOR UPDATE -- requires a real transaction client (same
+  // reasoning as HandicapHistoryRepository.getCurrentIndexForUpdate,
+  // ghs#24: a lock taken outside an explicit transaction is meaningless).
+  // Every workflow transition (ghs#23) locks the round row with this
+  // before deciding anything, so two concurrent transitions on the same
+  // round (e.g. an admin double-clicking "approve") can't race.
+  getForUpdate(id: string, client: PoolClient): Promise<RoundForUpdate | null>;
   // Bare status transition only -- no recalculation, no notification.
-  // Those are real behaviour, explicitly Phase 2's scope, not this
-  // repository's.
-  setStatus(id: string, status: RoundStatus, rejectionReason?: string): Promise<void>;
+  // Those are real behaviour, orchestrated one layer up (ghs#23/24), not
+  // this repository's. client: threaded through so a workflow
+  // transition's status change and its recalculation can commit or roll
+  // back together (ghs#24's atomicity requirement).
+  setStatus(id: string, status: RoundStatus, rejectionReason?: string, client?: PoolClient): Promise<void>;
+  // Soft delete (rounds.deleted_at), matching the players/clubs
+  // convention. No return value -- callers already have the round's
+  // pre-deletion state from getForUpdate, called just before this.
+  softDelete(id: string, client?: PoolClient): Promise<void>;
 }
 
 interface RoundRow {
@@ -296,9 +325,9 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       }
 
       const roundResult = setClauses.length === 0
-        ? await pool.query<RoundRow>(`SELECT ${ROUND_COLUMNS} FROM rounds WHERE id = $1`, [id])
+        ? await pool.query<RoundRow>(`SELECT ${ROUND_COLUMNS} FROM rounds WHERE id = $1 AND deleted_at IS NULL`, [id])
         : await pool.query<RoundRow>(
-            `UPDATE rounds SET ${setClauses.join(", ")}, updated_at = now() WHERE id = $1 RETURNING ${ROUND_COLUMNS}`,
+            `UPDATE rounds SET ${setClauses.join(", ")}, updated_at = now() WHERE id = $1 AND deleted_at IS NULL RETURNING ${ROUND_COLUMNS}`,
             values,
           );
       if (roundResult.rows.length === 0) throw new Error("round not found");
@@ -312,7 +341,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
 
     async get(id) {
       const roundResult = await pool.query<RoundRow>(
-        `SELECT ${ROUND_COLUMNS} FROM rounds WHERE id = $1`,
+        `SELECT ${ROUND_COLUMNS} FROM rounds WHERE id = $1 AND deleted_at IS NULL`,
         [id],
       );
       const roundRow = roundResult.rows[0];
@@ -328,7 +357,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
 
     async listByPlayer(playerId) {
       const result = await pool.query<RoundRow>(
-        `SELECT ${ROUND_COLUMNS} FROM rounds WHERE player_id = $1 ORDER BY played_at DESC`,
+        `SELECT ${ROUND_COLUMNS} FROM rounds WHERE player_id = $1 AND deleted_at IS NULL ORDER BY played_at DESC`,
         [playerId],
       );
       return result.rows.map(toRoundSummary);
@@ -341,6 +370,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
          WHERE player_id = $1
            AND status = 'approved'
            AND score_differential IS NOT NULL
+           AND deleted_at IS NULL
          ORDER BY played_at DESC`,
         [playerId],
       );
@@ -352,10 +382,44 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       }));
     },
 
-    async setStatus(id, status, rejectionReason) {
-      await pool.query(
-        `UPDATE rounds SET status = $2, rejection_reason = $3, updated_at = now() WHERE id = $1`,
+    async getForUpdate(id, client) {
+      const result = await client.query<{
+        id: string;
+        player_id: string;
+        tee_configuration_id: string;
+        played_at: Date;
+        status: RoundStatus;
+        score_differential: string | null;
+      }>(
+        `SELECT id, player_id, tee_configuration_id, played_at, status, score_differential
+         FROM rounds
+         WHERE id = $1 AND deleted_at IS NULL
+         FOR UPDATE`,
+        [id],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        id: row.id,
+        playerId: row.player_id,
+        teeConfigurationId: row.tee_configuration_id,
+        playedAt: row.played_at.toISOString(),
+        status: row.status,
+        scoreDifferential: row.score_differential === null ? null : Number(row.score_differential),
+      };
+    },
+
+    async setStatus(id, status, rejectionReason, client) {
+      await (client ?? pool).query(
+        `UPDATE rounds SET status = $2, rejection_reason = $3, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
         [id, status, rejectionReason ?? null],
+      );
+    },
+
+    async softDelete(id, client) {
+      await (client ?? pool).query(
+        `UPDATE rounds SET deleted_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+        [id],
       );
     },
   };
