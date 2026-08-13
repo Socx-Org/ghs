@@ -1,8 +1,9 @@
 # Copied from socx-platform's reference/github/workflows/ci.yml
 # (Approved), {{PLACEHOLDER}} values substituted for GHS. Stage order and
-# rationale: ENG-040.2. Do not hand-roll deploy steps here -- the deploy
-# job is a deliberate stub until Phase 3 (Infrastructure Alignment) wires
-# reference/deployment in for real.
+# rationale: ENG-040.2. The deploy job below is copied from reference/
+# deployment/workflows/deploy-job.yml (ghs#35, Phase 3 -- Infrastructure
+# Alignment) -- do not hand-roll deploy mechanics here beyond substituting
+# GHS's own values.
 
 name: CI
 
@@ -59,9 +60,8 @@ jobs:
       - name: Build
         run: npm run build --workspaces --if-present
 
-  # Deliberately a stub -- proves gating is correct (ENG-040.4: separate job,
-  # triggered only on push to main), not real deploy mechanics. Phase 3
-  # (Infrastructure Alignment) replaces this with reference/deployment.
+  # Separate job, triggered only on push to main (ENG-040.4). Real deploy
+  # mechanics via reference/deployment -- ghs#35.
   deploy:
     name: Deploy
     needs: [ci]
@@ -69,7 +69,91 @@ jobs:
     runs-on: ubuntu-latest
     environment: "prod-lab-01"
     steps:
-      - name: Deploy (placeholder)
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed so `git describe --tags` can see tags
+
+      - name: Compute release version
+        id: version
         run: |
-          echo "Real deploy steps land in Phase 3 (Infrastructure Alignment), via reference/deployment."
-          echo "This job intentionally only proves correct gating for now."
+          if git describe --tags --exact-match >/dev/null 2>&1; then
+            VERSION="$(git describe --tags --exact-match)"
+          else
+            VERSION="0.0.0-$(git rev-parse --short HEAD)"
+          fi
+          # VERSION becomes part of a filesystem path (release.tar.gz's
+          # remote destination) and is interpolated, single-quoted, into a
+          # sudo'd remote ssh command. The 0.0.0-<sha> fallback is always
+          # safe (hex only), but a git TAG is not similarly constrained --
+          # git's own ref-name rules disallow spaces/~^:?*[\ but do not
+          # disallow a literal single quote, so a tag crafted as
+          # `v1.0'$(...)'` would break out of that quoting and execute
+          # arbitrary commands as root on the deploy target. Allowlisting
+          # before VERSION is used anywhere closes that off entirely
+          # (caught in review, PR #37).
+          if ! [[ "$VERSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "ERROR: computed version '${VERSION}' contains characters unsafe for a path segment / shell-quoted argument -- refusing to deploy." >&2
+            exit 1
+          fi
+          echo "Deploying version: ${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      # Full install (including devDependencies) is required here -- the
+      # build step needs typescript itself, which is a devDependency.
+      # Pruning happens AFTER build, not before (reference/deployment's own
+      # documented real-verification finding: an --omit=dev install before
+      # the build step silently resolves `tsc` to nothing usable and fails).
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build --workspaces --if-present
+
+      - name: Prune to production dependencies
+        run: npm prune --omit=dev
+
+      # apps/api/package.json, not the workspace root's -- the root
+      # package.json has no "type" field (only the workspace member does),
+      # and Node needs a "type": "module" package.json findable by walking
+      # up from apps/api/dist/index.js. dist/data/migrations/*.sql is
+      # already inside apps/api/dist (apps/api's own build script copies
+      # them there), so a single `apps/api/dist` glob covers both the
+      # compiled app and the migration runner's SQL files.
+      - name: Package release
+        run: |
+          tar -czf release.tar.gz \
+            apps/api/dist \
+            apps/api/package.json \
+            node_modules \
+            package-lock.json
+
+      - name: Deploy to droplet
+        env:
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          KEY_FILE="$(mktemp)"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+
+          # Array, not a single string -- expanding an unquoted string
+          # (e.g. `scp $SSH_OPTS ...`) is subject to word-splitting, a
+          # latent fragility even though none of these fixed values
+          # currently contain a space (caught in review, PR #37).
+          SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=accept-new)
+          REMOTE="${DEPLOY_USER}@${DROPLET_HOST}"
+          REMOTE_TARBALL="/tmp/release-${VERSION}.tar.gz"
+
+          scp "${SSH_OPTS[@]}" release.tar.gz "${REMOTE}:${REMOTE_TARBALL}"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" \
+            "sudo SERVICES=ghs-api.service HEALTH_URL=http://127.0.0.1:3001/healthz /opt/deploy/scripts/deploy-release.sh ghs '${VERSION}' '${REMOTE_TARBALL}'"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "rm -f '${REMOTE_TARBALL}'"
