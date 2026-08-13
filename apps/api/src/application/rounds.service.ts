@@ -13,7 +13,8 @@ import type {
 import type { CoursesRepository } from "../data/courses.repository.ts";
 import type { ScoringService } from "./scoring.service.ts";
 import type { RecalculationOrchestrator, RecalculationOutcome } from "./recalculation.service.ts";
-import type { NotificationsRepository } from "../data/notifications.repository.ts";
+import type { NotificationEventType, NotificationsRepository } from "../data/notifications.repository.ts";
+import type { PlayersRepository } from "../data/players.repository.ts";
 import type { Logger } from "../logger.ts";
 
 export class RoundNotFoundError extends Error {}
@@ -106,8 +107,26 @@ export function createRoundsService(
   scoring: ScoringService,
   recalculation: RecalculationOrchestrator,
   notifications: NotificationsRepository,
+  players: PlayersRepository,
   logger: Logger,
 ): RoundsService {
+  // notification_history/notification_outbox are user_id-scoped, not
+  // player_id-scoped (ghs#39) -- every real recipient is fundamentally a
+  // user, and not every player has one (an admin can enter a round for a
+  // player who never registered). Skips, doesn't error, when the player
+  // has no linked user account: there is no email address anywhere for
+  // such a player (Player has no email field of its own, only
+  // users.email), so there is genuinely nothing to notify.
+  async function notifyPlayer(
+    playerId: string,
+    eventType: NotificationEventType,
+    payload: Record<string, unknown>,
+    client: PoolClient,
+  ): Promise<void> {
+    const player = await players.get(playerId);
+    if (!player?.userId) return;
+    await notifications.record({ userId: player.userId, eventType, payload }, client);
+  }
   // recomputeRoundAggregates runs as its own, separate step before the
   // approval transaction opens -- not threaded into the same client. This
   // mirrors the precedent PccService.calculateOrOverride (ghs#19) already
@@ -193,8 +212,10 @@ export function createRoundsService(
       try {
         await client.query("BEGIN");
         const round = await repository.create({ ...input, holeScores }, client);
-        await notifications.record(
-          { playerId: round.playerId, eventType: "round_submitted", payload: { roundId: round.id, teeConfigurationId: round.teeConfigurationId, playedAt: round.playedAt } },
+        await notifyPlayer(
+          round.playerId,
+          "round_submitted",
+          { roundId: round.id, teeConfigurationId: round.teeConfigurationId, playedAt: round.playedAt },
           client,
         );
         await client.query("COMMIT");
@@ -272,7 +293,7 @@ export function createRoundsService(
           // ghs#25's own domain trigger table. The recalculation trigger
           // tag (amendment_approved vs round_approved) still distinguishes
           // them internally, just not in what the player is told.
-          await notifications.record({ playerId: existing.playerId, eventType: "round_approved", payload: { roundId: id, trigger } }, client);
+          await notifyPlayer(existing.playerId, "round_approved", { roundId: id, trigger }, client);
           const result = await recalculation.recalculatePlayerHandicap(existing.playerId, trigger, client);
           logger.info("round approved", { roundId: id, playerId: existing.playerId, trigger, recalculationStatus: result.status });
           return result;
@@ -300,7 +321,7 @@ export function createRoundsService(
           // not conditioned on the round having ever had a differential:
           // rejecting IS the business event regardless of whether there
           // was anything to recalculate as a result.
-          await notifications.record({ playerId: existing.playerId, eventType: "round_rejected", payload: { roundId: id, reason: trimmedReason } }, client);
+          await notifyPlayer(existing.playerId, "round_rejected", { roundId: id, reason: trimmedReason }, client);
           // Legacy bug fix: only logged as "requested", never actually
           // recalculated, when rejecting a round that had already
           // contributed a differential (ghs#23's own confirmed finding).

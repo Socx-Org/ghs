@@ -6,6 +6,7 @@ import type { PlayersRepository } from "../data/players.repository.ts";
 import type { ActivationTokenRepository } from "../data/activation-tokens.repository.ts";
 import type { PasswordResetTokenRepository } from "../data/password-reset-tokens.repository.ts";
 import type { MfaRepository } from "../data/mfa.repository.ts";
+import type { NotificationsRepository } from "../data/notifications.repository.ts";
 import { hashPassword, verifyPassword } from "../lib/password.ts";
 import { generateToken, hashToken } from "../lib/tokens.ts";
 
@@ -43,6 +44,7 @@ export interface AuthServiceDeps {
   passwordResetTokens: PasswordResetTokenRepository;
   mfa: MfaRepository;
   mfaVerifier: MfaCodeVerifier;
+  notifications: NotificationsRepository;
 }
 
 export interface AuthService {
@@ -56,20 +58,8 @@ export interface AuthService {
   resetPassword(rawToken: string, newPassword: string): Promise<void>;
 }
 
-// Interim: activation/reset "delivery" is a structured log line, not a
-// real email send. ADR-210's outbox pattern is the real mechanism, landed
-// in Phase 4 -- explicitly flagged placeholder, not a second, GHS-specific
-// email path (same approach already used in the Phase 2/4 epics).
-function logDeliveryPlaceholder(logger: Logger, kind: string, email: string, rawToken: string): void {
-  logger.info("TODO(Phase 4, ADR-210): real email delivery not yet implemented", {
-    kind,
-    email,
-    token: rawToken,
-  });
-}
-
 export function createAuthService(deps: AuthServiceDeps): AuthService {
-  const { pool, logger, authProvider, users, players, activationTokens, passwordResetTokens, mfa, mfaVerifier } = deps;
+  const { pool, logger, authProvider, users, players, activationTokens, passwordResetTokens, mfa, mfaVerifier, notifications } = deps;
 
   return {
     async register(input) {
@@ -98,9 +88,22 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
         const expiresAt = new Date(Date.now() + ACTIVATION_TOKEN_TTL_HOURS * 60 * 60 * 1000);
         await activationTokens.create(userId, hashToken(rawToken), expiresAt, client);
 
-        await client.query("COMMIT");
+        // ghs#39: moved inside the transaction (was previously logged
+        // after COMMIT, a real gap -- a crash between commit and the log
+        // call would have silently dropped the only record of the
+        // activation token ever having been issued). The raw token is
+        // deliberately part of the durable payload, not a log line: the
+        // worker (ghs#42) needs it to build the real activation email's
+        // content, and this is the outbox's own necessary message data,
+        // not observability output -- SEC-010's "never log a token" rule
+        // targets stdout/journald, not this table.
+        await notifications.record(
+          { userId, eventType: "account_activation", payload: { email: input.email, token: rawToken, expiresAt: expiresAt.toISOString() } },
+          client,
+        );
 
-        logDeliveryPlaceholder(logger, "account_activation", input.email, rawToken);
+        await client.query("COMMIT");
+        logger.info("user registered", { userId });
         return { userId };
       } catch (err) {
         await client.query("ROLLBACK");
@@ -163,8 +166,27 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
 
       const rawToken = generateToken();
       const expiresAt = new Date(Date.now() + ACTIVATION_TOKEN_TTL_HOURS * 60 * 60 * 1000);
-      await activationTokens.create(user.id, hashToken(rawToken), expiresAt);
-      logDeliveryPlaceholder(logger, "account_activation_resend", email, rawToken);
+
+      // ghs#39: this method previously had no transaction at all -- the
+      // token write and the (placeholder) "delivery" were two
+      // independent operations. Now a real transaction spans both real
+      // writes (ADR-210 point 1).
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await activationTokens.create(user.id, hashToken(rawToken), expiresAt, client);
+        await notifications.record(
+          { userId: user.id, eventType: "account_activation_resend", payload: { email, token: rawToken, expiresAt: expiresAt.toISOString() } },
+          client,
+        );
+        await client.query("COMMIT");
+        logger.info("activation resent", { userId: user.id });
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
     },
 
     async requestPasswordReset(email) {
@@ -173,8 +195,24 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
 
       const rawToken = generateToken();
       const expiresAt = new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MINUTES * 60 * 1000);
-      await passwordResetTokens.create(user.id, hashToken(rawToken), expiresAt);
-      logDeliveryPlaceholder(logger, "password_reset", email, rawToken);
+
+      // Same fix as resendActivation above -- no transaction existed here before.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await passwordResetTokens.create(user.id, hashToken(rawToken), expiresAt, client);
+        await notifications.record(
+          { userId: user.id, eventType: "password_reset", payload: { email, token: rawToken, expiresAt: expiresAt.toISOString() } },
+          client,
+        );
+        await client.query("COMMIT");
+        logger.info("password reset requested", { userId: user.id });
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
     },
 
     async resetPassword(rawToken, newPassword) {

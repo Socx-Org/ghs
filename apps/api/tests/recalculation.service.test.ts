@@ -13,6 +13,7 @@ import type { HandicapHistoryService } from "../src/application/handicap-history
 import type { DailyPcc } from "../src/data/pcc.repository.ts";
 import type { PccService } from "../src/application/pcc.service.ts";
 import type { NotificationHistoryRecord, NotificationsRepository, RecordNotificationInput } from "../src/data/notifications.repository.ts";
+import type { Player, PlayersRepository } from "../src/data/players.repository.ts";
 
 // Pure unit tests (ENG-030.3) -- no HTTP, no real database.
 
@@ -95,11 +96,25 @@ function fakeNotificationsRepository(): NotificationsRepository & { recordedCall
     recordedCalls,
     async record(input) {
       recordedCalls.push(input);
-      const record: NotificationHistoryRecord = { id: String(recordedCalls.length), playerId: input.playerId, eventType: input.eventType, payload: input.payload, createdAt: new Date().toISOString() };
+      const record: NotificationHistoryRecord = { id: String(recordedCalls.length), userId: input.userId, eventType: input.eventType, payload: input.payload, createdAt: new Date().toISOString() };
       return record;
     },
-    async listForPlayer() {
+    async listForUser() {
       return [];
+    },
+  };
+}
+
+// Maps playerId -> a synthetic linked userId ("<playerId>-user") by
+// default (ghs#39's schema change) -- every test below still identifies
+// players by playerId, so notifications resolve deterministically.
+function fakePlayersRepository(): PlayersRepository {
+  return {
+    async create() { throw new Error("not used by these tests"); },
+    async findByUserId() { throw new Error("not used by these tests"); },
+    async get(id) {
+      const player: Player = { id, userId: `${id}-user`, clubId: null, firstName: "Test", lastName: "Player", country: "ES", createdAt: new Date().toISOString() };
+      return player;
     },
   };
 }
@@ -127,6 +142,7 @@ test("recalculatePlayerHandicap: player_not_found when the player doesn't exist 
     fakeHandicapHistoryService({}, []),
     unusedPccService(),
     fakeNotificationsRepository(),
+    fakePlayersRepository(),
     silentLogger,
   );
 
@@ -141,6 +157,7 @@ test("recalculatePlayerHandicap: insufficient_holes when fewer than 3 effective 
     fakeHandicapHistoryService({ "player-1": { handicapIndex: null, lowHandicapIndex: null } }, []),
     unusedPccService(),
     fakeNotificationsRepository(),
+    fakePlayersRepository(),
     silentLogger,
   );
 
@@ -156,6 +173,7 @@ test("recalculatePlayerHandicap: eligible writes through handicap-history's shar
     fakeHandicapHistoryService({ "player-1": { handicapIndex: null, lowHandicapIndex: null } }, recordCalls),
     unusedPccService(),
     fakeNotificationsRepository(),
+    fakePlayersRepository(),
     silentLogger,
   );
 
@@ -176,6 +194,7 @@ test("recalculatePlayerHandicap: an eligible, changed result fires a handicap_ch
     fakeHandicapHistoryService({ "player-1": { handicapIndex: null, lowHandicapIndex: null } }, []),
     unusedPccService(),
     notifications,
+    fakePlayersRepository(),
     silentLogger,
   );
 
@@ -183,9 +202,35 @@ test("recalculatePlayerHandicap: an eligible, changed result fires a handicap_ch
 
   assert.equal(notifications.recordedCalls.length, 1);
   const call = notifications.recordedCalls[0]!;
-  assert.equal(call.playerId, "player-1");
+  assert.equal(call.userId, "player-1-user");
   assert.equal(call.eventType, "handicap_changed");
   assert.equal(call.payload.trigger, "pcc_correction", "tagged with trigger source, per ghs#25's own domain trigger table");
+});
+
+test("recalculatePlayerHandicap: skips the notification (does not error) for a player with no linked user account (ghs#39)", async () => {
+  const notifications = fakeNotificationsRepository();
+  const noLoginPlayers: PlayersRepository = {
+    async create() { throw new Error("not used by this test"); },
+    async findByUserId() { throw new Error("not used by this test"); },
+    async get(id) {
+      const player: Player = { id, userId: null, clubId: null, firstName: "No", lastName: "Login", country: "ES", createdAt: new Date().toISOString() };
+      return player;
+    },
+  };
+  const orchestrator = createRecalculationOrchestrator(
+    fakePool(),
+    fakeRoundsRepository({ "player-1": makeDifferentials(3, 10) }),
+    fakeHandicapHistoryService({ "player-1": { handicapIndex: null, lowHandicapIndex: null } }, []),
+    unusedPccService(),
+    notifications,
+    noLoginPlayers,
+    silentLogger,
+  );
+
+  const result = await orchestrator.recalculatePlayerHandicap("player-1", "round_approved");
+
+  assert.equal(result.status, "eligible", "the recalculation itself still genuinely happens");
+  assert.equal(notifications.recordedCalls.length, 0, "no email address exists anywhere for a player with no linked user account");
 });
 
 test("recalculatePlayerHandicap: no notification when the recalculation produces no actual index change (ghs#25, matches ghs#21's change-only history policy)", async () => {
@@ -204,6 +249,7 @@ test("recalculatePlayerHandicap: no notification when the recalculation produces
     },
     unusedPccService(),
     notifications,
+    fakePlayersRepository(),
     silentLogger,
   );
 
@@ -221,6 +267,7 @@ test("recalculatePlayerHandicap: no notification for the amendment_reopened trig
     fakeHandicapHistoryService({ "player-1": { handicapIndex: null, lowHandicapIndex: null } }, []),
     unusedPccService(),
     notifications,
+    fakePlayersRepository(),
     silentLogger,
   );
 
@@ -252,6 +299,7 @@ test("recalculatePlayerHandicap: an unchanged recalculation surfaces a null hist
     },
     unusedPccService(),
     fakeNotificationsRepository(),
+    fakePlayersRepository(),
     silentLogger,
   );
 
@@ -271,6 +319,7 @@ test("recalculatePlayerHandicap: a thrown error is caught and reported as a 'fai
     ),
     unusedPccService(),
     fakeNotificationsRepository(),
+    fakePlayersRepository(),
     silentLogger,
   );
 
@@ -308,6 +357,7 @@ test("recalculatePccForTeeConfigDay: one player's thrown failure does not preven
     fakeHandicapHistoryService(currentIndexByPlayer, recordCalls, { throwForPlayerId: "player-2" }),
     pccService,
     fakeNotificationsRepository(),
+    fakePlayersRepository(),
     silentLogger,
   );
 

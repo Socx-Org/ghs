@@ -63,8 +63,9 @@ function buildServices() {
   const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const notificationsRepository = createNotificationsRepository(pool);
-  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, logger);
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, logger);
+  const playersRepo = createPlayersRepository(pool);
+  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, playersRepo, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, playersRepo, logger);
   return { roundsRepo, coursesRepo, pccService, scoringService, roundsService };
 }
 

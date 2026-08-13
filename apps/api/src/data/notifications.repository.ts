@@ -1,26 +1,30 @@
 import type { Pool, PoolClient } from "pg";
 
-// ghs#25's fixed domain trigger table (rounds.service.ts, recalculation.
-// service.ts, handicap-overrides.service.ts each decide *whether* one of
-// these fires; this repository only knows how to write one once a
-// caller has already decided to).
+// The full set of real notification-worthy events across the rebuilt
+// system (ghs#25's original five, plus the four auth-flow events ghs#39
+// migrated off a plaintext-token-logging placeholder onto this same real
+// write path).
 export type NotificationEventType =
   | "round_submitted"
   | "round_approved"
   | "round_rejected"
   | "handicap_changed"
-  | "manual_override";
+  | "manual_override"
+  | "account_activation"
+  | "account_activation_resend"
+  | "password_reset"
+  | "account_activation_admin_invite";
 
 export interface NotificationHistoryRecord {
   id: string;
-  playerId: string;
+  userId: string;
   eventType: NotificationEventType;
   payload: Record<string, unknown>;
   createdAt: string;
 }
 
 export interface RecordNotificationInput {
-  playerId: string;
+  userId: string;
   eventType: NotificationEventType;
   payload: Record<string, unknown>;
 }
@@ -31,18 +35,27 @@ export interface NotificationsRepository {
   // requires the outbox record land in the SAME transaction as the
   // business event that triggered it. client is a required PoolClient,
   // not optional like most repositories in this codebase: every real
-  // caller in ghs#25's scope already has an open transaction by the time
-  // this is called (that's the entire point of the trigger), so there is
-  // no legitimate self-managed mode to fall back to here -- making the
-  // parameter required enforces ADR-210 point 1 structurally rather than
-  // only by convention/comment.
+  // caller in this repository's scope already has an open transaction by
+  // the time this is called (that's the entire point of the trigger), so
+  // there is no legitimate self-managed mode to fall back to here --
+  // making the parameter required enforces ADR-210 point 1 structurally
+  // rather than only by convention/comment.
+  //
+  // userId, not playerId (ghs#39): every real notification recipient is
+  // fundamentally a user -- a player is a user who also has a player
+  // profile, not every user has one (admin/super_admin accounts never
+  // do), and not every player has a linked user account either. Callers
+  // that start from a playerId resolve the linked userId themselves and
+  // skip calling this entirely when there isn't one (there is nothing to
+  // notify -- no email address exists anywhere for a player with no
+  // linked user).
   record(input: RecordNotificationInput, client: PoolClient): Promise<NotificationHistoryRecord>;
-  listForPlayer(playerId: string): Promise<NotificationHistoryRecord[]>;
+  listForUser(userId: string): Promise<NotificationHistoryRecord[]>;
 }
 
 interface NotificationHistoryRow {
   id: string;
-  player_id: string;
+  user_id: string;
   event_type: NotificationEventType;
   payload: Record<string, unknown>;
   created_at: Date;
@@ -51,23 +64,23 @@ interface NotificationHistoryRow {
 function toHistoryRecord(row: NotificationHistoryRow): NotificationHistoryRecord {
   return {
     id: row.id,
-    playerId: row.player_id,
+    userId: row.user_id,
     eventType: row.event_type,
     payload: row.payload,
     createdAt: row.created_at.toISOString(),
   };
 }
 
-const HISTORY_COLUMNS = "id, player_id, event_type, payload, created_at";
+const HISTORY_COLUMNS = "id, user_id, event_type, payload, created_at";
 
 export function createNotificationsRepository(pool: Pool): NotificationsRepository {
   return {
     async record(input, client) {
       const historyResult = await client.query<NotificationHistoryRow>(
-        `INSERT INTO notification_history (player_id, event_type, payload)
+        `INSERT INTO notification_history (user_id, event_type, payload)
          VALUES ($1, $2, $3::jsonb)
          RETURNING ${HISTORY_COLUMNS}`,
-        [input.playerId, input.eventType, JSON.stringify(input.payload)],
+        [input.userId, input.eventType, JSON.stringify(input.payload)],
       );
       const history = toHistoryRecord(historyResult.rows[0]!);
 
@@ -80,10 +93,10 @@ export function createNotificationsRepository(pool: Pool): NotificationsReposito
       return history;
     },
 
-    async listForPlayer(playerId) {
+    async listForUser(userId) {
       const result = await pool.query<NotificationHistoryRow>(
-        `SELECT ${HISTORY_COLUMNS} FROM notification_history WHERE player_id = $1 ORDER BY created_at DESC`,
-        [playerId],
+        `SELECT ${HISTORY_COLUMNS} FROM notification_history WHERE user_id = $1 ORDER BY created_at DESC`,
+        [userId],
       );
       return result.rows.map(toHistoryRecord);
     },

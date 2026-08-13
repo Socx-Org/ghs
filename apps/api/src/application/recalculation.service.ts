@@ -5,6 +5,7 @@ import type { DailyPcc } from "../data/pcc.repository.ts";
 import type { PccService } from "./pcc.service.ts";
 import type { HandicapHistoryService } from "./handicap-history.service.ts";
 import type { NotificationsRepository } from "../data/notifications.repository.ts";
+import type { PlayersRepository } from "../data/players.repository.ts";
 import { applyWhsCaps, calculateHandicapIndex } from "./whs-calculation.ts";
 
 // The single recalculation-orchestration boundary (ghs#24). Legacy calls
@@ -91,6 +92,7 @@ export function createRecalculationOrchestrator(
   handicapHistory: HandicapHistoryService,
   pcc: PccService,
   notifications: NotificationsRepository,
+  players: PlayersRepository,
   logger: Logger,
 ): RecalculationOrchestrator {
   // Runs entirely on the given client -- every read and the eventual
@@ -156,14 +158,20 @@ export function createRecalculationOrchestrator(
     // anything about a reopened round, including a transient handicap
     // change caused by retracting it, until the correction is finalised.
     if (result.history !== null && trigger !== "amendment_reopened") {
-      await notifications.record(
-        {
-          playerId,
-          eventType: "handicap_changed",
-          payload: { trigger, previousIndex: current.handicapIndex, newIndex: result.handicapIndex, historyRecordId: result.history.id },
-        },
-        client,
-      );
+      // user_id, not player_id (ghs#39) -- skip, don't error, when this
+      // player has no linked user account (see notifications.
+      // repository.ts's own comment for the full reasoning).
+      const player = await players.get(playerId);
+      if (player?.userId) {
+        await notifications.record(
+          {
+            userId: player.userId,
+            eventType: "handicap_changed",
+            payload: { trigger, previousIndex: current.handicapIndex, newIndex: result.handicapIndex, historyRecordId: result.history.id },
+          },
+          client,
+        );
+      }
     }
 
     return {

@@ -94,7 +94,7 @@ test("a manual override writes to both handicap_overrides (ghs#10's admin-action
   const historyRepo = createHandicapHistoryRepository(pool);
   const historyService = createHandicapHistoryService(historyRepo);
   const notificationsRepository = createNotificationsRepository(pool);
-  const overridesService = createHandicapOverridesService(pool, overridesRepo, historyService, notificationsRepository, logger);
+  const overridesService = createHandicapOverridesService(pool, overridesRepo, historyService, notificationsRepository, players, logger);
 
   await overridesService.createOverride({
     playerId: player.id,
@@ -132,7 +132,7 @@ test("a manual override without a reason is rejected before reaching either tabl
   const overridesRepo = createHandicapOverridesRepository(pool);
   const historyService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const notificationsRepository = createNotificationsRepository(pool);
-  const overridesService = createHandicapOverridesService(pool, overridesRepo, historyService, notificationsRepository, logger);
+  const overridesService = createHandicapOverridesService(pool, overridesRepo, historyService, notificationsRepository, players, logger);
 
   await assert.rejects(() =>
     overridesService.createOverride({ playerId: player.id, adminUserId: admin.id, newIndex: 10.0, reason: "" }),

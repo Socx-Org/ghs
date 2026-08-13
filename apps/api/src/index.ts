@@ -57,9 +57,9 @@ const clubsService = createClubsService(clubsRepository, logger);
 const pccService = createPccService(pccRepository);
 const scoringService = createScoringService(roundsRepository, coursesRepository, pccService);
 const handicapHistoryService = createHandicapHistoryService(handicapHistoryRepository);
-const handicapOverridesService = createHandicapOverridesService(pool, handicapOverridesRepository, handicapHistoryService, notificationsRepository, logger);
-const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepository, handicapHistoryService, pccService, notificationsRepository, logger);
-const roundsService = createRoundsService(pool, roundsRepository, coursesRepository, scoringService, recalculationOrchestrator, notificationsRepository, logger);
+const handicapOverridesService = createHandicapOverridesService(pool, handicapOverridesRepository, handicapHistoryService, notificationsRepository, playersRepository, logger);
+const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepository, handicapHistoryService, pccService, notificationsRepository, playersRepository, logger);
+const roundsService = createRoundsService(pool, roundsRepository, coursesRepository, scoringService, recalculationOrchestrator, notificationsRepository, playersRepository, logger);
 const coursesService = createCoursesService(coursesRepository, logger);
 const authProvider = createLocalAuthProvider(config.auth, refreshTokensRepository);
 const mfaService = createMfaService(mfaRepository, config.auth.mfaEncryptionKey);
@@ -74,8 +74,9 @@ const authService = createAuthService({
   passwordResetTokens: passwordResetTokenRepository,
   mfa: mfaRepository,
   mfaVerifier: mfaService,
+  notifications: notificationsRepository,
 });
-const adminUsersService = createAdminUsersService(pool, logger, usersRepository, playersRepository, activationTokenRepository);
+const adminUsersService = createAdminUsersService(pool, logger, usersRepository, playersRepository, activationTokenRepository, notificationsRepository);
 
 const app = createApp({
   logger,

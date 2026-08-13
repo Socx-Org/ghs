@@ -69,8 +69,9 @@ function buildOrchestrator() {
   const handicapHistoryService = createHandicapHistoryService(handicapHistoryRepo);
   const pccService = createPccService(createPccRepository(pool));
   const notificationsRepository = createNotificationsRepository(pool);
-  const orchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, logger);
-  return { roundsRepo, handicapHistoryRepo, handicapHistoryService, pccService, notificationsRepository, orchestrator };
+  const players = createPlayersRepository(pool);
+  const orchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
+  return { roundsRepo, handicapHistoryRepo, handicapHistoryService, pccService, notificationsRepository, players, orchestrator };
 }
 
 test("recalculatePlayerHandicap computes and persists a real handicap index from a player's real approved rounds, round-tripping through a fresh read", async () => {
