@@ -6,7 +6,7 @@ Part of the SOCX Application Modernisation programme, redeveloped under the SOCX
 
 ## Status
 
-Phase 0 (Foundation) — scaffold only, matching `socx-platform`'s `reference/application` pattern. No real domain logic yet; see the repository's Issues for the full redevelopment roadmap.
+Live at [ghs.socx.org.uk](https://ghs.socx.org.uk). Phases 0–2 complete: real domain logic (WHS handicap calculation, scoring, PCC, round approval/rejection/amendment workflow, notification outbox write path) and Phase 3 (Infrastructure Alignment) deploying it to production as a real, versioned `systemd` service. See the repository's Issues for the full redevelopment roadmap and what's still ahead (Phase 4 onward).
 
 ## Development
 
