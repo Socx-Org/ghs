@@ -8,6 +8,7 @@ import type {
 import type { HandicapHistoryService } from "./handicap-history.service.ts";
 import { InvalidHandicapChangeError } from "./handicap-history.service.ts";
 import type { NotificationsRepository } from "../data/notifications.repository.ts";
+import type { PlayersRepository } from "../data/players.repository.ts";
 
 export interface HandicapOverridesService {
   createOverride(input: CreateHandicapOverrideInput): Promise<HandicapOverride>;
@@ -25,6 +26,7 @@ export function createHandicapOverridesService(
   repository: HandicapOverridesRepository,
   handicapHistory: HandicapHistoryService,
   notifications: NotificationsRepository,
+  players: PlayersRepository,
   logger: Logger,
 ): HandicapOverridesService {
   return {
@@ -83,14 +85,19 @@ export function createHandicapOverridesService(
         // writes regardless of value (ghs#10), and the trigger table
         // doesn't qualify this row with "if changed" the way it does for
         // the calculated path.
-        await notifications.record(
-          {
-            playerId: override.playerId,
-            eventType: "manual_override",
-            payload: { overrideId: override.id, previousIndex: override.previousIndex, newIndex: override.newIndex, reason: override.reason, adminUserId: override.adminUserId },
-          },
-          client,
-        );
+        // user_id, not player_id (ghs#39) -- skip, don't error, when this
+        // player has no linked user account.
+        const player = await players.get(override.playerId);
+        if (player?.userId) {
+          await notifications.record(
+            {
+              userId: player.userId,
+              eventType: "manual_override",
+              payload: { overrideId: override.id, previousIndex: override.previousIndex, newIndex: override.newIndex, reason: override.reason, adminUserId: override.adminUserId },
+            },
+            client,
+          );
+        }
 
         await client.query("COMMIT");
         return override;

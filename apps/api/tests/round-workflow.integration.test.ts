@@ -91,9 +91,10 @@ function buildServices() {
   const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const notificationsRepository = createNotificationsRepository(pool);
-  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, logger);
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, logger);
-  return { roundsRepo, coursesRepo, handicapHistoryService, notificationsRepository, recalculationOrchestrator, roundsService };
+  const players = createPlayersRepository(pool);
+  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, logger);
+  return { roundsRepo, coursesRepo, handicapHistoryService, notificationsRepository, players, recalculationOrchestrator, roundsService };
 }
 
 test("rejectRound recalculates a previously-approved-then-reopened round -- the confirmed legacy bug ghs#23 fixes: legacy only logged 'recalculation requested' here, it never actually recalculated", async () => {
@@ -244,7 +245,7 @@ test("approveRound rolls back the status change if recalculation fails -- state 
       throw new Error("not used by this test");
     },
   };
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, failingRecalculation, notificationsRepository, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, failingRecalculation, notificationsRepository, players, logger);
 
   await assert.rejects(() => roundsService.approveRound(round.id), /simulated recalculation failure/);
 
@@ -279,14 +280,14 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
   });
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
-  const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens);
+  const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
   const pccService = createPccService(createPccRepository(pool));
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
-  const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, logger);
+  const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,

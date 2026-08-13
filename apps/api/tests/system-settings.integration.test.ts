@@ -93,6 +93,7 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on -
   const clubsRepo = createClubsRepository(pool);
   const coursesRepo = createCoursesRepository(pool);
   const settingsRepo = createSystemSettingsRepository(pool);
+  const notificationsRepository = createNotificationsRepository(pool);
 
   const authConfig: AuthConfig = {
     jwtSecret: "system-settings-test-secret",
@@ -107,19 +108,18 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on -
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
   });
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
-  const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens);
+  const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
   const roundsRepo = createRoundsRepository(pool);
   const pccService = createPccService(createPccRepository(pool));
   const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
-  const notificationsRepository = createNotificationsRepository(pool);
-  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, logger);
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, logger);
-  const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, logger);
+  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, logger);
+  const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,

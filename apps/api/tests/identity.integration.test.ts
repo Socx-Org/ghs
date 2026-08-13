@@ -14,6 +14,7 @@ import { createLocalAuthProvider } from "../src/application/auth-provider.ts";
 import { createAuthService } from "../src/application/auth.service.ts";
 import { createMfaService } from "../src/application/mfa.service.ts";
 import { createAdminUsersService } from "../src/application/admin-users.service.ts";
+import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
 import { generate as generateTotp } from "otplib";
 import type { AuthConfig } from "../src/config.ts";
 
@@ -35,6 +36,7 @@ function buildServices() {
   const passwordResetTokens = createPasswordResetTokenRepository(pool);
   const refreshTokens = createRefreshTokensRepository(pool);
   const mfaRepo = createMfaRepository(pool);
+  const notificationsRepository = createNotificationsRepository(pool);
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
@@ -48,16 +50,29 @@ function buildServices() {
     passwordResetTokens,
     mfa: mfaRepo,
     mfaVerifier: mfaService,
+    notifications: notificationsRepository,
   });
-  const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens);
+  const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
 
   return { users, players, activationTokens, passwordResetTokens, refreshTokens, authProvider, authService, mfaService, adminUsersService };
 }
 
 // The raw activation/reset token can't be recovered from its stored hash
-// (one-way) -- Phase 4's outbox isn't built yet, so the interim delivery
-// placeholder logs the raw token (ghs#8). Tests capture it via a
-// logger stand-in that records calls instead of writing to stdout.
+// (one-way) -- ghs#39 moved delivery off a log-line placeholder onto the
+// real notification_history/notification_outbox write path, so tests now
+// read the token back from there directly (the same durable data the
+// real worker, ghs#42, will eventually consume) rather than capturing a
+// log call.
+async function outboxPayloads(userId: string, eventType: string): Promise<Array<Record<string, unknown>>> {
+  const result = await pool.query<{ payload: Record<string, unknown> }>(
+    `SELECT o.payload FROM notification_outbox o
+     JOIN notification_history h ON h.id = o.notification_history_id
+     WHERE h.user_id = $1 AND h.event_type = $2
+     ORDER BY o.created_at`,
+    [userId, eventType],
+  );
+  return result.rows.map((r) => r.payload);
+}
 
 before(async () => {
   await applyMigrations(pool);
@@ -78,23 +93,10 @@ after(async () => {
 });
 
 test("full lifecycle: register -> activate -> login -> refresh", async () => {
-  const captured: Record<string, unknown>[] = [];
-  const capturingLogger = { ...logger, info: (msg: string, fields?: Record<string, unknown>) => captured.push({ msg, ...fields }) };
+  const s = buildServices();
+  const { users, players, authProvider, authService } = s;
 
-  const users = createUsersRepository(pool);
-  const players = createPlayersRepository(pool);
-  const activationTokens = createActivationTokenRepository(pool);
-  const passwordResetTokens = createPasswordResetTokenRepository(pool);
-  const refreshTokens = createRefreshTokensRepository(pool);
-  const mfaRepo = createMfaRepository(pool);
-  const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
-  const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
-  const authService = createAuthService({
-    pool, logger: capturingLogger as typeof logger, authProvider, users, players,
-    activationTokens, passwordResetTokens, mfa: mfaRepo, mfaVerifier: mfaService,
-  });
-
-  await authService.register({ email: "jane@example.com", password: "correct-horse-battery", firstName: "Jane", lastName: "Doe" });
+  const { userId } = await authService.register({ email: "jane@example.com", password: "correct-horse-battery", firstName: "Jane", lastName: "Doe" });
 
   // Real symmetry check (ghs#8's fix): a player profile exists even
   // though this is self-registration, same as it always did -- but the
@@ -109,9 +111,9 @@ test("full lifecycle: register -> activate -> login -> refresh", async () => {
   // Login before activation must fail.
   await assert.rejects(() => authService.login("jane@example.com", "correct-horse-battery"));
 
-  const activationLog = captured.find((c) => c.kind === "account_activation");
-  assert.ok(activationLog, "expected an activation token to be logged");
-  await authService.activateAccount(activationLog!.token as string);
+  const [activationPayload] = await outboxPayloads(userId, "account_activation");
+  assert.ok(activationPayload, "expected a real account_activation outbox row");
+  await authService.activateAccount(activationPayload!.token as string);
 
   const activeUser = await users.findByEmail("jane@example.com");
   assert.equal(activeUser!.status, "active");
@@ -138,14 +140,8 @@ test("full lifecycle: register -> activate -> login -> refresh", async () => {
 });
 
 test("password reset invalidates every other outstanding token for the user", async () => {
-  const captured: Record<string, unknown>[] = [];
-  const capturingLogger = { ...logger, info: (msg: string, fields?: Record<string, unknown>) => captured.push({ msg, ...fields }) };
-  const s = { ...buildServices() };
-  const users = s.users;
-  const authService = createAuthService({
-    pool, logger: capturingLogger as typeof logger, authProvider: s.authProvider, users, players: s.players,
-    activationTokens: s.activationTokens, passwordResetTokens: s.passwordResetTokens, mfa: createMfaRepository(pool), mfaVerifier: s.mfaService,
-  });
+  const s = buildServices();
+  const { authService } = s;
 
   const admin = await s.adminUsersService.adminCreateUser({
     email: "reset-me@example.com", password: "initial-password", role: "player",
@@ -154,10 +150,10 @@ test("password reset invalidates every other outstanding token for the user", as
 
   await authService.requestPasswordReset("reset-me@example.com");
   await authService.requestPasswordReset("reset-me@example.com"); // a second, newer request
-  const resetLogs = captured.filter((c) => c.kind === "password_reset");
-  assert.equal(resetLogs.length, 2);
+  const resetPayloads = await outboxPayloads(admin.userId, "password_reset");
+  assert.equal(resetPayloads.length, 2);
 
-  const [firstToken, secondToken] = resetLogs.map((l) => l.token as string);
+  const [firstToken, secondToken] = resetPayloads.map((p) => p.token as string);
 
   // Use the second (newer) token successfully.
   await authService.resetPassword(secondToken!, "brand-new-password");
@@ -194,12 +190,8 @@ test("admin-created account: autoActivate true skips the activation token entire
 });
 
 test("admin-created account: autoActivate false requires activation, and gets a linked player profile (symmetry fix)", async () => {
-  const captured: Record<string, unknown>[] = [];
-  const capturingLogger = { ...logger, info: (msg: string, fields?: Record<string, unknown>) => captured.push({ msg, ...fields }) };
-  const players = createPlayersRepository(pool);
-  const users = createUsersRepository(pool);
-  const activationTokens = createActivationTokenRepository(pool);
-  const adminUsersService = createAdminUsersService(pool, capturingLogger as typeof logger, users, players, activationTokens);
+  const s = buildServices();
+  const { users, players, adminUsersService } = s;
 
   const created = await adminUsersService.adminCreateUser({
     email: "invited@example.com", password: "invited-pw-123", role: "player",
@@ -212,8 +204,8 @@ test("admin-created account: autoActivate false requires activation, and gets a 
   const player = await players.findByUserId(created.userId);
   assert.ok(player, "admin-created player accounts must get a linked player profile too (ghs#8's symmetry fix)");
 
-  const activationLog = captured.find((c) => c.kind === "account_activation_admin_invite");
-  assert.ok(activationLog);
+  const [invitePayload] = await outboxPayloads(created.userId, "account_activation_admin_invite");
+  assert.ok(invitePayload, "expected a real account_activation_admin_invite outbox row");
 });
 
 test("MFA: enroll, confirm, login requires the second factor, backup code works once", async () => {

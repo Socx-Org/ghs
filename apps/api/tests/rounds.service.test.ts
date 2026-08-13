@@ -20,6 +20,7 @@ import type { DailyPcc } from "../src/data/pcc.repository.ts";
 import type { PccService } from "../src/application/pcc.service.ts";
 import type { RecalculationOrchestrator, RecalculationOutcome, RecalculationTrigger } from "../src/application/recalculation.service.ts";
 import type { NotificationHistoryRecord, NotificationsRepository, RecordNotificationInput } from "../src/data/notifications.repository.ts";
+import type { Player, PlayersRepository } from "../src/data/players.repository.ts";
 
 // A single 18-hole tee configuration, reused by every test below --
 // enough hole metadata (hole 1, par 4, stroke index 7) for the
@@ -127,11 +128,29 @@ function fakeNotificationsRepository(): NotificationsRepository & { recordedCall
     recordedCalls,
     async record(input) {
       recordedCalls.push(input);
-      const record: NotificationHistoryRecord = { id: String(recordedCalls.length), playerId: input.playerId, eventType: input.eventType, payload: input.payload, createdAt: new Date().toISOString() };
+      const record: NotificationHistoryRecord = { id: String(recordedCalls.length), userId: input.userId, eventType: input.eventType, payload: input.payload, createdAt: new Date().toISOString() };
       return record;
     },
-    async listForPlayer() {
+    async listForUser() {
       return [];
+    },
+  };
+}
+
+// Maps playerId -> a synthetic linked userId ("<playerId>-user") by
+// default, so every notifyPlayer() call in rounds.service.ts resolves to
+// a real userId and actually fires -- ghs#39's own schema change.
+// overrides: pass an explicit null for a specific playerId to simulate a
+// player with no linked user account (notifyPlayer must then skip, not
+// error -- see the dedicated test for this).
+function fakePlayersRepository(overrides: Record<string, string | null> = {}): PlayersRepository {
+  return {
+    async create() { throw new Error("not used by these tests"); },
+    async findByUserId() { throw new Error("not used by these tests"); },
+    async get(id) {
+      const userId = id in overrides ? overrides[id] : `${id}-user`;
+      const player: Player = { id, userId, clubId: null, firstName: "Test", lastName: "Player", country: "ES", createdAt: new Date().toISOString() };
+      return player;
     },
   };
 }
@@ -141,10 +160,11 @@ function roundsService(
   recalculation: RecalculationOrchestrator = fakeRecalculationOrchestrator(),
   pccService: PccService = unusedPccService(),
   notifications: NotificationsRepository = fakeNotificationsRepository(),
+  players: PlayersRepository = fakePlayersRepository(),
 ) {
   const courses = fakeCoursesRepository();
   const scoring = createScoringService(repository, courses, pccService);
-  return createRoundsService(fakePool(), repository, courses, scoring, recalculation, notifications, silentLogger);
+  return createRoundsService(fakePool(), repository, courses, scoring, recalculation, notifications, players, silentLogger);
 }
 
 function fakeRepository(): RoundsRepository & { getCallCount: number } {
@@ -277,7 +297,7 @@ test("createRound writes a round_submitted notification (ghs#25)", async () => {
 
   assert.equal(notifications.recordedCalls.length, 1);
   const call = notifications.recordedCalls[0]!;
-  assert.equal(call.playerId, "player-1");
+  assert.equal(call.userId, "player-1-user");
   assert.equal(call.eventType, "round_submitted");
   assert.equal(call.payload.roundId, round.id);
 });
@@ -311,6 +331,17 @@ test("reopenForAmendment writes no notification at all (platform owner decision,
   await service.reopenForAmendment(round.id, "Scorecard under review");
 
   assert.equal(notifications.recordedCalls.length, 0);
+});
+
+test("createRound skips the notification (does not error) for a player with no linked user account (ghs#39)", async () => {
+  const notifications = fakeNotificationsRepository();
+  const players = fakePlayersRepository({ "player-no-login": null });
+  const service = roundsService(fakeRepository(), fakeRecalculationOrchestrator(), unusedPccService(), notifications, players);
+
+  const round = await service.createRound({ playerId: "player-no-login", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+
+  assert.ok(round.id, "the round itself is still created normally");
+  assert.equal(notifications.recordedCalls.length, 0, "no email address exists anywhere for a player with no linked user account -- nothing to notify");
 });
 
 test("addHoleScore appends to an existing round -- the real incremental-entry workflow", async () => {

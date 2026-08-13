@@ -1,7 +1,14 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 export interface PasswordResetTokenRepository {
-  create(userId: string, tokenHash: string, expiresAt: Date): Promise<void>;
+  // client: when provided, the insert runs on it and no transaction is
+  // opened/committed here -- the caller owns that. Added for ghs#39: the
+  // token write and the real notification.record() call need to land in
+  // the same transaction (ADR-210 point 1), same client-threading
+  // convention already established elsewhere (activation-tokens.
+  // repository.ts, rounds.repository.ts, etc.). Omitted, this method
+  // issues its own single-statement insert exactly as before.
+  create(userId: string, tokenHash: string, expiresAt: Date, client?: PoolClient): Promise<void>;
   findValidByHash(tokenHash: string): Promise<{ id: string; userId: string } | null>;
   // Marks the given token used AND invalidates every other outstanding
   // token for the same user -- the real improvement over legacy GHS's
@@ -12,8 +19,8 @@ export interface PasswordResetTokenRepository {
 
 export function createPasswordResetTokenRepository(pool: Pool): PasswordResetTokenRepository {
   return {
-    async create(userId, tokenHash, expiresAt) {
-      await pool.query(
+    async create(userId, tokenHash, expiresAt, client) {
+      await (client ?? pool).query(
         "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
         [userId, tokenHash, expiresAt],
       );

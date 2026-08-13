@@ -3,6 +3,7 @@ import type { Logger } from "../logger.ts";
 import type { UsersRepository, UserRole, UserStatus } from "../data/users.repository.ts";
 import type { PlayersRepository } from "../data/players.repository.ts";
 import type { ActivationTokenRepository } from "../data/activation-tokens.repository.ts";
+import type { NotificationsRepository } from "../data/notifications.repository.ts";
 import { hashPassword } from "../lib/password.ts";
 import { generateToken, hashToken } from "../lib/tokens.ts";
 
@@ -29,6 +30,7 @@ export function createAdminUsersService(
   users: UsersRepository,
   players: PlayersRepository,
   activationTokens: ActivationTokenRepository,
+  notifications: NotificationsRepository,
 ): AdminUsersService {
   return {
     async adminCreateUser(input) {
@@ -61,14 +63,19 @@ export function createAdminUsersService(
           const rawToken = generateToken();
           const expiresAt = new Date(Date.now() + ACTIVATION_TOKEN_TTL_HOURS * 60 * 60 * 1000);
           await activationTokens.create(userId, hashToken(rawToken), expiresAt, client);
-          logger.info("TODO(Phase 4, ADR-210): real email delivery not yet implemented", {
-            kind: "account_activation_admin_invite",
-            email: input.email,
-            token: rawToken,
-          });
+          // ghs#39: replaces the previous plaintext-token-logging
+          // placeholder. The raw token is deliberately part of the
+          // durable payload (the worker needs it to build the real
+          // activation email), not a log line -- SEC-010's "never log a
+          // token" rule targets stdout/journald, not this table.
+          await notifications.record(
+            { userId, eventType: "account_activation_admin_invite", payload: { email: input.email, token: rawToken, expiresAt: expiresAt.toISOString() } },
+            client,
+          );
         }
 
         await client.query("COMMIT");
+        logger.info("user created by admin", { userId, role: input.role, autoActivate: input.autoActivate });
         return { userId };
       } catch (err) {
         await client.query("ROLLBACK");
