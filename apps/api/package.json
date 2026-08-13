@@ -7,7 +7,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && mkdir -p dist/data/migrations && cp src/data/migrations/*.sql dist/data/migrations/",
+    "build": "tsc -p tsconfig.build.json && mkdir -p dist/data/migrations && rm -f dist/data/migrations/*.sql && cp src/data/migrations/*.sql dist/data/migrations/",
     "start": "node dist/index.js",
     "migrate": "node dist/migrate.js",
     "dev": "node --watch src/index.ts",

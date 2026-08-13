@@ -81,6 +81,20 @@ jobs:
           else
             VERSION="0.0.0-$(git rev-parse --short HEAD)"
           fi
+          # VERSION becomes part of a filesystem path (release.tar.gz's
+          # remote destination) and is interpolated, single-quoted, into a
+          # sudo'd remote ssh command. The 0.0.0-<sha> fallback is always
+          # safe (hex only), but a git TAG is not similarly constrained --
+          # git's own ref-name rules disallow spaces/~^:?*[\ but do not
+          # disallow a literal single quote, so a tag crafted as
+          # `v1.0'$(...)'` would break out of that quoting and execute
+          # arbitrary commands as root on the deploy target. Allowlisting
+          # before VERSION is used anywhere closes that off entirely
+          # (caught in review, PR #37).
+          if ! [[ "$VERSION" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "ERROR: computed version '${VERSION}' contains characters unsafe for a path segment / shell-quoted argument -- refusing to deploy." >&2
+            exit 1
+          fi
           echo "Deploying version: ${VERSION}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
