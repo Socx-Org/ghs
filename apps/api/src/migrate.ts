@@ -19,7 +19,15 @@ try {
   await applyMigrations(pool);
   logger.info("migrations applied");
 } catch (err) {
-  logger.error("migration failed", { error: (err as Error).message });
+  // Normalized rather than a blind `(err as Error).message` -- a
+  // non-Error throw would otherwise log "undefined" and lose whatever
+  // was actually thrown. Stack included (not just the message) since
+  // this runs unsupervised, one-off, against production -- the extra
+  // debuggability matters more here than for a request-path error
+  // (caught in review, PR #37).
+  const message = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : undefined;
+  logger.error("migration failed", { error: message, stack });
   process.exitCode = 1;
 } finally {
   await pool.end();

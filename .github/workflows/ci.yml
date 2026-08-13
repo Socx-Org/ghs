@@ -131,11 +131,15 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
           chmod 600 "$KEY_FILE"
 
-          SSH_OPTS="-i $KEY_FILE -o StrictHostKeyChecking=accept-new"
+          # Array, not a single string -- expanding an unquoted string
+          # (e.g. `scp $SSH_OPTS ...`) is subject to word-splitting, a
+          # latent fragility even though none of these fixed values
+          # currently contain a space (caught in review, PR #37).
+          SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=accept-new)
           REMOTE="${DEPLOY_USER}@${DROPLET_HOST}"
           REMOTE_TARBALL="/tmp/release-${VERSION}.tar.gz"
 
-          scp $SSH_OPTS release.tar.gz "${REMOTE}:${REMOTE_TARBALL}"
-          ssh $SSH_OPTS "$REMOTE" \
+          scp "${SSH_OPTS[@]}" release.tar.gz "${REMOTE}:${REMOTE_TARBALL}"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" \
             "sudo SERVICES=ghs-api.service HEALTH_URL=http://127.0.0.1:3001/healthz /opt/deploy/scripts/deploy-release.sh ghs '${VERSION}' '${REMOTE_TARBALL}'"
-          ssh $SSH_OPTS "$REMOTE" "rm -f '${REMOTE_TARBALL}'"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "rm -f '${REMOTE_TARBALL}'"

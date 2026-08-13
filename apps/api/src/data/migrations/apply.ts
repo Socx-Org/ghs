@@ -30,13 +30,27 @@ export async function applyMigrations(pool: Pool): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_LOCK_KEY]);
-    const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
-    for (const file of files) {
-      const sql = readFileSync(join(migrationsDir, file), "utf8");
-      await client.query(sql);
+    try {
+      const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
+      for (const file of files) {
+        const sql = readFileSync(join(migrationsDir, file), "utf8");
+        await client.query(sql);
+      }
+    } finally {
+      try {
+        await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]);
+      } catch {
+        // Best-effort only -- advisory locks are session-scoped and
+        // release automatically once this client is returned to the pool
+        // (or the connection closes), so a failed explicit unlock isn't
+        // fatal. Swallowed here, not rethrown, so it can never mask a
+        // real migration failure from the try block above (caught in
+        // review, PR #37: the previous version let an unlock error
+        // replace the original error, and skip client.release() below
+        // entirely).
+      }
     }
   } finally {
-    await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_LOCK_KEY]);
     client.release();
   }
 }
