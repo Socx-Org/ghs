@@ -1,0 +1,55 @@
+# GHS's own filled-in copy of socx-platform's reference/systemd/app-api.service
+# (ADR-040), per deploy/README.md. Installed as /etc/systemd/system/ghs-api.service.
+#
+# Deliberately no shell wrapper, no `bash -lc`, no nvm -- the unit executes the
+# node binary directly so startup cannot depend on $HOME or login-shell state
+# (the fragility recorded in CS-INF-010).
+
+[Unit]
+Description=ghs API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ghs
+Group=ghs
+
+# The `current` symlink points at a versioned release directory
+# (/opt/ghs/releases/<version>), keeping the running version pinned and
+# traceable (OPS-030.2); rollback is a symlink flip + restart (see
+# reference/deployment).
+WorkingDirectory=/opt/ghs/current
+ExecStart=/usr/bin/node /opt/ghs/current/apps/api/dist/index.js
+Restart=on-failure
+RestartSec=5
+
+# Non-secret configuration only (SEC-010.1); SOCX_ENV makes the environment
+# tier identifiable at runtime (OPS-010.2). PORT=3001 matches the
+# already-live nginx proxy target for ghs.socx.org.uk (deploy/nginx-ghs.conf).
+Environment=NODE_ENV=production
+Environment=SOCX_ENV=production
+Environment=PORT=3001
+
+# Secrets via systemd credentials (ADR-130, SEC-010.3) -- apps/api/src/
+# config.ts's readSecret() reads $CREDENTIALS_DIRECTORY/<name> at startup
+# (APP-010: read once, passed down). Three names, not the template's two --
+# GHS also encrypts MFA TOTP secrets at rest (IAM-020).
+LoadCredential=db_password:/etc/credentials/ghs/db_password
+LoadCredential=jwt_secret:/etc/credentials/ghs/jwt_secret
+LoadCredential=mfa_encryption_key:/etc/credentials/ghs/mfa_encryption_key
+
+# Hardening -- secure by default; loosen ReadWritePaths only for paths the app owns.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/ghs/shared
+
+# journald capture; log format/content is governed by OPS-050 (app-side).
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ghs-api
+
+[Install]
+WantedBy=multi-user.target
