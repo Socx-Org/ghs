@@ -73,6 +73,14 @@ export function createSmtpEmailProvider(
   config: EmailConfig,
   transportFactory: typeof nodemailer.createTransport = nodemailer.createTransport,
 ): EmailProvider {
+  // A user with no password is never valid SMTP auth -- nodemailer would
+  // otherwise silently pass `auth: { pass: undefined }` through to the
+  // wire, producing a confusing auth failure far from its real cause
+  // (caught in review, PR #45).
+  if (config.smtp.user && !config.smtp.password) {
+    throw new Error("Invalid SMTP config: smtp.user is set but smtp.password is missing");
+  }
+
   const transporter = transportFactory({
     host: config.smtp.host,
     port: config.smtp.port,
@@ -92,7 +100,12 @@ export function createSmtpEmailProvider(
         });
         return { providerMessageId: typeof info.messageId === "string" ? info.messageId : undefined };
       } catch (err) {
-        throw new EmailSendError(`SMTP send failed: ${(err as Error).message}`, err);
+        // Normalized rather than a blind `(err as Error).message` -- a
+        // non-Error throw would otherwise produce "SMTP send failed:
+        // undefined" and lose whatever was actually thrown (same fix as
+        // migrate.ts's own catch block, PR #37; caught in review, PR #45).
+        const message = err instanceof Error ? err.message : String(err);
+        throw new EmailSendError(`SMTP send failed: ${message}`, err);
       }
     },
   };
@@ -105,5 +118,16 @@ export function createEmailProvider(config: EmailConfig): EmailProvider {
     case "smtp":
     case "mailpit":
       return createSmtpEmailProvider(config);
+    default: {
+      // Exhaustiveness check: if EmailProviderKind ever grows a new
+      // member without a corresponding case above, this fails to compile
+      // (config.provider would no longer be assignable to `never`) --
+      // and if an invalid value somehow slips through at runtime anyway
+      // (e.g. a cast bypassing parseEmailProviderKind's validation), this
+      // throws instead of silently returning undefined (caught in
+      // review, PR #45).
+      const exhaustiveCheck: never = config.provider;
+      throw new Error(`Unknown email provider: ${String(exhaustiveCheck)}`);
+    }
   }
 }

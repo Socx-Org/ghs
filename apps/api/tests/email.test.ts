@@ -82,6 +82,18 @@ test("smtp provider passes auth through only when an smtp user is configured -- 
   assert.deepEqual((seenOptions[1] as { auth?: unknown }).auth, { user: "real-user", pass: "real-pass" });
 });
 
+test("createSmtpEmailProvider fails fast when smtp.user is set without a password, rather than silently sending auth: { pass: undefined }", () => {
+  assert.throws(
+    () => createSmtpEmailProvider(smtpConfig({ smtp: { host: "smtp.real-provider.test", port: 587, secure: true, user: "real-user" } })),
+    /smtp.user is set but smtp.password is missing/,
+  );
+});
+
+test("createEmailProvider throws for a provider value outside the known union, instead of returning undefined", () => {
+  const bogusConfig = { ...smtpConfig(), provider: "sendgrid" } as unknown as EmailConfig;
+  assert.throws(() => createEmailProvider(bogusConfig), /Unknown email provider: sendgrid/);
+});
+
 test("smtp provider translates a transport failure into a classifiable EmailSendError, never lets the raw provider error escape uncaught", async () => {
   const fakeTransportFactory = (() => ({
     async sendMail() {
