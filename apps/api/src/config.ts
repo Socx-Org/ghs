@@ -20,12 +20,44 @@ export interface AuthConfig {
   mfaEncryptionKey: Buffer;
 }
 
+// ghs#40 (ADR-210 point 10) -- sendgrid/ses are named in the ADR's own
+// aspirational EmailProvider shape but deliberately not built here (not
+// speculative work); mailpit and smtp share one real implementation
+// (Mailpit IS an SMTP server -- see lib/email.ts), so the difference
+// between them is only ever which connection settings apply, never which
+// code runs.
+export type EmailProviderKind = "mailpit" | "smtp" | "mock";
+
+const EMAIL_PROVIDER_KINDS: readonly EmailProviderKind[] = ["mailpit", "smtp", "mock"];
+
+export function parseEmailProviderKind(raw: string): EmailProviderKind {
+  if ((EMAIL_PROVIDER_KINDS as readonly string[]).includes(raw)) {
+    return raw as EmailProviderKind;
+  }
+  throw new Error(`Invalid EMAIL_PROVIDER '${raw}' -- must be one of: ${EMAIL_PROVIDER_KINDS.join(", ")}`);
+}
+
+export interface SmtpConnectionConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user?: string;
+  password?: string;
+}
+
+export interface EmailConfig {
+  provider: EmailProviderKind;
+  fromAddress: string;
+  smtp: SmtpConnectionConfig;
+}
+
 export interface AppConfig {
   env: string;
   port: number;
   serviceName: string;
   database: DatabaseConfig;
   auth: AuthConfig;
+  email: EmailConfig;
 }
 
 // Reads a systemd LoadCredential= file at $CREDENTIALS_DIRECTORY/<name>
@@ -75,6 +107,25 @@ export function loadConfig(): AppConfig {
       jwtRefreshExpiresInSeconds: 30 * 24 * 60 * 60,
       mfaPendingExpiresInSeconds: 5 * 60,
       mfaEncryptionKey: Buffer.from(readSecret("mfa_encryption_key", "MFA_ENCRYPTION_KEY"), "hex"),
+    },
+    email: {
+      // mailpit is the local-dev default (matches its own out-of-the-box
+      // listener) -- real deployment always overrides via a real
+      // EnvironmentFile/LoadCredential set, same convention as
+      // database.host/database.user above.
+      provider: parseEmailProviderKind(process.env.EMAIL_PROVIDER ?? "mailpit"),
+      fromAddress: process.env.EMAIL_FROM_ADDRESS ?? "noreply@ghs.local",
+      smtp: {
+        host: process.env.SMTP_HOST ?? "127.0.0.1",
+        port: Number(process.env.SMTP_PORT ?? 1025),
+        secure: process.env.SMTP_SECURE === "true",
+        user: process.env.SMTP_USER,
+        // Only required when an SMTP user is actually configured --
+        // Mailpit's default local listener takes no auth at all, and
+        // forcing a secret to exist for that case would fail local dev
+        // for no real reason.
+        password: process.env.SMTP_USER ? readSecret("smtp_password", "SMTP_PASSWORD") : undefined,
+      },
     },
   };
 }
