@@ -21,6 +21,7 @@ import type { PccService } from "../src/application/pcc.service.ts";
 import type { RecalculationOrchestrator, RecalculationOutcome, RecalculationTrigger } from "../src/application/recalculation.service.ts";
 import type { NotificationHistoryRecord, NotificationsRepository, RecordNotificationInput } from "../src/data/notifications.repository.ts";
 import type { Player, PlayersRepository } from "../src/data/players.repository.ts";
+import type { NotificationSettings, SystemSettingsService } from "../src/application/system-settings.service.ts";
 
 // A single 18-hole tee configuration, reused by every test below --
 // enough hole metadata (hole 1, par 4, stroke index 7) for the
@@ -122,18 +123,34 @@ function fakeRecalculationOrchestrator(): RecalculationOrchestrator & {
   };
 }
 
-function fakeNotificationsRepository(): NotificationsRepository & { recordedCalls: RecordNotificationInput[] } {
-  const recordedCalls: RecordNotificationInput[] = [];
+function fakeNotificationsRepository(): NotificationsRepository & { recordedCalls: Array<RecordNotificationInput & { enqueued: boolean }> } {
+  const recordedCalls: Array<RecordNotificationInput & { enqueued: boolean }> = [];
   return {
     recordedCalls,
-    async record(input) {
-      recordedCalls.push(input);
+    async record(input, _client, options) {
+      recordedCalls.push({ ...input, enqueued: options?.enqueue ?? true });
       const record: NotificationHistoryRecord = { id: String(recordedCalls.length), userId: input.userId, eventType: input.eventType, payload: input.payload, createdAt: new Date().toISOString() };
       return record;
     },
     async listForUser() {
       return [];
     },
+  };
+}
+
+// Every real notification default is "on" (system-settings.service.ts's
+// own default), so tests that don't care about gating (almost all of
+// them) see the exact same behaviour as before ghs#41 without having to
+// pass anything.
+function fakeSystemSettingsService(overrides: Partial<NotificationSettings> = {}): SystemSettingsService {
+  const settings: NotificationSettings = { roundSubmitted: true, roundApproved: true, maintenanceAlerts: true, ...overrides };
+  return {
+    async getMaintenanceMode() { throw new Error("not used by these tests"); },
+    async setMaintenanceMode() { throw new Error("not used by these tests"); },
+    async getSelfRegistrationEnabled() { throw new Error("not used by these tests"); },
+    async setSelfRegistrationEnabled() { throw new Error("not used by these tests"); },
+    async getNotificationSettings() { return settings; },
+    async setNotificationSetting() { throw new Error("not used by these tests"); },
   };
 }
 
@@ -161,10 +178,11 @@ function roundsService(
   pccService: PccService = unusedPccService(),
   notifications: NotificationsRepository = fakeNotificationsRepository(),
   players: PlayersRepository = fakePlayersRepository(),
+  systemSettings: SystemSettingsService = fakeSystemSettingsService(),
 ) {
   const courses = fakeCoursesRepository();
   const scoring = createScoringService(repository, courses, pccService);
-  return createRoundsService(fakePool(), repository, courses, scoring, recalculation, notifications, players, silentLogger);
+  return createRoundsService(fakePool(), repository, courses, scoring, recalculation, notifications, players, systemSettings, silentLogger);
 }
 
 function fakeRepository(): RoundsRepository & { getCallCount: number } {
@@ -318,6 +336,31 @@ test("approveRound writes a round_approved notification, and rejectRound writes 
 
   const rejectedCall = notifications.recordedCalls.find((c) => c.eventType === "round_rejected")!;
   assert.equal(rejectedCall.payload.reason, "Incomplete scorecard");
+});
+
+test("createRound: notify_round_submitted=false still writes notification_history but does not enqueue an outbox delivery (ghs#41)", async () => {
+  const notifications = fakeNotificationsRepository();
+  const systemSettings = fakeSystemSettingsService({ roundSubmitted: false });
+  const service = roundsService(fakeRepository(), fakeRecalculationOrchestrator(), unusedPccService(), notifications, fakePlayersRepository(), systemSettings);
+
+  await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+
+  assert.equal(notifications.recordedCalls.length, 1, "the business event genuinely happened -- notification_history still gets a row");
+  assert.equal(notifications.recordedCalls[0]!.enqueued, false, "but no outbox row -- nothing for the worker to ever deliver");
+});
+
+test("approveRound: notify_round_approved=false still writes notification_history but does not enqueue an outbox delivery (ghs#41)", async () => {
+  const notifications = fakeNotificationsRepository();
+  const systemSettings = fakeSystemSettingsService({ roundApproved: false });
+  const service = roundsService(fakeRepository(), fakeRecalculationOrchestrator(), zeroPccService(), notifications, fakePlayersRepository(), systemSettings);
+
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+  await service.approveRound(round.id);
+
+  const approvedCall = notifications.recordedCalls.find((c) => c.eventType === "round_approved")!;
+  assert.ok(approvedCall, "notification_history still gets a round_approved row");
+  assert.equal(approvedCall.enqueued, false);
 });
 
 test("reopenForAmendment writes no notification at all (platform owner decision, 2026-08-12)", async () => {

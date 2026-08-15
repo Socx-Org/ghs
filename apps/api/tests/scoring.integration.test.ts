@@ -14,6 +14,8 @@ import { createHandicapHistoryRepository } from "../src/data/handicap-history.re
 import { createHandicapHistoryService } from "../src/application/handicap-history.service.ts";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
+import { createSystemSettingsRepository } from "../src/data/system-settings.repository.ts";
+import { createSystemSettingsService } from "../src/application/system-settings.service.ts";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const logger = createLogger("test");
@@ -64,8 +66,9 @@ function buildServices() {
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const notificationsRepository = createNotificationsRepository(pool);
   const playersRepo = createPlayersRepository(pool);
+  const systemSettingsService = createSystemSettingsService(createSystemSettingsRepository(pool));
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, playersRepo, logger);
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, playersRepo, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, playersRepo, systemSettingsService, logger);
   return { roundsRepo, coursesRepo, pccService, scoringService, roundsService };
 }
 

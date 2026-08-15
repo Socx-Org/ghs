@@ -29,6 +29,16 @@ export interface RecordNotificationInput {
   payload: Record<string, unknown>;
 }
 
+export interface RecordNotificationOptions {
+  // ghs#41 -- when a preference gates delivery off, the business event
+  // still genuinely happened (notification_history exists either way),
+  // but no work is created for the worker to ever deliver. Matches
+  // ADR-210's own "history without outbox" case. Defaults to true, so
+  // every call site from before ghs#41 (all five ghs#25 triggers, all
+  // four auth-flow events) is unaffected without being touched.
+  enqueue?: boolean;
+}
+
 export interface NotificationsRepository {
   // Writes notification_history and its child notification_outbox row
   // as one pair of inserts, both on the given client -- ADR-210 point 1
@@ -49,7 +59,7 @@ export interface NotificationsRepository {
   // skip calling this entirely when there isn't one (there is nothing to
   // notify -- no email address exists anywhere for a player with no
   // linked user).
-  record(input: RecordNotificationInput, client: PoolClient): Promise<NotificationHistoryRecord>;
+  record(input: RecordNotificationInput, client: PoolClient, options?: RecordNotificationOptions): Promise<NotificationHistoryRecord>;
   listForUser(userId: string): Promise<NotificationHistoryRecord[]>;
 }
 
@@ -75,7 +85,7 @@ const HISTORY_COLUMNS = "id, user_id, event_type, payload, created_at";
 
 export function createNotificationsRepository(pool: Pool): NotificationsRepository {
   return {
-    async record(input, client) {
+    async record(input, client, options) {
       const historyResult = await client.query<NotificationHistoryRow>(
         `INSERT INTO notification_history (user_id, event_type, payload)
          VALUES ($1, $2, $3::jsonb)
@@ -84,11 +94,13 @@ export function createNotificationsRepository(pool: Pool): NotificationsReposito
       );
       const history = toHistoryRecord(historyResult.rows[0]!);
 
-      await client.query(
-        `INSERT INTO notification_outbox (notification_history_id, event_type, payload)
-         VALUES ($1, $2, $3::jsonb)`,
-        [history.id, input.eventType, JSON.stringify(input.payload)],
-      );
+      if (options?.enqueue ?? true) {
+        await client.query(
+          `INSERT INTO notification_outbox (notification_history_id, event_type, payload)
+           VALUES ($1, $2, $3::jsonb)`,
+          [history.id, input.eventType, JSON.stringify(input.payload)],
+        );
+      }
 
       return history;
     },

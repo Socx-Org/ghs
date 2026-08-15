@@ -59,11 +59,11 @@ const scoringService = createScoringService(roundsRepository, coursesRepository,
 const handicapHistoryService = createHandicapHistoryService(handicapHistoryRepository);
 const handicapOverridesService = createHandicapOverridesService(pool, handicapOverridesRepository, handicapHistoryService, notificationsRepository, playersRepository, logger);
 const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepository, handicapHistoryService, pccService, notificationsRepository, playersRepository, logger);
-const roundsService = createRoundsService(pool, roundsRepository, coursesRepository, scoringService, recalculationOrchestrator, notificationsRepository, playersRepository, logger);
+const systemSettingsService = createSystemSettingsService(systemSettingsRepository);
+const roundsService = createRoundsService(pool, roundsRepository, coursesRepository, scoringService, recalculationOrchestrator, notificationsRepository, playersRepository, systemSettingsService, logger);
 const coursesService = createCoursesService(coursesRepository, logger);
 const authProvider = createLocalAuthProvider(config.auth, refreshTokensRepository);
 const mfaService = createMfaService(mfaRepository, config.auth.mfaEncryptionKey);
-const systemSettingsService = createSystemSettingsService(systemSettingsRepository);
 const authService = createAuthService({
   pool,
   logger,

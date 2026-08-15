@@ -20,6 +20,8 @@ import { createHandicapOverridesRepository } from "../src/data/handicap-override
 import { createHandicapOverridesService } from "../src/application/handicap-overrides.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
 import type { NotificationsRepository } from "../src/data/notifications.repository.ts";
+import { createSystemSettingsRepository } from "../src/data/system-settings.repository.ts";
+import { createSystemSettingsService } from "../src/application/system-settings.service.ts";
 import type { RecalculationOrchestrator } from "../src/application/recalculation.service.ts";
 import { createAuthService } from "../src/application/auth.service.ts";
 import { createLocalAuthProvider } from "../src/application/auth-provider.ts";
@@ -99,9 +101,10 @@ function buildServices() {
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const notificationsRepository = createNotificationsRepository(pool);
   const players = createPlayersRepository(pool);
+  const systemSettingsService = createSystemSettingsService(createSystemSettingsRepository(pool));
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, logger);
-  return { roundsRepo, coursesRepo, handicapHistoryService, notificationsRepository, players, recalculationOrchestrator, roundsService };
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
+  return { roundsRepo, coursesRepo, handicapHistoryService, notificationsRepository, players, systemSettingsService, recalculationOrchestrator, roundsService };
 }
 
 interface OutboxRow {
@@ -151,6 +154,24 @@ test("createRound writes notification_history and its child notification_outbox 
 
   const outboxRow = await pool.query("SELECT payload FROM notification_outbox WHERE id = $1", [outbox[0]!.id]);
   assert.equal(outboxRow.rows[0]!.payload.roundId, round.id);
+});
+
+test("createRound: notify_round_submitted=false still writes notification_history but creates no notification_outbox row, real Postgres (ghs#41)", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const { playerId, userId } = await createPlayerWithUser("Gated", "Submit");
+  const { roundsService, systemSettingsService } = buildServices();
+  await systemSettingsService.setNotificationSetting("roundSubmitted", false, null);
+
+  const round = await roundsService.createRound({ playerId, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+
+  const history = await historyRowsForUser(userId);
+  assert.deepEqual(history.map((h) => h.event_type), ["round_submitted"], "the round was genuinely submitted -- notification_history still records it");
+
+  const outbox = await outboxRowsForUser(userId);
+  assert.equal(outbox.length, 0, "gated off -- nothing for the worker to ever deliver (ADR-210's 'history without outbox' case)");
+
+  const historyRow = await pool.query("SELECT payload FROM notification_history WHERE user_id = $1", [userId]);
+  assert.equal(historyRow.rows[0]!.payload.roundId, round.id);
 });
 
 test("createRound skips the notification (does not error) for a player with no linked user account, real Postgres (ghs#39)", async () => {
@@ -207,6 +228,27 @@ test("approveRound writes round_approved, and -- since the round is eligible and
 
   const outbox = await outboxRowsForUser(userId);
   assert.equal(outbox.length, 2, "both notification_history rows have their own outbox row -- not shared, not merged");
+});
+
+test("approveRound: notify_round_approved=false still writes round_approved history but no outbox row -- the independently-triggered handicap_changed notification is unaffected, real Postgres (ghs#41)", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const { playerId, userId } = await createPlayerWithUser("GatedApprove", "Notify");
+  const { roundsRepo, roundsService, systemSettingsService } = buildServices();
+  await systemSettingsService.setNotificationSetting("roundApproved", false, null);
+
+  await createApprovedRound(playerId, teeConfigurationId, "2026-05-01T09:00:00.000Z", 10.0);
+  await createApprovedRound(playerId, teeConfigurationId, "2026-05-02T09:00:00.000Z", 12.0);
+
+  const round = await roundsRepo.create({ playerId, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(round.id, { holeNumber: 1, strokes: 4, netDoubleBogeyAdjusted: 4 });
+
+  await roundsService.approveRound(round.id);
+
+  const history = await historyRowsForUser(userId);
+  assert.deepEqual(history.map((h) => h.event_type).sort(), ["handicap_changed", "round_approved"], "both business events genuinely happened -- history is unaffected by the gate");
+
+  const outbox = await outboxRowsForUser(userId);
+  assert.deepEqual(outbox.map((o) => o.event_type), ["handicap_changed"], "round_approved's own outbox row is gated off; handicap_changed has no system_settings key in this issue's scope and is unaffected");
 });
 
 test("rejectRound writes round_rejected with the reason even when there's no differential to recalculate, real Postgres", async () => {
@@ -277,7 +319,7 @@ test("a no-op recalculation (no actual index change) writes no notification -- m
 test("the state change and its notification writes roll back together on failure -- proves they share one real transaction, not two independent writes (ghs#25/ADR-210 point 1, real Postgres)", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   const { playerId, userId } = await createPlayerWithUser("Atomic", "Notify");
-  const { roundsRepo, coursesRepo, notificationsRepository, players } = buildServices();
+  const { roundsRepo, coursesRepo, notificationsRepository, players, systemSettingsService } = buildServices();
 
   const round = await roundsRepo.create({ playerId, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
   await roundsRepo.addHoleScore(round.id, { holeNumber: 1, strokes: 4, netDoubleBogeyAdjusted: 4 });
@@ -291,7 +333,7 @@ test("the state change and its notification writes roll back together on failure
     },
   };
   const scoringService = createScoringService(roundsRepo, coursesRepo, createPccService(createPccRepository(pool)));
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, failingRecalculation, notificationsRepository, players, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, failingRecalculation, notificationsRepository, players, systemSettingsService, logger);
 
   await assert.rejects(() => roundsService.approveRound(round.id), /simulated recalculation failure/);
 
@@ -420,6 +462,18 @@ test("register writes an account_activation notification, real Postgres (ghs#39)
   const payload = await pool.query<{ payload: { token: string; email: string } }>("SELECT payload FROM notification_outbox WHERE id = $1", [outbox[0]!.id]);
   assert.ok(payload.rows[0]!.payload.token, "the raw token is present in the durable payload -- the worker needs it to build the real activation email");
   assert.equal(payload.rows[0]!.payload.email, "activation-test@example.com");
+});
+
+test("register still enqueues account_activation for delivery even when every round preference is off, real Postgres (ghs#41: auth-flow events are never preference-gateable)", async () => {
+  const systemSettingsService = createSystemSettingsService(createSystemSettingsRepository(pool));
+  await systemSettingsService.setNotificationSetting("roundSubmitted", false, null);
+  await systemSettingsService.setNotificationSetting("roundApproved", false, null);
+
+  const { authService } = buildAuthServices(createNotificationsRepository(pool));
+  const { userId } = await authService.register({ email: "never-gated@example.com", password: "correct-horse-battery", firstName: "A", lastName: "B" });
+
+  const outbox = await outboxRowsForUser(userId);
+  assert.equal(outbox.length, 1, "a user cannot opt out of their own account-access email -- no system_settings key even exists for this event, so it can never be gated");
 });
 
 test("register: rolls back the created user and player together with a failing notification write, real Postgres (ghs#39/ADR-210 point 1)", async () => {

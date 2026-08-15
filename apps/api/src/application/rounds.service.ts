@@ -13,8 +13,9 @@ import type {
 import type { CoursesRepository } from "../data/courses.repository.ts";
 import type { ScoringService } from "./scoring.service.ts";
 import type { RecalculationOrchestrator, RecalculationOutcome } from "./recalculation.service.ts";
-import type { NotificationEventType, NotificationsRepository } from "../data/notifications.repository.ts";
+import type { NotificationEventType, NotificationsRepository, RecordNotificationOptions } from "../data/notifications.repository.ts";
 import type { PlayersRepository } from "../data/players.repository.ts";
+import type { SystemSettingsService } from "./system-settings.service.ts";
 import type { Logger } from "../logger.ts";
 
 export class RoundNotFoundError extends Error {}
@@ -108,6 +109,7 @@ export function createRoundsService(
   recalculation: RecalculationOrchestrator,
   notifications: NotificationsRepository,
   players: PlayersRepository,
+  systemSettings: SystemSettingsService,
   logger: Logger,
 ): RoundsService {
   // notification_history/notification_outbox are user_id-scoped, not
@@ -122,10 +124,11 @@ export function createRoundsService(
     eventType: NotificationEventType,
     payload: Record<string, unknown>,
     client: PoolClient,
+    options?: RecordNotificationOptions,
   ): Promise<void> {
     const player = await players.get(playerId);
     if (!player?.userId) return;
-    await notifications.record({ userId: player.userId, eventType, payload }, client);
+    await notifications.record({ userId: player.userId, eventType, payload }, client, options);
   }
   // recomputeRoundAggregates runs as its own, separate step before the
   // approval transaction opens -- not threaded into the same client. This
@@ -202,6 +205,13 @@ export function createRoundsService(
         }));
       }
 
+      // Read outside the transaction, same as every other system_settings
+      // check in this codebase (e.g. the self-registration gate) --
+      // settings are read live, not cached, and there's no correctness
+      // reason to read this specific boolean through the same connection
+      // as the write below (ghs#41).
+      const { roundSubmitted } = await systemSettings.getNotificationSettings();
+
       // Opens its own transaction (new for ghs#25 -- repository.create()
       // previously self-managed its own, entirely invisible to this
       // layer) so the "round_submitted" notification lands in the SAME
@@ -212,11 +222,16 @@ export function createRoundsService(
       try {
         await client.query("BEGIN");
         const round = await repository.create({ ...input, holeScores }, client);
+        // notification_history always gets a row -- the round was
+        // genuinely submitted regardless of preference -- but no outbox
+        // row (nothing for the worker to ever deliver) when gated off
+        // (ghs#41, ADR-210's "history without outbox" case).
         await notifyPlayer(
           round.playerId,
           "round_submitted",
           { roundId: round.id, teeConfigurationId: round.teeConfigurationId, playedAt: round.playedAt },
           client,
+          { enqueue: roundSubmitted },
         );
         await client.query("COMMIT");
         logger.info("round created", { roundId: round.id, playerId: round.playerId, holeCount: round.holeScores.length });
@@ -278,6 +293,8 @@ export function createRoundsService(
 
       await rescoreBeforeApproval(id);
 
+      const { roundApproved } = await systemSettings.getNotificationSettings();
+
       return runWorkflowTransition(
         id,
         // Re-checked here too, under the row lock: the status above was
@@ -293,7 +310,8 @@ export function createRoundsService(
           // ghs#25's own domain trigger table. The recalculation trigger
           // tag (amendment_approved vs round_approved) still distinguishes
           // them internally, just not in what the player is told.
-          await notifyPlayer(existing.playerId, "round_approved", { roundId: id, trigger }, client);
+          // enqueue: same gating as createRound above (ghs#41).
+          await notifyPlayer(existing.playerId, "round_approved", { roundId: id, trigger }, client, { enqueue: roundApproved });
           const result = await recalculation.recalculatePlayerHandicap(existing.playerId, trigger, client);
           logger.info("round approved", { roundId: id, playerId: existing.playerId, trigger, recalculationStatus: result.status });
           return result;

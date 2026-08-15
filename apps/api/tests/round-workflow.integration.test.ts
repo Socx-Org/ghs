@@ -92,9 +92,10 @@ function buildServices() {
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const notificationsRepository = createNotificationsRepository(pool);
   const players = createPlayersRepository(pool);
+  const systemSettingsService = createSystemSettingsService(createSystemSettingsRepository(pool));
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, logger);
-  return { roundsRepo, coursesRepo, handicapHistoryService, notificationsRepository, players, recalculationOrchestrator, roundsService };
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
+  return { roundsRepo, coursesRepo, handicapHistoryService, notificationsRepository, players, systemSettingsService, recalculationOrchestrator, roundsService };
 }
 
 test("rejectRound recalculates a previously-approved-then-reopened round -- the confirmed legacy bug ghs#23 fixes: legacy only logged 'recalculation requested' here, it never actually recalculated", async () => {
@@ -231,7 +232,7 @@ test("approveRound rolls back the status change if recalculation fails -- state 
   const teeConfigurationId = await createTeeConfiguration();
   const players = createPlayersRepository(pool);
   const player = await players.create({ firstName: "Atomic", lastName: "Rollback" });
-  const { roundsRepo, coursesRepo, notificationsRepository } = buildServices();
+  const { roundsRepo, coursesRepo, notificationsRepository, systemSettingsService } = buildServices();
   const scoringService = createScoringService(roundsRepo, coursesRepo, createPccService(createPccRepository(pool)));
 
   const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
@@ -245,7 +246,7 @@ test("approveRound rolls back the status change if recalculation fails -- state 
       throw new Error("not used by this test");
     },
   };
-  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, failingRecalculation, notificationsRepository, players, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, failingRecalculation, notificationsRepository, players, systemSettingsService, logger);
 
   await assert.rejects(() => roundsService.approveRound(round.id), /simulated recalculation failure/);
 
