@@ -82,6 +82,21 @@ test("smtp provider passes auth through only when an smtp user is configured -- 
   assert.deepEqual((seenOptions[1] as { auth?: unknown }).auth, { user: "real-user", pass: "real-pass" });
 });
 
+test("smtp provider configures connection/greeting/socket timeouts -- a provider that never responds must fail fast enough for retry/backoff to engage, rather than hang the claimed row in 'processing' forever (found for real during ghs#43's production verification, PR #47 follow-up)", () => {
+  const seenOptions: unknown[] = [];
+  const fakeTransportFactory = ((options: unknown) => {
+    seenOptions.push(options);
+    return { async sendMail() { return {}; } };
+  }) as unknown as typeof import("nodemailer").createTransport;
+
+  createSmtpEmailProvider(smtpConfig(), fakeTransportFactory);
+
+  const options = seenOptions[0] as { connectionTimeout?: number; greetingTimeout?: number; socketTimeout?: number };
+  assert.ok(options.connectionTimeout && options.connectionTimeout > 0 && options.connectionTimeout <= 30_000);
+  assert.ok(options.greetingTimeout && options.greetingTimeout > 0 && options.greetingTimeout <= 30_000);
+  assert.ok(options.socketTimeout && options.socketTimeout > 0 && options.socketTimeout <= 60_000);
+});
+
 test("createSmtpEmailProvider fails fast when smtp.user is set without a password, rather than silently sending auth: { pass: undefined }", () => {
   assert.throws(
     () => createSmtpEmailProvider(smtpConfig({ smtp: { host: "smtp.real-provider.test", port: 587, secure: true, user: "real-user" } })),
