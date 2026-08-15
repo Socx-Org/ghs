@@ -1,0 +1,82 @@
+# GHS's own filled-in copy of socx-platform's reference/systemd/
+# app-worker.service (ADR-040), per deploy/README.md. Installed as
+# /etc/systemd/system/ghs-worker.service. ghs#43 -- the notification
+# delivery worker (ghs#42) as its own independently managed service,
+# alongside ghs-api.service (Phase 3).
+#
+# Deliberately no shell wrapper, no `bash -lc`, no nvm -- the unit executes
+# the node binary directly so startup cannot depend on $HOME or login-shell
+# state (the fragility recorded in CS-INF-010), same convention as
+# ghs-api.service.
+
+[Unit]
+Description=ghs worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ghs
+Group=ghs
+
+# Same `current` symlink ghs-api.service runs against -- one release
+# directory, one symlink flip, both services restarted together
+# (ghs#43's own deploy pipeline change: SERVICES="ghs-api.service
+# ghs-worker.service").
+WorkingDirectory=/opt/ghs/current
+ExecStart=/usr/bin/node /opt/ghs/current/apps/worker/dist/index.js
+Restart=on-failure
+RestartSec=5
+
+# Non-secret configuration only (SEC-010.1). No PORT -- the worker has no
+# HTTP server, it only polls the database (ADR-210: PostgreSQL is the
+# queue, no broker). EMAIL_PROVIDER=smtp: real outbound delivery via
+# Hostinger, the same relay account RMS already uses (platform owner
+# decision, 2026-08-16) -- SMTP_SECURE=false per that same decision
+# (explicit choice, not the port-465 default of true: confirmed with the
+# platform owner after flagging the discrepancy).
+Environment=NODE_ENV=production
+Environment=SOCX_ENV=production
+Environment=EMAIL_PROVIDER=smtp
+Environment=SMTP_HOST=smtp.hostinger.com
+Environment=SMTP_PORT=465
+Environment=SMTP_SECURE=false
+Environment=SMTP_USER=info@basemathlimited.co.uk
+Environment=EMAIL_FROM_ADDRESS="Socx Golf Handicap System <info@basemathlimited.co.uk>"
+# No frontend app exists in this repo yet (confirmed by search, ghs#42) --
+# activation/reset links will 404 until one is built. Points at the real
+# live domain regardless: delivery mechanics and email content are fully
+# real and correct today, the link target is a known, separate gap, not
+# silently invented.
+Environment=APP_BASE_URL=https://ghs.socx.org.uk
+
+# Secrets via systemd credentials (ADR-130, SEC-010.3) -- apps/worker/src/
+# config.ts's loadWorkerConfig() (via @ghs/api's loadDatabaseConfig()/
+# loadEmailConfig()) reads $CREDENTIALS_DIRECTORY/<name> at startup
+# (APP-010: read once, passed down). db_password is the SAME file already
+# provisioned for ghs-api.service (one database, one credential) --
+# deliberately NOT jwt_secret/mfa_encryption_key: the worker has no
+# auth-related code path at all and must never be able to read them
+# (least privilege, confirmed against this exact reference template
+# before ghs#42 was implemented).
+LoadCredential=db_password:/etc/credentials/ghs/db_password
+LoadCredential=smtp_password:/etc/credentials/ghs/smtp_password
+
+# Hardening -- secure by default; loosen ReadWritePaths only for paths the
+# app owns. Same posture as ghs-api.service.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/opt/ghs/shared
+
+# journald capture; log format/content is governed by OPS-050 (app-side).
+# poll-loop.ts/delivery.service.ts never log recipient addresses, tokens,
+# or message bodies (SEC-010) -- only event types, ids, attempt counts,
+# and durations.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ghs-worker
+
+[Install]
+WantedBy=multi-user.target

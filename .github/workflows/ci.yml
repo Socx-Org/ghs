@@ -124,11 +124,25 @@ jobs:
       # already inside apps/api/dist (apps/api's own build script copies
       # them there), so a single `apps/api/dist` glob covers both the
       # compiled app and the migration runner's SQL files.
+      #
+      # apps/api/src is ALSO required (ghs#43) -- not just apps/api/dist.
+      # apps/worker imports apps/api's config/logger/email/pool/system-
+      # settings code via the @ghs/api package name (node_modules/@ghs/api
+      # is a workspace symlink to apps/api), resolved through apps/api/
+      # package.json's own "exports" map -- which points at the *source*
+      # .ts files (Node 24 strips types natively at runtime), not dist.
+      # Packaging only dist would leave those import specifiers dangling
+      # in production. Verified for real: built this exact tarball shape,
+      # extracted it on prod-lab-01, and ran apps/worker/dist/index.js
+      # against it directly before ever wiring this into automated CI.
       - name: Package release
         run: |
           tar -czf release.tar.gz \
             apps/api/dist \
+            apps/api/src \
             apps/api/package.json \
+            apps/worker/dist \
+            apps/worker/package.json \
             node_modules \
             package-lock.json
 
@@ -154,6 +168,12 @@ jobs:
           REMOTE_TARBALL="/tmp/release-${VERSION}.tar.gz"
 
           scp "${SSH_OPTS[@]}" release.tar.gz "${REMOTE}:${REMOTE_TARBALL}"
+          # Both services restart from the same release symlink flip
+          # (ghs#43) -- RMS's own multi-service precedent for SERVICES=.
+          # HEALTH_URL only ever probes the API (deploy-release.sh's own
+          # health gate is systemctl-is-active-per-service regardless, so
+          # the worker is still gated on actually being active -- it has
+          # no HTTP endpoint of its own to poll).
           ssh "${SSH_OPTS[@]}" "$REMOTE" \
-            "sudo SERVICES=ghs-api.service HEALTH_URL=http://127.0.0.1:3001/healthz /opt/deploy/scripts/deploy-release.sh ghs '${VERSION}' '${REMOTE_TARBALL}'"
+            "sudo SERVICES='ghs-api.service ghs-worker.service' HEALTH_URL=http://127.0.0.1:3001/healthz /opt/deploy/scripts/deploy-release.sh ghs '${VERSION}' '${REMOTE_TARBALL}'"
           ssh "${SSH_OPTS[@]}" "$REMOTE" "rm -f '${REMOTE_TARBALL}'"
