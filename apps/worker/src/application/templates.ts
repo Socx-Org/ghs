@@ -60,6 +60,21 @@ function formatIndex(index: number | null | undefined): string {
   return typeof index === "number" ? index.toFixed(1) : "N/A";
 }
 
+// round_rejected's reason and manual_override's reason are free text (a
+// rejecting admin/approver, or an overriding admin, types this) -- unlike
+// every other interpolated value here (IDs, dates, numbers), it must be
+// HTML-escaped before landing in the html body, or it could malform the
+// markup or, in some mail clients, inject content (PR #47 review fix).
+// text bodies need no escaping -- they're never parsed as markup.
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function activationUrl(appBaseUrl: string, token: string): string {
   return `${appBaseUrl}/activate-account?token=${encodeURIComponent(token)}`;
 }
@@ -98,7 +113,7 @@ export function renderNotification(
       return {
         subject: "Round Rejected",
         text: `Your round has been rejected.\n\nReason: ${p.reason}\n\nSign in to view your round details.`,
-        html: `<p>Your round has been <strong>rejected</strong>.</p><p><strong>Reason:</strong> ${p.reason}</p><p>Sign in to view your round details.</p>`,
+        html: `<p>Your round has been <strong>rejected</strong>.</p><p><strong>Reason:</strong> ${escapeHtml(p.reason)}</p><p>Sign in to view your round details.</p>`,
       };
     }
 
@@ -120,7 +135,7 @@ export function renderNotification(
       return {
         subject: "Your handicap index has been manually adjusted",
         text: `An administrator has manually adjusted your handicap index.\n\nPrevious index: ${previousLabel}\nNew index: ${newLabel}\nReason: ${p.reason}\n\nSign in to view your full handicap history.`,
-        html: `<p>An administrator has manually adjusted your handicap index.</p><ul><li><strong>Previous index:</strong> ${previousLabel}</li><li><strong>New index:</strong> ${newLabel}</li><li><strong>Reason:</strong> ${p.reason}</li></ul><p>Sign in to view your full handicap history.</p>`,
+        html: `<p>An administrator has manually adjusted your handicap index.</p><ul><li><strong>Previous index:</strong> ${previousLabel}</li><li><strong>New index:</strong> ${newLabel}</li><li><strong>Reason:</strong> ${escapeHtml(p.reason)}</li></ul><p>Sign in to view your full handicap history.</p>`,
       };
     }
 

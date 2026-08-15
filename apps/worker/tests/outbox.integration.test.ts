@@ -107,9 +107,11 @@ test("full success lifecycle: pending -> processing (claim) -> sent, attempt cou
   assert.ok(row.claimedAt);
   assert.equal(row.attempts, 0);
 
-  await outbox.markSent(id);
+  await outbox.markSent(id, row.attempts + 1);
   const after = await outboxRow(id);
   assert.equal(after.status, "sent");
+  assert.equal(after.attempts, 1, "attempts includes the successful send itself (PR #47 review fix)");
+  assert.equal(after.retry_after, null);
 });
 
 test("a pending row not yet due for retry (retry_after in the future) is not claimable", async () => {
@@ -137,6 +139,26 @@ test("retryable failure: attempt increments, retry scheduled, and the row become
   assert.ok(claimedAgain.some((r) => r.id === id), "eligible again now that retry_after is in the past");
 });
 
+test("a row that fails once then succeeds on retry ends up with no stale retry_after/failure_reason -- markSent clears both, real Postgres (PR #47 review fix)", async () => {
+  const userId = await createRealUser("recovers-then-succeeds@example.com");
+  const id = await insertOutboxRow(userId);
+  const outbox = createOutboxRepository(pool);
+
+  await outbox.claimBatch(20);
+  await outbox.markPendingRetry(id, 1, new Date(Date.now() - 1000), "simulated retryable failure");
+
+  const [reclaimed] = await outbox.claimBatch(20);
+  assert.equal(reclaimed!.id, id);
+  await outbox.markSent(id, reclaimed!.attempts + 1);
+
+  const after = await outboxRow(id);
+  assert.equal(after.status, "sent");
+  assert.equal(after.attempts, 2, "counts both the original failed attempt and the successful one");
+  assert.equal(after.retry_after, null, "no stale retry_after left over from the earlier failure");
+  const failureReason = await pool.query("SELECT failure_reason FROM notification_outbox WHERE id = $1", [id]);
+  assert.equal(failureReason.rows[0]!.failure_reason, null, "no stale failure_reason left over from the earlier failure");
+});
+
 test("permanent failure: row becomes failed immediately, no further attempts, real Postgres", async () => {
   const userId = await createRealUser("permanent@example.com");
   const id = await insertOutboxRow(userId);
@@ -161,9 +183,12 @@ test("retry exhaustion: a retryable failure repeated through the full backoff sc
   const alwaysFails = fakeProvider(async () => {
     throw new EmailSendError("SMTP send failed: timeout", { code: "ETIMEDOUT" });
   });
-  const deliveryDeps = { outbox, recipients, provider: alwaysFails, logger, appBaseUrl: "https://ghs.test", batchSize: 20, backoffMinutes: [1, 5, 15], maxAttempts: 3 };
+  const deliveryDeps = { outbox, recipients, provider: alwaysFails, logger, appBaseUrl: "https://ghs.test", batchSize: 20, backoffMinutes: [1, 5, 15] };
 
-  for (let i = 0; i < 3; i++) {
+  // 4 total attempts allowed: the initial one plus one retry per
+  // configured backoff entry (PR #47 review fix -- every entry in [1, 5,
+  // 15] is now reachable, not just the first two).
+  for (let i = 0; i < 4; i++) {
     // Force immediate eligibility each pass -- this test exercises the
     // attempts/exhaustion logic, not real wall-clock backoff delays.
     await pool.query("UPDATE notification_outbox SET retry_after = now() - interval '1 second' WHERE id = $1", [id]);
@@ -172,7 +197,7 @@ test("retry exhaustion: a retryable failure repeated through the full backoff sc
 
   const after = await outboxRow(id);
   assert.equal(after.status, "failed");
-  assert.equal(after.attempts, 3);
+  assert.equal(after.attempts, 4);
 });
 
 test("a processing row still within the crash-recovery timeout is not reclaimed", async () => {
@@ -189,7 +214,7 @@ test("crash recovery: an abandoned processing row becomes reclaimable and is pro
   const id = await insertOutboxRow(userId, { status: "processing", claimedAt: new Date(Date.now() - 10 * 60 * 1000) }); // 10 minutes ago
 
   const outbox = createOutboxRepository(pool);
-  const result = await runCrashRecoverySweep({ outbox, logger, timeoutMinutes: 5, batchSize: 20, backoffMinutes: [1, 5, 15], maxAttempts: 3 });
+  const result = await runCrashRecoverySweep({ outbox, logger, timeoutMinutes: 5, batchSize: 20, backoffMinutes: [1, 5, 15] });
 
   assert.equal(result.reclaimed, 1);
   const after = await outboxRow(id);
@@ -200,15 +225,15 @@ test("crash recovery: an abandoned processing row becomes reclaimable and is pro
 
 test("crash recovery: a poison message that keeps crashing the worker eventually lands in failed, not an infinite reclaim loop", async () => {
   const userId = await createRealUser("poison@example.com");
-  const id = await insertOutboxRow(userId, { status: "processing", claimedAt: new Date(Date.now() - 10 * 60 * 1000), attempts: 2 }); // already at attempts=2, maxAttempts=3
+  const id = await insertOutboxRow(userId, { status: "processing", claimedAt: new Date(Date.now() - 10 * 60 * 1000), attempts: 3 }); // already at attempts=3 -- the schedule's last entry (backoffMinutes[2]) was already used
 
   const outbox = createOutboxRepository(pool);
-  const result = await runCrashRecoverySweep({ outbox, logger, timeoutMinutes: 5, batchSize: 20, backoffMinutes: [1, 5, 15], maxAttempts: 3 });
+  const result = await runCrashRecoverySweep({ outbox, logger, timeoutMinutes: 5, batchSize: 20, backoffMinutes: [1, 5, 15] });
 
   assert.equal(result.reclaimed, 1);
   const after = await outboxRow(id);
   assert.equal(after.status, "failed");
-  assert.equal(after.attempts, 3);
+  assert.equal(after.attempts, 4);
 });
 
 test("retention cleanup deletes old sent/failed outbox rows but not recent ones, bounded per call, real Postgres", async () => {
@@ -280,7 +305,7 @@ test("runDeliveryCycle resolves the recipient's real, current email via user_id 
   const seenMessages: EmailMessage[] = [];
   const provider = fakeProvider(async (message) => { seenMessages.push(message); return {}; });
 
-  await runDeliveryCycle({ outbox, recipients, provider, logger, appBaseUrl: "https://ghs.test", batchSize: 20, backoffMinutes: [1, 5, 15], maxAttempts: 3 });
+  await runDeliveryCycle({ outbox, recipients, provider, logger, appBaseUrl: "https://ghs.test", batchSize: 20, backoffMinutes: [1, 5, 15] });
 
   assert.equal(seenMessages.length, 1);
   assert.equal(seenMessages[0]!.to, "changed@example.com");

@@ -10,7 +10,6 @@ import { createRetentionRepository } from "./data/retention.repository.ts";
 import { startPollLoop } from "./application/poll-loop.ts";
 import {
   RETRY_BACKOFF_MINUTES,
-  MAX_ATTEMPTS,
   CRASH_RECOVERY_TIMEOUT_MINUTES,
   SENT_RETENTION_DAYS,
   FAILED_RETENTION_DAYS,
@@ -47,7 +46,6 @@ const handle = startPollLoop({
     appBaseUrl: config.appBaseUrl,
     batchSize: BATCH_SIZE,
     backoffMinutes: RETRY_BACKOFF_MINUTES,
-    maxAttempts: MAX_ATTEMPTS,
   },
   crashRecovery: {
     outbox,
@@ -55,7 +53,6 @@ const handle = startPollLoop({
     timeoutMinutes: CRASH_RECOVERY_TIMEOUT_MINUTES,
     batchSize: BATCH_SIZE,
     backoffMinutes: RETRY_BACKOFF_MINUTES,
-    maxAttempts: MAX_ATTEMPTS,
   },
   retention: {
     retention,

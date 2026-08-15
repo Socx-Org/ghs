@@ -34,14 +34,17 @@ function fakeRow(overrides: Partial<OutboxRow> = {}): OutboxRow {
 }
 
 function fakeOutboxRepository(claimed: OutboxRow[]): OutboxRepository & {
+  sent: Array<{ id: string; attempts: number }>;
   sentIds: string[];
   pendingRetries: Array<{ id: string; attempts: number; retryAfter: Date; failureReason: string }>;
   failedRows: Array<{ id: string; attempts: number; failureReason: string }>;
 } {
+  const sent: Array<{ id: string; attempts: number }> = [];
   const sentIds: string[] = [];
   const pendingRetries: Array<{ id: string; attempts: number; retryAfter: Date; failureReason: string }> = [];
   const failedRows: Array<{ id: string; attempts: number; failureReason: string }> = [];
   return {
+    sent,
     sentIds,
     pendingRetries,
     failedRows,
@@ -51,7 +54,8 @@ function fakeOutboxRepository(claimed: OutboxRow[]): OutboxRepository & {
     async claimStuckProcessing() {
       throw new Error("not used by these tests");
     },
-    async markSent(id) {
+    async markSent(id, attempts) {
+      sent.push({ id, attempts });
       sentIds.push(id);
     },
     async markPendingRetry(id, attempts, retryAfter, failureReason) {
@@ -80,7 +84,6 @@ const deliveryDefaults = {
   appBaseUrl: "https://ghs.test",
   batchSize: 20,
   backoffMinutes: [1, 5, 15],
-  maxAttempts: 3,
 };
 
 test("an empty claim does nothing -- no recipient lookup, no provider call", async () => {
@@ -106,6 +109,7 @@ test("a successful send marks the row sent and passes the rendered subject/text/
 
   assert.deepEqual(result, { claimed: 1, sent: 1, failed: 0 });
   assert.deepEqual(outbox.sentIds, ["outbox-1"]);
+  assert.deepEqual(outbox.sent, [{ id: "outbox-1", attempts: 1 }], "attempts passed to markSent includes this successful send itself (PR #47 review fix)");
   assert.equal(seenMessages.length, 1);
   assert.equal(seenMessages[0]!.to, "player@example.com");
   assert.equal(seenMessages[0]!.subject, "Round Submitted");
@@ -140,8 +144,8 @@ test("a permanent send failure goes straight to markFailed, not markPendingRetry
   assert.equal(outbox.failedRows[0]!.attempts, 1);
 });
 
-test("retry exhaustion: a retryable failure on the last available attempt still lands in markFailed", async () => {
-  const row = fakeRow({ attempts: 2 }); // maxAttempts is 3 -- this is the last one
+test("retry exhaustion: a retryable failure with no backoff entry left for the next attempt still lands in markFailed", async () => {
+  const row = fakeRow({ attempts: 3 }); // backoffMinutes has 3 entries -- this is the last one (index 2, "attempt 3")
   const outbox = fakeOutboxRepository([row]);
   const recipients = fakeRecipientsRepository(new Map([["history-1", { userId: "user-1", email: "player@example.com" }]]));
   const provider = fakeProvider(async () => { throw new EmailSendError("SMTP send failed: timeout", { code: "ETIMEDOUT" }); });
@@ -151,7 +155,7 @@ test("retry exhaustion: a retryable failure on the last available attempt still 
   assert.deepEqual(result, { claimed: 1, sent: 0, failed: 1 });
   assert.equal(outbox.pendingRetries.length, 0);
   assert.equal(outbox.failedRows.length, 1);
-  assert.equal(outbox.failedRows[0]!.attempts, 3);
+  assert.equal(outbox.failedRows[0]!.attempts, 4);
 });
 
 test("a row with no resolvable recipient is marked permanently failed, not retried -- the provider is never called for it", async () => {

@@ -15,13 +15,23 @@ export interface PollLoopDeps {
 
 export interface PollLoopHandle {
   // Resolves once the currently in-flight cycle (if any) finishes and no
-  // further cycles will be scheduled -- not an immediate abort. A single
-  // poll cycle is already short (bounded batch size, no external call
-  // held open across a DB transaction), so waiting for it to finish
-  // rather than interrupting mid-cycle is a deliberate, simple choice:
-  // there is nothing here that benefits from a harder cutoff.
+  // further cycles will be scheduled. Interrupts an in-progress sleep
+  // immediately (PR #47 review fix -- a previous version always waited
+  // out the full poll interval if called while sleeping, contradicting
+  // this very docstring); it does not interrupt a cycle that's actively
+  // running, since a single cycle is already short (bounded batch size,
+  // no external call held open across a DB transaction).
   stop(): Promise<void>;
 }
+
+// 10s: the same fallback getNotificationPollIntervalSeconds() itself uses
+// when no system_settings row exists yet. Used here only if that read
+// throws (e.g. a transient DB error) -- so a failing settings read can
+// never take down the loop (PR #47 review fix -- a previous version
+// awaited this outside runCycle()'s own try/catch, so a transient
+// failure there rejected the loop's promise and stopped the worker
+// entirely).
+const FALLBACK_POLL_INTERVAL_SECONDS = 10;
 
 // The loop itself (ADR-060: kept separate from delivery/crash-recovery/
 // retention's own logic, which are independently testable without any
@@ -35,6 +45,7 @@ export function startPollLoop(deps: PollLoopDeps): PollLoopHandle {
 
   let stopped = false;
   let lastRetentionAt = 0;
+  let cancelSleep: (() => void) | null = null;
 
   async function runCycle(): Promise<void> {
     try {
@@ -65,15 +76,39 @@ export function startPollLoop(deps: PollLoopDeps): PollLoopHandle {
     }
   }
 
+  async function nextPollIntervalSeconds(): Promise<number> {
+    try {
+      return await systemSettings.getNotificationPollIntervalSeconds();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("failed to read notify_poll_interval_seconds -- using the fallback interval for this cycle", {
+        error: message,
+        fallbackSeconds: FALLBACK_POLL_INTERVAL_SECONDS,
+      });
+      return FALLBACK_POLL_INTERVAL_SECONDS;
+    }
+  }
+
   function sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        cancelSleep = null;
+        resolve();
+      }, ms);
+      cancelSleep = () => {
+        clearTimeout(timer);
+        cancelSleep = null;
+        resolve();
+      };
+    });
   }
 
   async function loop(): Promise<void> {
     while (!stopped) {
       await runCycle();
       if (stopped) break;
-      const intervalSeconds = await systemSettings.getNotificationPollIntervalSeconds();
+      const intervalSeconds = await nextPollIntervalSeconds();
+      if (stopped) break;
       await sleep(intervalSeconds * 1000);
     }
   }
@@ -83,6 +118,7 @@ export function startPollLoop(deps: PollLoopDeps): PollLoopHandle {
   return {
     async stop() {
       stopped = true;
+      cancelSleep?.();
       await currentCycle;
     },
   };

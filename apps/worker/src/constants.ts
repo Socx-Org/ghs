@@ -9,13 +9,12 @@
 
 // ADR-210 point 5: "a configurable backoff schedule expressed as a list
 // of minute-offsets ... defaulting to RMS's proven [1, 5, 15] minutes".
+// Total attempts allowed is this array's own length + 1 (the initial
+// attempt, plus one retry per configured delay) -- see outbox-state.ts's
+// own comment (PR #47 review fix: an earlier separate MAX_ATTEMPTS
+// constant equal to this array's length left the last entry, 15 minutes,
+// unreachable).
 export const RETRY_BACKOFF_MINUTES: readonly number[] = [1, 5, 15];
-
-// = RETRY_BACKOFF_MINUTES.length, matching RMS's own
-// reminder_dispatches convention (retry_max = len(backoff_minutes)) --
-// the same convention already documented and used in ghs#39's own
-// planning.
-export const MAX_ATTEMPTS = RETRY_BACKOFF_MINUTES.length;
 
 // ADR-210 point 7: "a small multiple of expected provider-call latency".
 // A real send completes in seconds; 5 minutes is generous headroom.

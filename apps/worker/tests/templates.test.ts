@@ -37,6 +37,15 @@ test("round_rejected includes the mandatory reason (no legacy precedent -- new c
   assert.match(rendered.html, /Illegible scorecard/);
 });
 
+test("round_rejected HTML-escapes the free-text reason -- a rejecting admin's own words must not be able to inject markup into the email (PR #47 review fix)", () => {
+  const rendered = renderNotification("round_rejected", { roundId: "r1", reason: `<script>alert(1)</script> & "quoted" 'text'` }, APP_BASE_URL);
+  assert.doesNotMatch(rendered.html, /<script>/);
+  assert.match(rendered.html, /&lt;script&gt;alert\(1\)&lt;\/script&gt; &amp; &quot;quoted&quot; &#39;text&#39;/);
+  // The plain-text body is never parsed as markup -- escaping it would
+  // just corrupt the reason as read by a human, so it stays as-is there.
+  assert.match(rendered.text, /<script>alert\(1\)<\/script> & "quoted" 'text'/);
+});
+
 test("handicap_changed -- subject preserved verbatim from legacy's 'handicap_update' template", () => {
   const rendered = renderNotification("handicap_changed", { trigger: "round_approved", previousIndex: 15.4, newIndex: 14.1, historyRecordId: "h1" }, APP_BASE_URL);
   assert.equal(rendered.subject, "Your handicap index has been updated");
@@ -54,6 +63,12 @@ test("manual_override includes the admin's reason and both index values (no lega
   assert.equal(rendered.subject, "Your handicap index has been manually adjusted");
   assert.match(rendered.text, /12\.0/);
   assert.match(rendered.text, /Verified against a paper certificate/);
+});
+
+test("manual_override HTML-escapes the free-text reason -- same injection risk as round_rejected (PR #47 review fix)", () => {
+  const rendered = renderNotification("manual_override", { overrideId: "o1", previousIndex: 18.0, newIndex: 12.0, reason: "<b>bold</b>", adminUserId: "admin-1" }, APP_BASE_URL);
+  assert.doesNotMatch(rendered.html, /<b>bold<\/b>/);
+  assert.match(rendered.html, /&lt;b&gt;bold&lt;\/b&gt;/);
 });
 
 test("account_activation -- subject preserved verbatim from legacy, builds a real activation URL from the raw token", () => {

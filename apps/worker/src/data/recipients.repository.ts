@@ -28,7 +28,7 @@ export function createRecipientsRepository(pool: Pool): RecipientsRepository {
         `SELECT h.id AS history_id, u.id AS user_id, u.email::text AS email
          FROM notification_history h
          JOIN users u ON u.id = h.user_id
-         WHERE h.id = ANY($1)`,
+         WHERE h.id = ANY($1::uuid[])`,
         [historyIds],
       );
 

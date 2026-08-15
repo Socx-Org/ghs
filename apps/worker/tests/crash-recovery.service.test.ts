@@ -55,7 +55,7 @@ function fakeOutboxRepository(stuck: OutboxRow[]): OutboxRepository & {
   };
 }
 
-const deps = { logger: silentLogger, timeoutMinutes: 5, batchSize: 20, backoffMinutes: [1, 5, 15], maxAttempts: 3 };
+const deps = { logger: silentLogger, timeoutMinutes: 5, batchSize: 20, backoffMinutes: [1, 5, 15] };
 
 test("no stuck rows -- nothing happens", async () => {
   const outbox = fakeOutboxRepository([]);
@@ -75,19 +75,19 @@ test("a stuck row with attempts remaining is reclaimed back to pending, with att
 });
 
 test("a stuck row that has now exhausted its attempts becomes failed, not an infinite reclaim loop -- prevents a poison message looping forever", async () => {
-  const outbox = fakeOutboxRepository([fakeRow({ attempts: 2 })]); // maxAttempts is 3
+  const outbox = fakeOutboxRepository([fakeRow({ attempts: 3 })]); // backoffMinutes has 3 entries -- this is the last reachable one
   const result = await runCrashRecoverySweep({ ...deps, outbox });
 
   assert.deepEqual(result, { reclaimed: 1 });
   assert.equal(outbox.pendingRetries.length, 0);
   assert.equal(outbox.failedRows.length, 1);
-  assert.equal(outbox.failedRows[0]!.attempts, 3);
+  assert.equal(outbox.failedRows[0]!.attempts, 4);
 });
 
 test("multiple stuck rows are each reclaimed independently", async () => {
   const outbox = fakeOutboxRepository([
     fakeRow({ id: "outbox-1", attempts: 0 }),
-    fakeRow({ id: "outbox-2", attempts: 2 }),
+    fakeRow({ id: "outbox-2", attempts: 3 }), // backoffMinutes has 3 entries -- this is the last reachable one
   ]);
   const result = await runCrashRecoverySweep({ ...deps, outbox });
 

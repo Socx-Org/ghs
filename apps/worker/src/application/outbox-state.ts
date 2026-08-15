@@ -10,26 +10,33 @@ export type OutboxNextState =
   | { status: "pending"; attempts: number; retryAfter: Date }
   | { status: "failed"; attempts: number; retryAfter: null };
 
+// No separate maxAttempts parameter (PR #47 review fix): the backoff
+// schedule's own length IS the retry budget -- total attempts allowed is
+// backoffMinutes.length + 1 (the initial attempt, plus one retry per
+// configured delay). A previous version took maxAttempts = backoffMinutes.
+// length (3) as a separate constant, which meant the schedule's own last
+// entry (15 minutes) could never actually be reached -- attempts=3 already
+// failed before backoffMinutes[2] was ever read. Deriving the cutoff from
+// the array itself makes that class of drift impossible: every configured
+// delay is now genuinely used, and there is nothing left to keep in sync.
 export function nextOutboxState(
   currentAttempts: number,
   retryable: boolean,
   backoffMinutes: readonly number[],
-  maxAttempts: number,
   now: Date = new Date(),
 ): OutboxNextState {
   const attempts = currentAttempts + 1;
+  const delayMinutes = backoffMinutes[attempts - 1];
 
   // Permanent failures never consume the retry schedule (ADR-210 point
   // 4) -- straight to failed regardless of how many attempts remain.
-  // Retryable failures that have now exhausted the backoff schedule land
-  // in the exact same terminal state (point 11: dead-letter is just
-  // status='failed' in place, not a separate mechanism for either case).
-  if (!retryable || attempts >= maxAttempts) {
+  // Retryable failures that have now exhausted the backoff schedule
+  // (no delay configured for this attempt number) land in the exact
+  // same terminal state (point 11: dead-letter is just status='failed'
+  // in place, not a separate mechanism for either case).
+  if (!retryable || delayMinutes === undefined) {
     return { status: "failed", attempts, retryAfter: null };
   }
 
-  // attempts is 1-indexed after the increment above; backoffMinutes[0] is
-  // the delay before the 2nd attempt (i.e. after the 1st failure).
-  const delayMinutes = backoffMinutes[attempts - 1]!;
   return { status: "pending", attempts, retryAfter: new Date(now.getTime() + delayMinutes * 60_000) };
 }

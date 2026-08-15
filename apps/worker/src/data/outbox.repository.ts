@@ -69,7 +69,12 @@ export interface OutboxRepository {
   // the row's next status itself.
   claimStuckProcessing(timeoutMinutes: number, batchSize: number): Promise<OutboxRow[]>;
 
-  markSent(id: string): Promise<void>;
+  // attempts: the caller passes the count including this successful send
+  // itself (PR #47 review fix) -- and retry_after/failure_reason are
+  // always cleared on success, so a row that failed once before finally
+  // succeeding doesn't keep showing a stale failure reason or a
+  // meaningless future retry_after once it's actually sent.
+  markSent(id: string, attempts: number): Promise<void>;
   markPendingRetry(id: string, attempts: number, retryAfter: Date, failureReason: string): Promise<void>;
   markFailed(id: string, attempts: number, failureReason: string): Promise<void>;
 }
@@ -110,8 +115,13 @@ export function createOutboxRepository(pool: Pool): OutboxRepository {
       return result.rows.map(toOutboxRow);
     },
 
-    async markSent(id) {
-      await pool.query("UPDATE notification_outbox SET status = 'sent', updated_at = now() WHERE id = $1", [id]);
+    async markSent(id, attempts) {
+      await pool.query(
+        `UPDATE notification_outbox
+         SET status = 'sent', attempts = $2, retry_after = NULL, failure_reason = NULL, updated_at = now()
+         WHERE id = $1`,
+        [id, attempts],
+      );
     },
 
     async markPendingRetry(id, attempts, retryAfter, failureReason) {
