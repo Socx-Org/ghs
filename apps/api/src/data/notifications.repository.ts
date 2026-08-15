@@ -40,10 +40,11 @@ export interface RecordNotificationOptions {
 }
 
 export interface NotificationsRepository {
-  // Writes notification_history and its child notification_outbox row
-  // as one pair of inserts, both on the given client -- ADR-210 point 1
-  // requires the outbox record land in the SAME transaction as the
-  // business event that triggered it. client is a required PoolClient,
+  // Always writes notification_history. Also writes the child
+  // notification_outbox row, in the SAME transaction, on the given
+  // client -- ADR-210 point 1 -- unless options.enqueue is explicitly
+  // false (ghs#41: a preference gated delivery off, but the business
+  // event still genuinely happened). client is a required PoolClient,
   // not optional like most repositories in this codebase: every real
   // caller in this repository's scope already has an open transaction by
   // the time this is called (that's the entire point of the trigger), so
