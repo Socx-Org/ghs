@@ -84,6 +84,61 @@ function readSecret(credentialName: string, envVarFallback: string): string {
   return fallback;
 }
 
+// Split into independently-callable pieces (ghs#42) -- the worker needs
+// database + email config, but must never read jwt_secret/
+// mfa_encryption_key: it has no auth-related code path at all, and
+// reference/systemd/app-worker.service's own LoadCredential= line only
+// ever grants db_password, never the API's auth secrets (least privilege,
+// SEC-010/ADR-130 -- confirmed against the reference unit before writing
+// this, not assumed). loadConfig() below composes all of these for
+// apps/api's own use; apps/worker's composition root calls only
+// loadDatabaseConfig()/loadEmailConfig() directly.
+
+export function loadDatabaseConfig(): DatabaseConfig {
+  return {
+    host: process.env.DB_HOST ?? "127.0.0.1",
+    port: Number(process.env.DB_PORT ?? 5432),
+    database: process.env.DB_NAME ?? "ghs",
+    user: process.env.DB_USER ?? "ghs",
+    password: readSecret("db_password", "DB_PASSWORD"),
+  };
+}
+
+export function loadAuthConfig(): AuthConfig {
+  return {
+    jwtSecret: readSecret("jwt_secret", "JWT_SECRET"),
+    // Platform owner decision, 2026-08-10 (ghs#8): matches legacy GHS's
+    // own real, already-sound values, explicitly confirmed rather than
+    // silently inherited.
+    jwtAccessExpiresInSeconds: 15 * 60,
+    jwtRefreshExpiresInSeconds: 30 * 24 * 60 * 60,
+    mfaPendingExpiresInSeconds: 5 * 60,
+    mfaEncryptionKey: Buffer.from(readSecret("mfa_encryption_key", "MFA_ENCRYPTION_KEY"), "hex"),
+  };
+}
+
+export function loadEmailConfig(): EmailConfig {
+  return {
+    // mailpit is the local-dev default (matches its own out-of-the-box
+    // listener) -- real deployment always overrides via a real
+    // EnvironmentFile/LoadCredential set, same convention as
+    // database.host/database.user above.
+    provider: parseEmailProviderKind(process.env.EMAIL_PROVIDER ?? "mailpit"),
+    fromAddress: process.env.EMAIL_FROM_ADDRESS ?? "noreply@ghs.local",
+    smtp: {
+      host: process.env.SMTP_HOST ?? "127.0.0.1",
+      port: Number(process.env.SMTP_PORT ?? 1025),
+      secure: process.env.SMTP_SECURE === "true",
+      user: process.env.SMTP_USER,
+      // Only required when an SMTP user is actually configured --
+      // Mailpit's default local listener takes no auth at all, and
+      // forcing a secret to exist for that case would fail local dev
+      // for no real reason.
+      password: process.env.SMTP_USER ? readSecret("smtp_password", "SMTP_PASSWORD") : undefined,
+    },
+  };
+}
+
 // Read once, at startup, and passed down -- never re-read deep in the call
 // stack (APP-010, ADR-130).
 export function loadConfig(): AppConfig {
@@ -91,41 +146,8 @@ export function loadConfig(): AppConfig {
     env: process.env.SOCX_ENV ?? "development",
     port: Number(process.env.PORT ?? 3000),
     serviceName: process.env.SERVICE_NAME ?? "ghs-api",
-    database: {
-      host: process.env.DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.DB_PORT ?? 5432),
-      database: process.env.DB_NAME ?? "ghs",
-      user: process.env.DB_USER ?? "ghs",
-      password: readSecret("db_password", "DB_PASSWORD"),
-    },
-    auth: {
-      jwtSecret: readSecret("jwt_secret", "JWT_SECRET"),
-      // Platform owner decision, 2026-08-10 (ghs#8): matches legacy GHS's
-      // own real, already-sound values, explicitly confirmed rather than
-      // silently inherited.
-      jwtAccessExpiresInSeconds: 15 * 60,
-      jwtRefreshExpiresInSeconds: 30 * 24 * 60 * 60,
-      mfaPendingExpiresInSeconds: 5 * 60,
-      mfaEncryptionKey: Buffer.from(readSecret("mfa_encryption_key", "MFA_ENCRYPTION_KEY"), "hex"),
-    },
-    email: {
-      // mailpit is the local-dev default (matches its own out-of-the-box
-      // listener) -- real deployment always overrides via a real
-      // EnvironmentFile/LoadCredential set, same convention as
-      // database.host/database.user above.
-      provider: parseEmailProviderKind(process.env.EMAIL_PROVIDER ?? "mailpit"),
-      fromAddress: process.env.EMAIL_FROM_ADDRESS ?? "noreply@ghs.local",
-      smtp: {
-        host: process.env.SMTP_HOST ?? "127.0.0.1",
-        port: Number(process.env.SMTP_PORT ?? 1025),
-        secure: process.env.SMTP_SECURE === "true",
-        user: process.env.SMTP_USER,
-        // Only required when an SMTP user is actually configured --
-        // Mailpit's default local listener takes no auth at all, and
-        // forcing a secret to exist for that case would fail local dev
-        // for no real reason.
-        password: process.env.SMTP_USER ? readSecret("smtp_password", "SMTP_PASSWORD") : undefined,
-      },
-    },
+    database: loadDatabaseConfig(),
+    auth: loadAuthConfig(),
+    email: loadEmailConfig(),
   };
 }

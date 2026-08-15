@@ -53,3 +53,14 @@ test("notification settings default to all-on, matching legacy's real defaults",
   const updated = await service.getNotificationSettings();
   assert.deepEqual(updated, { roundSubmitted: true, roundApproved: false, maintenanceAlerts: true });
 });
+
+test("notification poll interval defaults to 10 seconds (ghs#42's approved configuration decision), is system_settings-configurable, and rejects non-positive values", async () => {
+  const service = createSystemSettingsService(fakeRepository());
+  assert.equal(await service.getNotificationPollIntervalSeconds(), 10);
+
+  await service.setNotificationPollIntervalSeconds(30, "admin-1");
+  assert.equal(await service.getNotificationPollIntervalSeconds(), 30);
+
+  await assert.rejects(() => service.setNotificationPollIntervalSeconds(0, "admin-1"));
+  await assert.rejects(() => service.setNotificationPollIntervalSeconds(-5, "admin-1"));
+});

@@ -149,6 +149,8 @@ function fakeSystemSettingsService(overrides: Partial<NotificationSettings> = {}
     async setMaintenanceMode() { throw new Error("not used by these tests"); },
     async getSelfRegistrationEnabled() { throw new Error("not used by these tests"); },
     async setSelfRegistrationEnabled() { throw new Error("not used by these tests"); },
+    async getNotificationPollIntervalSeconds() { throw new Error("not used by these tests"); },
+    async setNotificationPollIntervalSeconds() { throw new Error("not used by these tests"); },
     async getNotificationSettings() { return settings; },
     async setNotificationSetting() { throw new Error("not used by these tests"); },
   };
