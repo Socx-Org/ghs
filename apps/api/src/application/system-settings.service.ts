@@ -22,6 +22,13 @@ const KEYS = {
   notifyRoundSubmitted: "notify_round_submitted",
   notifyRoundApproved: "notify_round_approved",
   notifyMaintenanceAlerts: "notify_maintenance_alerts",
+  // ghs#42 (ADR-210 point 6/point 5's own "mechanism configurable, stored
+  // in system_settings" requirement) -- the only one of the worker's
+  // approved configuration decisions that's runtime-tunable rather than
+  // hardcoded (retry backoff, max attempts, crash-recovery timeout,
+  // retention periods, and batch size are all fixed constants -- see
+  // apps/worker/src/constants.ts).
+  notificationPollIntervalSeconds: "notify_poll_interval_seconds",
 } as const;
 
 export class InvalidSettingValueError extends Error {}
@@ -30,6 +37,14 @@ function parseBoolean(raw: string): boolean {
   if (raw === "true") return true;
   if (raw === "false") return false;
   throw new InvalidSettingValueError(`expected "true" or "false", got ${JSON.stringify(raw)}`);
+}
+
+function parsePositiveInteger(raw: string): number {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new InvalidSettingValueError(`expected a positive integer, got ${JSON.stringify(raw)}`);
+  }
+  return value;
 }
 
 export interface NotificationSettings {
@@ -47,6 +62,9 @@ export interface SystemSettingsService {
 
   getNotificationSettings(): Promise<NotificationSettings>;
   setNotificationSetting(setting: keyof NotificationSettings, value: boolean, updatedBy: string | null): Promise<void>;
+
+  getNotificationPollIntervalSeconds(): Promise<number>;
+  setNotificationPollIntervalSeconds(value: number, updatedBy: string | null): Promise<void>;
 }
 
 export function createSystemSettingsService(repo: SystemSettingsRepository): SystemSettingsService {
@@ -95,6 +113,26 @@ export function createSystemSettingsService(repo: SystemSettingsRepository): Sys
         maintenanceAlerts: KEYS.notifyMaintenanceAlerts,
       };
       await repo.upsert(keyMap[setting], String(value), `Notification toggle: ${setting}`, updatedBy);
+    },
+
+    async getNotificationPollIntervalSeconds() {
+      const row = await repo.get(KEYS.notificationPollIntervalSeconds);
+      // 10s: Phase 4 configuration decision (approved before ghs#42's
+      // implementation) -- low notification volume, no latency
+      // requirement stronger than "reasonably prompt".
+      return row ? parsePositiveInteger(row.value) : 10;
+    },
+
+    async setNotificationPollIntervalSeconds(value, updatedBy) {
+      if (!Number.isInteger(value) || value <= 0) {
+        throw new InvalidSettingValueError(`poll interval must be a positive integer number of seconds, got ${value}`);
+      }
+      await repo.upsert(
+        KEYS.notificationPollIntervalSeconds,
+        String(value),
+        "How often the notification worker polls notification_outbox for pending work, in seconds",
+        updatedBy,
+      );
     },
   };
 }

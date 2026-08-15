@@ -6,6 +6,17 @@
   "engines": {
     "node": ">=24"
   },
+  "exports": {
+    "./config": "./src/config.ts",
+    "./logger": "./src/logger.ts",
+    "./lib/email": "./src/lib/email.ts",
+    "./data/pool": "./src/data/pool.ts",
+    "./data/users.repository": "./src/data/users.repository.ts",
+    "./data/notifications.repository": "./src/data/notifications.repository.ts",
+    "./data/system-settings.repository": "./src/data/system-settings.repository.ts",
+    "./application/system-settings.service": "./src/application/system-settings.service.ts",
+    "./data/migrations/apply": "./src/data/migrations/apply.ts"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && mkdir -p dist/data/migrations && rm -f dist/data/migrations/*.sql && cp src/data/migrations/*.sql dist/data/migrations/",
     "start": "node dist/index.js",
