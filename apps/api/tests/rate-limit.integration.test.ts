@@ -142,6 +142,17 @@ test("/healthz is never subject to the general API tier, even after it's exhaust
 
     const health = await fetch(`${baseUrl}/healthz`);
     assert.equal(health.status, 200, "/healthz must still succeed -- an infrastructure liveness probe must never be inadvertently throttled");
+
+    // healthRouter only registers GET /healthz -- a GET here would be
+    // exempt purely from mount order (it's handled and responded to
+    // before the request ever reaches the limiter), which wouldn't
+    // actually prove the limiter's own `skip` predicate does anything
+    // (caught in review, PR #51). POST /healthz matches no router's
+    // route at all, so it falls through to the general limiter for
+    // real -- only the skip predicate (matching on req.path, not
+    // method) can be what protects it here.
+    const postHealth = await fetch(`${baseUrl}/healthz`, { method: "POST" });
+    assert.notEqual(postHealth.status, 429, "POST /healthz reaches the limiter's own middleware (no route handles it) -- the skip predicate, not mount order, is what must exempt it");
   });
 });
 
