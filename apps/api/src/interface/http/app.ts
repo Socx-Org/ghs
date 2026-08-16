@@ -12,6 +12,13 @@ import type { HandicapOverridesService } from "../../application/handicap-overri
 import type { PccService } from "../../application/pcc.service.ts";
 import type { PlayersRepository } from "../../data/players.repository.ts";
 import type { AuthProvider } from "../../application/auth-provider.ts";
+import {
+  createGeneralApiLimiter,
+  createAuthTierLimiter,
+  createSensitiveActionIpLimiter,
+  createSensitiveActionEmailLimiter,
+} from "./middleware/rate-limit.ts";
+import type { RateLimitTierOverride } from "./middleware/rate-limit.ts";
 import { healthRouter } from "./routes/health.ts";
 import { clubsRouter } from "./routes/clubs.ts";
 import { coursesRouter } from "./routes/courses.ts";
@@ -36,12 +43,39 @@ export interface AppDeps {
   pccService: PccService;
   playersRepository: PlayersRepository;
   authProvider: AuthProvider;
+  // ghs#49: real production wiring never sets this (undefined -- every
+  // tier uses its real operational value, defined once in rate-limit.ts).
+  // Exists solely so this issue's own request-flood tests can build the
+  // real app, through this same real composition root, with small
+  // thresholds -- proving hundreds of real requests against a
+  // production-sized 300 limit would make the suite slow for no benefit
+  // a small override doesn't already prove.
+  rateLimitOverrides?: {
+    general?: RateLimitTierOverride;
+    auth?: RateLimitTierOverride;
+    sensitiveIp?: RateLimitTierOverride;
+    sensitiveEmail?: RateLimitTierOverride;
+  };
 }
 
 // Composition root for the interface layer -- wires routers, never touches
 // persistence directly (ADR-060).
 export function createApp(deps: AppDeps): Express {
   const app = express();
+
+  // ghs#49: GHS runs behind nginx (Phase 3, reference/nginx) -- exactly
+  // one hop, same host (nginx proxies to 127.0.0.1:{{APP_PORT}}, per
+  // reference/nginx's own topology; deploy/nginx-ghs.conf's own
+  // proxy_set_header X-Forwarded-For confirms this is already set
+  // correctly on the nginx side). "loopback" trusts requests
+  // originating from 127.0.0.1/::1 and reads the real client IP from
+  // X-Forwarded-For. Without this, every production request would
+  // appear to Express as coming from nginx's own local IP, collapsing
+  // every real client into a single shared rate-limit bucket -- found
+  // and fixed as a real prerequisite for rate limiting to work in
+  // production at all, not assumed to already be configured.
+  app.set("trust proxy", "loopback");
+
   app.use(express.json());
 
   app.use((req, _res, next) => {
@@ -50,6 +84,22 @@ export function createApp(deps: AppDeps): Express {
   });
 
   app.use(healthRouter());
+
+  // General API baseline -- mounted after healthRouter (so a healthy
+  // request never even reaches it) and before every other route, so
+  // everything else is covered by the broad, outer tier. The auth and
+  // sensitive-action tiers below are layered ON TOP of this for the
+  // paths they cover, not an alternative to it -- each request to
+  // /auth/resend-activation, for example, is independently checked
+  // against all three, and any one being exceeded is enough to reject.
+  app.use(createGeneralApiLimiter(deps.rateLimitOverrides?.general));
+
+  app.use("/auth", createAuthTierLimiter(deps.rateLimitOverrides?.auth));
+  const sensitiveActionIpLimiter = createSensitiveActionIpLimiter(deps.rateLimitOverrides?.sensitiveIp);
+  const sensitiveActionEmailLimiter = createSensitiveActionEmailLimiter(deps.rateLimitOverrides?.sensitiveEmail);
+  app.use("/auth/resend-activation", sensitiveActionIpLimiter, sensitiveActionEmailLimiter);
+  app.use("/auth/password-reset/request", sensitiveActionIpLimiter, sensitiveActionEmailLimiter);
+
   app.use(authRouter(deps.authService, deps.systemSettingsService));
   app.use(mfaRouter(deps.mfaService, deps.authProvider));
   app.use(adminUsersRouter(deps.adminUsersService, deps.mfaService, deps.authProvider));
