@@ -167,6 +167,13 @@ const ADMIN_GATED_ROUTES: RouteCase[] = [
   { name: "PUT /admin/settings/notifications/:type", method: "PUT", path: "/admin/settings/notifications/round-submitted", body: { value: true } },
   { name: "PATCH /admin/users/:id/status", method: "PATCH", path: "/admin/users/00000000-0000-0000-0000-000000000000/status", body: { status: "active" } },
   { name: "DELETE /admin/users/:id/mfa", method: "DELETE", path: "/admin/users/00000000-0000-0000-0000-000000000000/mfa" },
+  // requireAdmin runs before the route body -- a dummy UUID still proves
+  // the authorization gate (player 401/403; admin/super_admin clear it
+  // and reach RoundNotFoundError -> 404, never 401/403), same pattern
+  // already used above for PATCH /admin/tee-configurations/:id/pcc.
+  { name: "PATCH /rounds/:id/status", method: "PATCH", path: "/rounds/00000000-0000-0000-0000-000000000000/status", body: { status: "approved" } },
+  { name: "DELETE /rounds/:id", method: "DELETE", path: "/rounds/00000000-0000-0000-0000-000000000000" },
+  { name: "POST /players/:id/handicap-overrides", method: "POST", path: "/players/00000000-0000-0000-0000-000000000000/handicap-overrides", body: { newIndex: 10.0, reason: "RBAC matrix test" } },
 ];
 
 for (const route of ADMIN_GATED_ROUTES) {
