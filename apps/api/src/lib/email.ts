@@ -86,6 +86,22 @@ export function createSmtpEmailProvider(
     port: config.smtp.port,
     secure: config.smtp.secure,
     auth: config.smtp.user ? { user: config.smtp.user, pass: config.smtp.password } : undefined,
+    // Found for real during ghs#43's production verification: a claimed
+    // outbox row can hang indefinitely mid-send with no error and no
+    // timeout at all (e.g. a network path that completes the TCP
+    // handshake but then silently drops all application-layer data --
+    // reproduced there against multiple, unrelated SMTP providers, so a
+    // provider-side issue was ruled out; the underlying cause was
+    // infrastructure-level, not something this abstraction can fix).
+    // Without an explicit timeout, nothing ever rejects, so classify.ts
+    // never runs and the row never enters the retry/backoff path ADR-210
+    // requires -- it just sits in 'processing' until crash-recovery's own,
+    // much longer timeout eventually reclaims it. These bound that: ANY
+    // genuinely unreachable or non-responding provider now fails fast
+    // enough for retry/backoff to actually engage.
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
   });
 
   return {
