@@ -33,7 +33,7 @@ function fakeRefreshTokens(): RefreshTokensRepository & { records: Map<string, R
     },
     async revokeByHash(tokenHash) {
       const record = records.get(tokenHash);
-      if (record && !record.revokedAt) record.revokedAt = new Date();
+      if (record && !record.revokedAt && !record.rotatedAt) record.revokedAt = new Date();
     },
   };
 }

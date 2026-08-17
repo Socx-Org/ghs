@@ -21,11 +21,18 @@ export interface RefreshTokensRepository {
   // ghs#59: revokes exactly the one record matching this hash -- real
   // logout, distinct from revokeAllForUser (reuse-detection's response
   // to a theft signal, which deliberately ends every session). A no-op,
-  // not an error, when the hash matches nothing or the record is
-  // already revoked -- logout is idempotent by design, matching this
-  // auth system's existing enumeration-safe posture elsewhere (e.g.
-  // resend-activation's identical response regardless of whether the
-  // account exists).
+  // not an error, when the hash matches nothing, is already revoked, OR
+  // is already rotated -- logout is idempotent by design, matching this
+  // auth system's existing enumeration-safe posture elsewhere. The
+  // already-rotated exclusion is not optional: validateAndRotateRefreshToken
+  // checks revokedAt before rotatedAt, so revoking an already-rotated
+  // (stale, exchanged) token here would let it be presented to
+  // /auth/logout to launder away the evidence reuse-detection needs --
+  // a stale token later replayed to /auth/refresh would then get a
+  // plain "revoked" 401 instead of tripping revokeAllForUser, the real
+  // theft response (review finding, PR #74). Only a token that is
+  // currently someone's real, active, un-rotated session can be logged
+  // out of.
   revokeByHash(tokenHash: string): Promise<void>;
 }
 
@@ -71,7 +78,7 @@ export function createRefreshTokensRepository(pool: Pool): RefreshTokensReposito
 
     async revokeByHash(tokenHash) {
       await pool.query(
-        "UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL",
+        "UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL AND rotated_at IS NULL",
         [tokenHash],
       );
     },
