@@ -192,5 +192,16 @@ jobs:
           # API/worker release swap above -- acceptable for static
           # assets, where a stale bundle for a few seconds is much
           # lower-risk than for the API.
+          #
+          # mkdir -p before the sync (review finding, PR #77): rsync -a
+          # alone auto-creates a single missing leaf directory (verified
+          # directly -- `rsync -a src/ existing-parent/missing-leaf/`
+          # succeeds), so this was never a bug on a normally-provisioned
+          # box (nginx already created /var/www when installed). It only
+          # bites if /var/www itself is also missing -- real rsync (unlike
+          # openrsync) doesn't create multiple missing levels without
+          # --mkpath (rsync 3.2.3+), a case worth covering cheaply
+          # (a full droplet rebuild) rather than relying on that nuance.
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo mkdir -p /var/www/ghs"
           ssh "${SSH_OPTS[@]}" "$REMOTE" \
             "sudo rsync -a --delete /opt/ghs/current/apps/web/dist/ /var/www/ghs/"
