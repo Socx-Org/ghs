@@ -50,6 +50,24 @@ export interface RoundSummary {
   status: RoundStatus;
 }
 
+// ghs#61: a purpose-built, lightweight projection for the admin pending-
+// review queue -- deliberately not the full Round aggregate (no hole
+// scores, no score fields an admin doesn't need just to decide which
+// round to open next). Exactly the fields a queue row needs to render,
+// per the approved scope: round id, player identity, course, tee
+// configuration, played date.
+export interface PendingRoundQueueItem {
+  id: string;
+  playerId: string;
+  playerFirstName: string;
+  playerLastName: string;
+  courseId: string;
+  courseName: string;
+  teeConfigurationId: string;
+  teeConfigurationName: string;
+  playedAt: string;
+}
+
 export interface CreateHoleScoreInput {
   holeNumber: number;
   strokes: number;
@@ -143,6 +161,13 @@ export interface RoundsRepository {
   updateScores(id: string, update: RoundScoreUpdate): Promise<Round>;
   get(id: string): Promise<Round | null>;
   listByPlayer(playerId: string): Promise<RoundSummary[]>;
+  // ghs#61: every round awaiting review, across all players -- the admin
+  // pending-queue's own real query, not a filtered view of listByPlayer
+  // (which is player-scoped) or get (which is single-round). Deliberately
+  // narrow: no pagination/filtering/sorting parameters, matching the
+  // approved scope (a purpose-built queue endpoint, not a general admin
+  // rounds browser).
+  listPendingQueue(): Promise<PendingRoundQueueItem[]>;
   // Every approved round with a real differential -- the exact input the
   // WHS calculation engine (ghs#22) needs. Excludes anything without a
   // score_differential yet (unscored, or scoring not yet run) and
@@ -394,6 +419,47 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         [playerId],
       );
       return result.rows.map(toRoundSummary);
+    },
+
+    async listPendingQueue() {
+      const result = await pool.query<{
+        id: string;
+        player_id: string;
+        player_first_name: string;
+        player_last_name: string;
+        course_id: string;
+        course_name: string;
+        tee_configuration_id: string;
+        tee_configuration_name: string;
+        played_at: Date;
+      }>(
+        `SELECT
+           r.id, r.player_id, p.first_name AS player_first_name, p.last_name AS player_last_name,
+           c.id AS course_id, c.name AS course_name,
+           tc.id AS tee_configuration_id, tc.name AS tee_configuration_name,
+           r.played_at
+         FROM rounds r
+         JOIN players p ON p.id = r.player_id
+         JOIN tee_configurations tc ON tc.id = r.tee_configuration_id
+         JOIN courses c ON c.id = tc.course_id
+         WHERE r.status = 'pending' AND r.deleted_at IS NULL
+         -- Oldest submission first (updated_at is set the moment a round
+         -- transitions to 'pending', ghs#58's setStatus) -- a real FIFO
+         -- queue order, not played_at (when the round was played, which
+         -- is unrelated to how long it's been waiting for review).
+         ORDER BY r.updated_at ASC`,
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        playerId: row.player_id,
+        playerFirstName: row.player_first_name,
+        playerLastName: row.player_last_name,
+        courseId: row.course_id,
+        courseName: row.course_name,
+        teeConfigurationId: row.tee_configuration_id,
+        teeConfigurationName: row.tee_configuration_name,
+        playedAt: row.played_at.toISOString(),
+      }));
     },
 
     async listApprovedDifferentialsForPlayer(playerId, client) {

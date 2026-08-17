@@ -26,6 +26,7 @@ function fakeRoundsRepository(differentialsByPlayer: Record<string, RoundDiffere
     async updateScores() { throw new Error("not used"); },
     async get() { return null; },
     async listByPlayer() { return []; },
+    async listPendingQueue() { throw new Error("not used by these tests"); },
     async listApprovedDifferentialsForPlayer(playerId) {
       return differentialsByPlayer[playerId] ?? [];
     },

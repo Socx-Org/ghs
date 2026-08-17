@@ -212,6 +212,21 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
     }
   });
 
+  // ghs#61: the admin pending-review queue -- purpose-built and
+  // deliberately narrow (no pagination/filtering/sorting query params),
+  // matching the approved scope. Not a generic admin rounds browser;
+  // raise that separately if a real requirement for one is ever
+  // approved. Mounted before the /rounds/:id-shaped routes below, but
+  // ordering doesn't actually matter here -- /admin/rounds/pending
+  // shares no path segment with /rounds/:id at all.
+  router.get("/admin/rounds/pending", ...requireAdmin, async (_req, res, next) => {
+    try {
+      res.status(200).json(await service.listPendingQueue());
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // Every transition below is admin-only (matching legacy's real,
   // unambiguous behaviour, and ghs#9's existing precedent for status
   // changes) and real workflow behaviour, not a bare field update: each

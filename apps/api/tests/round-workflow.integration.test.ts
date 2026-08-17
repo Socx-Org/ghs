@@ -459,3 +459,38 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("listPendingQueue (ghs#61): returns only genuinely pending rounds, across all players, oldest submission first, with the queue's own lightweight shape", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const players = createPlayersRepository(pool);
+  const playerA = await players.create({ firstName: "Queue", lastName: "First" });
+  const playerB = await players.create({ firstName: "Queue", lastName: "Second" });
+  const { roundsRepo, roundsService } = buildServices();
+
+  // A draft round -- never submitted, must never appear in the queue.
+  await roundsRepo.create({ playerId: playerA.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+
+  // An already-approved round -- already decided, must never appear.
+  await createApprovedRound(playerA.id, teeConfigurationId, "2026-05-02T09:00:00.000Z", 10.0);
+
+  // Two real pending rounds, submitted in a known order (setStatus's own
+  // updated_at is what listPendingQueue orders by).
+  const firstSubmitted = await roundsRepo.create({ playerId: playerA.id, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
+  await roundsRepo.setStatus(firstSubmitted.id, "pending");
+  const secondSubmitted = await roundsRepo.create({ playerId: playerB.id, teeConfigurationId, playedAt: "2026-05-04T09:00:00.000Z" });
+  await roundsRepo.setStatus(secondSubmitted.id, "pending");
+
+  const queue = await roundsService.listPendingQueue();
+
+  assert.equal(queue.length, 2, "only the two genuinely pending rounds appear -- not the draft, not the approved one");
+  assert.deepEqual(queue.map((item) => item.id), [firstSubmitted.id, secondSubmitted.id], "oldest submission first, a real FIFO queue order");
+
+  const first = queue[0]!;
+  assert.equal(first.playerId, playerA.id);
+  assert.equal(first.playerFirstName, "Queue");
+  assert.equal(first.playerLastName, "First");
+  assert.equal(first.teeConfigurationId, teeConfigurationId);
+  assert.ok(first.courseName, "course name is present -- enough to render a queue row without a further per-round fetch");
+  assert.ok(first.teeConfigurationName);
+  assert.equal(first.playedAt, "2026-05-03T09:00:00.000Z");
+});
