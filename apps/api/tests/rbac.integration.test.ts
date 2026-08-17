@@ -481,6 +481,10 @@ test("ownership boundary: a player CAN view their own profile, including their (
     // calculation or admin override ever sets them, not omitted.
     assert.equal(body.handicapIndex, null);
     assert.equal(body.lowHandicapIndex, null);
+    // userId is an internal auth-linkage key, not profile data -- must
+    // never appear in the wire response, even for the player's own
+    // profile (review finding, PR #75).
+    assert.equal("userId" in body, false, "userId must not appear in the response DTO at all");
   });
 });
 

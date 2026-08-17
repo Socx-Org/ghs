@@ -1,5 +1,5 @@
 import { Router } from "express";
-import type { PlayersRepository } from "../../../data/players.repository.ts";
+import type { Player, PlayersRepository } from "../../../data/players.repository.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth } from "../middleware/require-auth.ts";
 import { createPlayerAccessAuthorizer } from "../authorization.ts";
@@ -11,6 +11,19 @@ import { createPlayerAccessAuthorizer } from "../authorization.ts";
 // the whole operation, matching this route's own dependency directly on
 // PlayersRepository for authorizeForPlayer, the same pattern every other
 // player-owned-resource route already uses.
+
+// Request/response shape lives here, not the application/data-access
+// layers (ADR-060) -- an explicit response DTO, not the raw repository
+// Player passed straight through. userId is an internal auth-linkage
+// key (players.user_id -> users.id), not profile data the frontend
+// needs; returning it verbatim would widen what an admin viewing an
+// arbitrary player incidentally learns beyond this endpoint's own
+// purpose (review finding, PR #75).
+function toPlayerProfileResponse(player: Player) {
+  const { userId: _userId, ...profile } = player;
+  return profile;
+}
+
 export function playersRouter(players: PlayersRepository, authProvider: AuthProvider): Router {
   const router = Router();
   const auth = requireAuth(authProvider);
@@ -26,9 +39,12 @@ export function playersRouter(players: PlayersRepository, authProvider: AuthProv
       // directly, so checking first means an unauthorized caller gets a
       // uniform 403 regardless of whether the player exists, rather than
       // a 404-vs-403 distinction that would otherwise leak which player
-      // IDs are real.
+      // IDs are real. The message is deliberately generic, not "cannot
+      // view another player's profile" -- that would be misleading for
+      // the nonexistent-player case this same 403 also covers (review
+      // finding, PR #75).
       if (!(await authorizeForPlayer(identity.sub, identity.ghsRole, playerId))) {
-        res.status(403).json({ error: "cannot view another player's profile" });
+        res.status(403).json({ error: "forbidden" });
         return;
       }
 
@@ -37,7 +53,7 @@ export function playersRouter(players: PlayersRepository, authProvider: AuthProv
         res.status(404).json({ error: "player not found" });
         return;
       }
-      res.status(200).json(player);
+      res.status(200).json(toPlayerProfileResponse(player));
     } catch (err) {
       next(err);
     }
