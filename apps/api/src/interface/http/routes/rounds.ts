@@ -156,6 +156,48 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         res.status(400).json({ error: err.message });
         return;
       }
+      // ghs#58: addHoleScore now rejects an attempt to edit a round that
+      // isn't draft/rejected/amending (e.g. pending, under active
+      // review) -- same 409 treatment as every other invalid workflow
+      // transition below, not left to fall through to the generic 500
+      // handler.
+      if (err instanceof InvalidRoundTransitionError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  // ghs#58: the explicit, player-initiated moment a round becomes
+  // visible to the admin pending-queue -- ownership-checked exactly like
+  // every other player-facing round route above, not admin-gated (a
+  // player submits their own round; approval/rejection remains
+  // admin-only, unchanged, below).
+  router.post("/rounds/:id/submit", auth, async (req, res, next) => {
+    try {
+      const roundId = String(req.params.id);
+      const round = await service.getRound(roundId);
+      if (!round) {
+        res.status(404).json({ error: "round not found" });
+        return;
+      }
+      const identity = req.identity!;
+      if (!(await authorizeForPlayer(identity.sub, identity.ghsRole, round.playerId))) {
+        res.status(403).json({ error: "cannot submit another player's round" });
+        return;
+      }
+
+      res.status(200).json(await service.submitForReview(roundId));
+    } catch (err) {
+      if (err instanceof RoundNotFoundError) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      if (err instanceof InvalidRoundTransitionError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });
