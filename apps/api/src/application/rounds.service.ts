@@ -51,6 +51,18 @@ export interface RoundsService {
   getRound(id: string): Promise<Round | null>;
   listRoundsForPlayer(playerId: string): Promise<RoundSummary[]>;
 
+  // draft|rejected|amending -> pending (ghs#58). The explicit moment a
+  // round actually becomes visible to the admin pending-queue -- never
+  // reachable by merely creating or editing one. Fires round_submitted
+  // here, not at creation (ADR-210 point 1: the same transaction as the
+  // real event, and "submitted" now genuinely means "asked for review",
+  // not "record exists"). No recalculation: none of draft/rejected/
+  // amending ever contributed a differential (only 'approved' rounds do,
+  // per listApprovedDifferentialsForPlayer), so landing in 'pending'
+  // changes nothing recalculation needs to see yet -- approveRound is
+  // still what triggers that, unchanged.
+  submitForReview(id: string): Promise<RoundWorkflowResult>;
+
   // Every method below is a real workflow transition (ghs#23): each
   // opens its own transaction, locks the round row first
   // (RoundsRepository.getForUpdate), validates the transition is legal
@@ -156,6 +168,14 @@ export function createRoundsService(
     }
   }
 
+  // ghs#58: the set of statuses a player may still write hole scores
+  // into, and the exact same set submitForReview accepts as a valid
+  // source status -- one shared definition, not two independently
+  // maintained lists that could drift apart.
+  function isEditableStatus(status: RoundStatus): boolean {
+    return status === "draft" || status === "rejected" || status === "amending";
+  }
+
   async function runWorkflowTransition(
     id: string,
     validate: (existing: RoundForUpdate) => void,
@@ -205,43 +225,18 @@ export function createRoundsService(
         }));
       }
 
-      // Read outside the transaction, same as every other system_settings
-      // check in this codebase (e.g. the self-registration gate) --
-      // settings are read live, not cached, and there's no correctness
-      // reason to read this specific boolean through the same connection
-      // as the write below (ghs#41).
-      const { roundSubmitted } = await systemSettings.getNotificationSettings();
-
-      // Opens its own transaction (new for ghs#25 -- repository.create()
-      // previously self-managed its own, entirely invisible to this
-      // layer) so the "round_submitted" notification lands in the SAME
-      // transaction as the round's own creation (ADR-210 point 1), not
-      // as an unrelated follow-up write that could succeed or fail
-      // independently of the round actually being created.
-      const client = await pool.connect();
-      try {
-        await client.query("BEGIN");
-        const round = await repository.create({ ...input, holeScores }, client);
-        // notification_history always gets a row -- the round was
-        // genuinely submitted regardless of preference -- but no outbox
-        // row (nothing for the worker to ever deliver) when gated off
-        // (ghs#41, ADR-210's "history without outbox" case).
-        await notifyPlayer(
-          round.playerId,
-          "round_submitted",
-          { roundId: round.id, teeConfigurationId: round.teeConfigurationId, playedAt: round.playedAt },
-          client,
-          { enqueue: roundSubmitted },
-        );
-        await client.query("COMMIT");
-        logger.info("round created", { roundId: round.id, playerId: round.playerId, holeCount: round.holeScores.length });
-        return round;
-      } catch (err) {
-        await client.query("ROLLBACK");
-        throw err;
-      } finally {
-        client.release();
-      }
+      // ghs#58: creating a round no longer submits it for review -- it
+      // lands in 'draft' (repository.create's own insert), invisible to
+      // the admin pending-queue. No round_submitted notification here
+      // any more (moved to submitForReview below, ADR-210 point 1's
+      // "same transaction as the real event" now means the same
+      // transaction as the SUBMISSION, not mere record creation) -- so
+      // this no longer needs its own transaction wrapper either;
+      // repository.create() manages its own, exactly as it did before
+      // ghs#25 threaded a client through for the notification's sake.
+      const round = await repository.create({ ...input, holeScores });
+      logger.info("round created", { roundId: round.id, playerId: round.playerId, holeCount: round.holeScores.length });
+      return round;
     },
 
     async addHoleScore(roundId, input, preloadedRound) {
@@ -251,6 +246,11 @@ export function createRoundsService(
       const teeConfiguration = await courses.getTeeConfiguration(round.teeConfigurationId);
       if (!teeConfiguration) throw new Error("tee configuration not found");
 
+      // playingHandicap and the tee configuration's own hole data never
+      // change after a round/course is created (no edit path exists for
+      // either), so computing this from the caller's own round snapshot
+      // is safe even though that snapshot's STATUS may be stale -- unlike
+      // status, this doesn't need the fresh, locked read below.
       const netDoubleBogeyAdjusted = scoring.computeHoleAdjustment({
         holeNumber: input.holeNumber,
         strokes: input.strokes,
@@ -259,9 +259,40 @@ export function createRoundsService(
         holeCount: teeConfiguration.holeCount,
       });
 
-      const holeScore = await repository.addHoleScore(roundId, { ...input, netDoubleBogeyAdjusted });
-      logger.info("hole score recorded", { roundId, holeNumber: holeScore.holeNumber });
-      return holeScore;
+      // ghs#58: the actual editable-status decision is made against a
+      // freshly row-locked read, not the caller's (possibly stale)
+      // snapshot -- preloadedRound in particular may be minutes old by
+      // the time this runs (the HTTP route fetches it once, up front,
+      // for its own ownership check). Locking + checking + inserting on
+      // the SAME transaction closes the race a concurrent submit/admin
+      // transition could otherwise slip through between the check and
+      // the write -- the same FOR UPDATE discipline runWorkflowTransition
+      // already gives every other status-sensitive round operation in
+      // this file, found missing here in review (PR #73).
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const locked = await repository.getForUpdate(roundId, client);
+        if (!locked) throw new RoundNotFoundError(`round ${roundId} not found`);
+        if (!isEditableStatus(locked.status)) {
+          throw new InvalidRoundTransitionError(`cannot add a hole score to a round in status '${locked.status}'`);
+        }
+        const holeScore = await repository.addHoleScore(roundId, { ...input, netDoubleBogeyAdjusted }, client);
+        await client.query("COMMIT");
+        logger.info("hole score recorded", { roundId, holeNumber: holeScore.holeNumber });
+        return holeScore;
+      } catch (err) {
+        try {
+          await client.query("ROLLBACK");
+        } catch {
+          // Best-effort only, same convention as apply.ts's advisory
+          // unlock / migration rollback -- never let a secondary
+          // rollback failure replace and hide the real error above.
+        }
+        throw err;
+      } finally {
+        client.release();
+      }
     },
 
     async updateScores(id, update) {
@@ -276,6 +307,40 @@ export function createRoundsService(
 
     async listRoundsForPlayer(playerId) {
       return repository.listByPlayer(playerId);
+    },
+
+    async submitForReview(id) {
+      const { roundSubmitted } = await systemSettings.getNotificationSettings();
+
+      return runWorkflowTransition(
+        id,
+        (existing) => {
+          if (!isEditableStatus(existing.status)) {
+            throw new InvalidRoundTransitionError(`cannot submit a round in status '${existing.status}' for review`);
+          }
+        },
+        async (client, existing) => {
+          // setStatus's rejectionReason param defaults to null when
+          // omitted (same as approveRound/reopenForAmendment below) --
+          // clears a stale rejection reason from a round that's now
+          // back under review, the same way those two already clear it
+          // implicitly today.
+          await repository.setStatus(id, "pending", undefined, client);
+          // notification_history always gets a row -- the round was
+          // genuinely submitted regardless of preference -- but no
+          // outbox row (nothing for the worker to ever deliver) when
+          // gated off (ghs#41, ADR-210's "history without outbox" case).
+          await notifyPlayer(
+            existing.playerId,
+            "round_submitted",
+            { roundId: id, teeConfigurationId: existing.teeConfigurationId, playedAt: existing.playedAt },
+            client,
+            { enqueue: roundSubmitted },
+          );
+          logger.info("round submitted for review", { roundId: id, playerId: existing.playerId });
+          return null;
+        },
+      );
     },
 
     async approveRound(id) {

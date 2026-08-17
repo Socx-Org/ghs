@@ -1,10 +1,13 @@
 import type { Pool, PoolClient } from "pg";
 
 export type FairwayResult = "hit" | "missed_left" | "missed_right";
-// 'amending': an approved round reopened for correction (ghs#23) --
-// distinct from 'pending' so "awaiting first approval" and "was
-// approved, now under correction" stay distinguishable.
-export type RoundStatus = "pending" | "approved" | "rejected" | "amending";
+// 'draft': player is still entering scores, not yet submitted for
+// review (ghs#58) -- distinct from 'pending' so creating a round never
+// itself places it in the admin approval queue. 'amending': an approved
+// round reopened for correction (ghs#23) -- distinct from 'pending' so
+// "awaiting first approval" and "was approved, now under correction"
+// stay distinguishable.
+export type RoundStatus = "draft" | "pending" | "approved" | "rejected" | "amending";
 
 export interface HoleScore {
   id: string;
@@ -131,7 +134,12 @@ export interface RoundsRepository {
   // manages its own self-contained transaction exactly as before --
   // existing callers are unaffected.
   create(input: CreateRoundInput, client?: PoolClient): Promise<Round>;
-  addHoleScore(roundId: string, input: CreateHoleScoreInput): Promise<HoleScore>;
+  // client: same optional-participation convention as create() above --
+  // threaded through so ghs#58's status guard (rounds.service.ts) can
+  // take a real row lock (getForUpdate) and this insert on the SAME
+  // client/transaction, closing the race between checking the round's
+  // status and writing the hole score (review finding, PR #73).
+  addHoleScore(roundId: string, input: CreateHoleScoreInput, client?: PoolClient): Promise<HoleScore>;
   updateScores(id: string, update: RoundScoreUpdate): Promise<Round>;
   get(id: string): Promise<Round | null>;
   listByPlayer(playerId: string): Promise<RoundSummary[]>;
@@ -277,8 +285,8 @@ async function insertHoleScore(
 // service.ts's runRecalculation).
 async function runCreate(client: PoolClient, input: CreateRoundInput): Promise<Round> {
   const roundResult = await client.query<RoundRow>(
-    `INSERT INTO rounds (player_id, tee_configuration_id, played_at, playing_handicap, is_tournament, is_9_hole)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO rounds (player_id, tee_configuration_id, played_at, playing_handicap, is_tournament, is_9_hole, status)
+     VALUES ($1, $2, $3, $4, $5, $6, 'draft')
      RETURNING ${ROUND_COLUMNS}`,
     [
       input.playerId,
@@ -324,8 +332,8 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       }
     },
 
-    async addHoleScore(roundId, input) {
-      return insertHoleScore(pool, roundId, input);
+    async addHoleScore(roundId, input, client) {
+      return insertHoleScore(client ?? pool, roundId, input);
     },
 
     async updateScores(id, update) {
