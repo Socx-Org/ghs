@@ -174,6 +174,9 @@ const ADMIN_GATED_ROUTES: RouteCase[] = [
   { name: "PATCH /rounds/:id/status", method: "PATCH", path: "/rounds/00000000-0000-0000-0000-000000000000/status", body: { status: "approved" } },
   { name: "DELETE /rounds/:id", method: "DELETE", path: "/rounds/00000000-0000-0000-0000-000000000000" },
   { name: "POST /players/:id/handicap-overrides", method: "POST", path: "/players/00000000-0000-0000-0000-000000000000/handicap-overrides", body: { newIndex: 10.0, reason: "RBAC matrix test" } },
+  // ghs#61 -- a real list endpoint, no dummy-ID path param needed; the
+  // authorization gate is exercised identically either way.
+  { name: "GET /admin/rounds/pending", method: "GET", path: "/admin/rounds/pending" },
 ];
 
 for (const route of ADMIN_GATED_ROUTES) {

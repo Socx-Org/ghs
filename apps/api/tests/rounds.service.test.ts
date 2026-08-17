@@ -263,6 +263,7 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
         .filter((r) => r.playerId === playerId && !deleted.has(r.id))
         .map(({ id, playerId: p, teeConfigurationId, playedAt, status }) => ({ id, playerId: p, teeConfigurationId, playedAt, status }));
     },
+    async listPendingQueue() { throw new Error("not used by these tests"); },
     async listApprovedDifferentialsForPlayer(playerId: string) {
       return [...rounds.values()]
         .filter((r) => r.playerId === playerId && r.status === "approved" && r.scoreDifferential !== null && !deleted.has(r.id))

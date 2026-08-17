@@ -3,6 +3,7 @@ import type {
   CreateHoleScoreInput,
   CreateRoundInput,
   HoleScore,
+  PendingRoundQueueItem,
   Round,
   RoundForUpdate,
   RoundScoreUpdate,
@@ -50,6 +51,12 @@ export interface RoundsService {
   updateScores(id: string, update: RoundScoreUpdate): Promise<Round>;
   getRound(id: string): Promise<Round | null>;
   listRoundsForPlayer(playerId: string): Promise<RoundSummary[]>;
+  // ghs#61: the admin pending-review queue, across all players -- a thin
+  // pass-through to the repository's own purpose-built query. No
+  // business logic belongs here (unlike the workflow transitions below),
+  // so no wrapping beyond the interface/application layering ADR-060
+  // already requires of every route.
+  listPendingQueue(): Promise<PendingRoundQueueItem[]>;
 
   // draft|rejected|amending -> pending (ghs#58). The explicit moment a
   // round actually becomes visible to the admin pending-queue -- never
@@ -307,6 +314,10 @@ export function createRoundsService(
 
     async listRoundsForPlayer(playerId) {
       return repository.listByPlayer(playerId);
+    },
+
+    async listPendingQueue() {
+      return repository.listPendingQueue();
     },
 
     async submitForReview(id) {
