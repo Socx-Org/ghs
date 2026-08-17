@@ -345,9 +345,13 @@ test("invalid role values are rejected at the input-validation layer (POST /admi
 });
 
 test("'viewer' cannot be introduced through the database model either -- rejected by the CHECK constraint even bypassing the application layer entirely", async () => {
+  // Asserts on the SQLSTATE code (23514 = check_violation), not the
+  // human-readable message -- the message text varies across Postgres
+  // versions/locales and would make this test brittle (review comment,
+  // PR #52).
   await assert.rejects(
     () => pool.query("INSERT INTO users (email, password_hash, role, status) VALUES ('viewer-bypass@example.com', 'x', 'viewer', 'active')"),
-    /violates check constraint/,
+    (err: unknown) => (err as { code?: string }).code === "23514",
   );
 });
 
