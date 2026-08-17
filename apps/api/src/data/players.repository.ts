@@ -8,6 +8,13 @@ export interface Player {
   lastName: string;
   country: string;
   createdAt: string;
+  // ghs#60: added to the projection -- the columns themselves have
+  // existed since migration 007 (handicap history/cached index), but
+  // were never read anywhere outside the internal recalculation
+  // pipeline (HandicapHistoryRepository.getCurrentIndex). Null until a
+  // player's first real WHS calculation (or admin override) sets them.
+  handicapIndex: number | null;
+  lowHandicapIndex: number | null;
 }
 
 export interface CreatePlayerInput {
@@ -32,6 +39,8 @@ interface PlayerRow {
   last_name: string;
   country: string;
   created_at: Date;
+  handicap_index: string | null;
+  low_handicap_index: string | null;
 }
 
 function toPlayer(row: PlayerRow): Player {
@@ -43,10 +52,12 @@ function toPlayer(row: PlayerRow): Player {
     lastName: row.last_name,
     country: row.country,
     createdAt: row.created_at.toISOString(),
+    handicapIndex: row.handicap_index === null ? null : Number(row.handicap_index),
+    lowHandicapIndex: row.low_handicap_index === null ? null : Number(row.low_handicap_index),
   };
 }
 
-const SELECT_COLUMNS = "id, user_id, club_id, first_name, last_name, country, created_at";
+const SELECT_COLUMNS = "id, user_id, club_id, first_name, last_name, country, created_at, handicap_index, low_handicap_index";
 
 export function createPlayersRepository(pool: Pool): PlayersRepository {
   return {

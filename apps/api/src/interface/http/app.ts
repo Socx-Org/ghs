@@ -29,6 +29,7 @@ import { adminSettingsRouter } from "./routes/admin-settings.ts";
 import { adminPccRouter } from "./routes/admin-pcc.ts";
 import { roundsRouter } from "./routes/rounds.ts";
 import { handicapOverridesRouter } from "./routes/handicap-overrides.ts";
+import { playersRouter } from "./routes/players.ts";
 
 export interface AppDeps {
   logger: Logger;
@@ -125,6 +126,7 @@ export function createApp(deps: AppDeps): Express {
   v1Router.use(coursesRouter(deps.coursesService, deps.authProvider));
   v1Router.use(roundsRouter(deps.roundsService, deps.playersRepository, deps.authProvider));
   v1Router.use(handicapOverridesRouter(deps.handicapOverridesService, deps.playersRepository, deps.authProvider));
+  v1Router.use(playersRouter(deps.playersRepository, deps.authProvider));
 
   app.use("/api/v1", v1Router);
 

@@ -168,7 +168,7 @@ function fakePlayersRepository(overrides: Record<string, string | null> = {}): P
     async findByUserId() { throw new Error("not used by these tests"); },
     async get(id) {
       const userId = id in overrides ? overrides[id] : `${id}-user`;
-      const player: Player = { id, userId, clubId: null, firstName: "Test", lastName: "Player", country: "ES", createdAt: new Date().toISOString() };
+      const player: Player = { id, userId, clubId: null, firstName: "Test", lastName: "Player", country: "ES", createdAt: new Date().toISOString(), handicapIndex: null, lowHandicapIndex: null };
       return player;
     },
   };
