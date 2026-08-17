@@ -1,0 +1,63 @@
+import { Router } from "express";
+import type { Player, PlayersRepository } from "../../../data/players.repository.ts";
+import type { AuthProvider } from "../../../application/auth-provider.ts";
+import { requireAuth } from "../middleware/require-auth.ts";
+import { createPlayerAccessAuthorizer } from "../authorization.ts";
+
+// ghs#60: a player's own profile + current handicap index -- the first
+// player-resource-level endpoint (rounds.ts/handicap-overrides.ts only
+// ever exposed player-scoped sub-resources, never the player record
+// itself). No PlayersService wrapper -- PlayersRepository.get is already
+// the whole operation, matching this route's own dependency directly on
+// PlayersRepository for authorizeForPlayer, the same pattern every other
+// player-owned-resource route already uses.
+
+// Request/response shape lives here, not the application/data-access
+// layers (ADR-060) -- an explicit response DTO, not the raw repository
+// Player passed straight through. userId is an internal auth-linkage
+// key (players.user_id -> users.id), not profile data the frontend
+// needs; returning it verbatim would widen what an admin viewing an
+// arbitrary player incidentally learns beyond this endpoint's own
+// purpose (review finding, PR #75).
+function toPlayerProfileResponse(player: Player) {
+  const { userId: _userId, ...profile } = player;
+  return profile;
+}
+
+export function playersRouter(players: PlayersRepository, authProvider: AuthProvider): Router {
+  const router = Router();
+  const auth = requireAuth(authProvider);
+  const authorizeForPlayer = createPlayerAccessAuthorizer(players);
+
+  router.get("/players/:id", auth, async (req, res, next) => {
+    try {
+      const playerId = String(req.params.id);
+      const identity = req.identity!;
+      // Checked before the fetch, not after (unlike rounds.ts's GET
+      // /rounds/:id, which must fetch first to learn the round's own
+      // playerId) -- authorizeForPlayer only needs the URL's playerId
+      // directly, so checking first means an unauthorized caller gets a
+      // uniform 403 regardless of whether the player exists, rather than
+      // a 404-vs-403 distinction that would otherwise leak which player
+      // IDs are real. The message is deliberately generic, not "cannot
+      // view another player's profile" -- that would be misleading for
+      // the nonexistent-player case this same 403 also covers (review
+      // finding, PR #75).
+      if (!(await authorizeForPlayer(identity.sub, identity.ghsRole, playerId))) {
+        res.status(403).json({ error: "forbidden" });
+        return;
+      }
+
+      const player = await players.get(playerId);
+      if (!player) {
+        res.status(404).json({ error: "player not found" });
+        return;
+      }
+      res.status(200).json(toPlayerProfileResponse(player));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  return router;
+}

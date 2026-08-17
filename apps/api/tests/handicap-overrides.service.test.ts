@@ -47,7 +47,7 @@ function fakePlayersRepository(): PlayersRepository {
     async create() { throw new Error("not used by these tests"); },
     async findByUserId() { throw new Error("not used by these tests"); },
     async get(id) {
-      const player: Player = { id, userId: `${id}-user`, clubId: null, firstName: "Test", lastName: "Player", country: "ES", createdAt: new Date().toISOString() };
+      const player: Player = { id, userId: `${id}-user`, clubId: null, firstName: "Test", lastName: "Player", country: "ES", createdAt: new Date().toISOString(), handicapIndex: null, lowHandicapIndex: null };
       return player;
     },
   };

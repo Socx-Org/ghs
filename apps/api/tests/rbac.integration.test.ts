@@ -432,3 +432,67 @@ test("ownership boundary: a player CAN view their own rounds", async () => {
     assert.equal(res.status, 200);
   });
 });
+
+// ---------------------------------------------------------------------
+// GET /players/:id (ghs#60) -- same ownership boundary as the rounds/
+// handicap-overrides sub-resources above, now for the player record
+// itself.
+// ---------------------------------------------------------------------
+
+test("ownership boundary: a player cannot view another player's profile, an admin can, a 403 leaks no existence information", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const playerA = await createUserWithRole(ctx, "player");
+    const playerB = await createUserWithRole(ctx, "player");
+    const admin = await createUserWithRole(ctx, "admin");
+    await ctx.players.create({ userId: playerA.user.id, firstName: "A", lastName: "Player" });
+    const playerBProfile = await ctx.players.create({ userId: playerB.user.id, firstName: "B", lastName: "Player" });
+
+    const asPlayerA = await fetch(`${baseUrl}/api/v1/players/${playerBProfile.id}`, { headers: authHeader(playerA.token) });
+    assert.equal(asPlayerA.status, 403, "player A cannot view player B's profile");
+
+    // Authorization is checked before the existence check (route-layer
+    // ordering, ghs#60) -- an unauthorized caller gets the exact same
+    // 403 for a real player ID as for one that doesn't exist at all,
+    // proven directly below.
+    const missingId = "00000000-0000-0000-0000-000000000000";
+    const asPlayerAForMissing = await fetch(`${baseUrl}/api/v1/players/${missingId}`, { headers: authHeader(playerA.token) });
+    assert.equal(asPlayerAForMissing.status, 403, "a real player's ID and a nonexistent one are indistinguishable to an unauthorized caller");
+
+    const asAdmin = await fetch(`${baseUrl}/api/v1/players/${playerBProfile.id}`, { headers: authHeader(admin.token) });
+    assert.equal(asAdmin.status, 200, "an admin can view any player's profile");
+    const body = await asAdmin.json();
+    assert.equal(body.firstName, "B");
+  });
+});
+
+test("ownership boundary: a player CAN view their own profile, including their (initially null) handicap index", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const player = await createUserWithRole(ctx, "player");
+    const playerProfile = await ctx.players.create({ userId: player.user.id, firstName: "Own", lastName: "Player" });
+
+    const res = await fetch(`${baseUrl}/api/v1/players/${playerProfile.id}`, { headers: authHeader(player.token) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.id, playerProfile.id);
+    assert.equal(body.firstName, "Own");
+    // Real, additive fields (ghs#60) -- null until a real WHS
+    // calculation or admin override ever sets them, not omitted.
+    assert.equal(body.handicapIndex, null);
+    assert.equal(body.lowHandicapIndex, null);
+    // userId is an internal auth-linkage key, not profile data -- must
+    // never appear in the wire response, even for the player's own
+    // profile (review finding, PR #75).
+    assert.equal("userId" in body, false, "userId must not appear in the response DTO at all");
+  });
+});
+
+test("GET /players/:id returns 404 for a genuinely nonexistent player, once authorized (admin)", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+    const res = await fetch(`${baseUrl}/api/v1/players/00000000-0000-0000-0000-000000000000`, { headers: authHeader(admin.token) });
+    assert.equal(res.status, 404);
+  });
+});
