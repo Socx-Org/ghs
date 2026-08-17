@@ -134,12 +134,24 @@ async function historyRowsForUser(userId: string): Promise<Array<{ event_type: s
   return result.rows;
 }
 
-test("createRound writes notification_history and its child notification_outbox row, both in the same transaction as the round itself, real Postgres", async () => {
+test("createRound writes no notification at all -- moved to submitForReview (ghs#58), real Postgres", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const { playerId, userId } = await createPlayerWithUser("Draft", "Notify");
+  const { roundsService } = buildServices();
+
+  await roundsService.createRound({ playerId, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+
+  const history = await historyRowsForUser(userId);
+  assert.equal(history.length, 0, "creating a round (landing in 'draft') is no longer the submission event");
+});
+
+test("submitForReview writes notification_history and its child notification_outbox row, both in the same transaction, real Postgres (ghs#58, moved from createRound)", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   const { playerId, userId } = await createPlayerWithUser("Submit", "Notify");
   const { roundsService } = buildServices();
 
   const round = await roundsService.createRound({ playerId, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsService.submitForReview(round.id);
 
   const history = await historyRowsForUser(userId);
   assert.deepEqual(history.map((h) => h.event_type), ["round_submitted"]);
@@ -156,13 +168,14 @@ test("createRound writes notification_history and its child notification_outbox 
   assert.equal(outboxRow.rows[0]!.payload.roundId, round.id);
 });
 
-test("createRound: notify_round_submitted=false still writes notification_history but creates no notification_outbox row, real Postgres (ghs#41)", async () => {
+test("submitForReview: notify_round_submitted=false still writes notification_history but creates no notification_outbox row, real Postgres (ghs#41, moved from createRound by ghs#58)", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   const { playerId, userId } = await createPlayerWithUser("Gated", "Submit");
   const { roundsService, systemSettingsService } = buildServices();
   await systemSettingsService.setNotificationSetting("roundSubmitted", false, null);
 
   const round = await roundsService.createRound({ playerId, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsService.submitForReview(round.id);
 
   const history = await historyRowsForUser(userId);
   assert.deepEqual(history.map((h) => h.event_type), ["round_submitted"], "the round was genuinely submitted -- notification_history still records it");
@@ -217,12 +230,17 @@ test("approveRound writes round_approved, and -- since the round is eligible and
 
   const round = await roundsRepo.create({ playerId, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
   await roundsRepo.addHoleScore(round.id, { holeNumber: 1, strokes: 4, netDoubleBogeyAdjusted: 4 });
+  // Set directly, not via roundsService.submitForReview -- that would
+  // itself fire a round_submitted notification, contaminating this
+  // test's own isolation of approveRound's notification behaviour.
+  await roundsRepo.setStatus(round.id, "pending");
 
   await roundsService.approveRound(round.id);
 
   // round_submitted never fired for this round (it was inserted directly
-  // via the repository, bypassing roundsService.createRound) -- only the
-  // two events approveRound itself is responsible for.
+  // via the repository, bypassing roundsService.createRound/
+  // submitForReview) -- only the two events approveRound itself is
+  // responsible for.
   const history = await historyRowsForUser(userId);
   assert.deepEqual(history.map((h) => h.event_type).sort(), ["handicap_changed", "round_approved"]);
 
@@ -241,6 +259,7 @@ test("approveRound: notify_round_approved=false still writes round_approved hist
 
   const round = await roundsRepo.create({ playerId, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
   await roundsRepo.addHoleScore(round.id, { holeNumber: 1, strokes: 4, netDoubleBogeyAdjusted: 4 });
+  await roundsRepo.setStatus(round.id, "pending");
 
   await roundsService.approveRound(round.id);
 
@@ -257,6 +276,7 @@ test("rejectRound writes round_rejected with the reason even when there's no dif
   const { roundsRepo, roundsService } = buildServices();
 
   const round = await roundsRepo.create({ playerId, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsRepo.setStatus(round.id, "pending");
   await roundsService.rejectRound(round.id, "Illegible scorecard");
 
   const history = await historyRowsForUser(userId);
@@ -323,6 +343,7 @@ test("the state change and its notification writes roll back together on failure
 
   const round = await roundsRepo.create({ playerId, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
   await roundsRepo.addHoleScore(round.id, { holeNumber: 1, strokes: 4, netDoubleBogeyAdjusted: 4 });
+  await roundsRepo.setStatus(round.id, "pending");
 
   const failingRecalculation: RecalculationOrchestrator = {
     async recalculatePlayerHandicap() {

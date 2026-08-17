@@ -141,6 +141,7 @@ test("rejectRound skips recalculation for a round that never had a differential 
   const { roundsRepo, roundsService } = buildServices();
 
   const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsRepo.setStatus(round.id, "pending");
   const result = await roundsService.rejectRound(round.id, "Never submitted a scorecard");
 
   assert.equal(result.round!.status, "rejected");
@@ -192,6 +193,7 @@ test("amendment lifecycle end-to-end: reopen retracts before any correction, re-
   for (let holeNumber = 1; holeNumber <= 18; holeNumber++) {
     await roundsRepo.addHoleScore(round.id, { holeNumber, strokes: 5, netDoubleBogeyAdjusted: 5 });
   }
+  await roundsRepo.setStatus(round.id, "pending");
 
   const approved = await roundsService.approveRound(round.id);
   assert.equal(approved.round!.status, "approved");
@@ -237,6 +239,7 @@ test("approveRound rolls back the status change if recalculation fails -- state 
 
   const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
   await roundsRepo.addHoleScore(round.id, { holeNumber: 1, strokes: 4, netDoubleBogeyAdjusted: 4 });
+  await roundsRepo.setStatus(round.id, "pending");
 
   const failingRecalculation: RecalculationOrchestrator = {
     async recalculatePlayerHandicap() {
@@ -320,6 +323,15 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
     const playerToken = playerLogin.tokens.accessToken;
 
     const round = await roundsRepo.create({ playerId: playerRecord!.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+    // ghs#58: a fresh round is 'draft' -- reject/reopen/delete's own
+    // authorization and input-validation checks (player-403, missing-
+    // reason-400) all happen before the service is ever reached, so
+    // those assertions below are unaffected regardless of status. The
+    // real admin reject call further down does reach the service, which
+    // requires 'pending'/'amending' -- set directly here (not via
+    // roundsService.submitForReview, which would fire a notification
+    // this test doesn't otherwise care about).
+    await roundsRepo.setStatus(round.id, "pending");
 
     const asPlayer = { "Content-Type": "application/json", Authorization: `Bearer ${playerToken}` };
     const asAdmin = { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` };
@@ -377,6 +389,7 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
     // A blank rejectionReason must not shadow a real value in reason, and
     // both are trimmed before persisting (caught in review, PR #32).
     const thirdRound = await roundsRepo.create({ playerId: playerRecord!.id, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
+    await roundsRepo.setStatus(thirdRound.id, "pending");
     const reasonFallbackResponse = await fetch(`${baseUrl}/api/v1/rounds/${thirdRound.id}/status`, {
       method: "PATCH", headers: asAdmin, body: JSON.stringify({ status: "rejected", rejectionReason: "", reason: "  Scorecard illegible  " }),
     });
