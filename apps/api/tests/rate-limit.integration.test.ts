@@ -157,7 +157,11 @@ test("/healthz is never subject to the general API tier, even after it's exhaust
     // comparison against "/healthz" could never match from inside
     // v1Router, where req.path is already relative to /api/v1).
     const postHealth = await fetch(`${baseUrl}/healthz`, { method: "POST" });
-    assert.notEqual(postHealth.status, 429, "POST /healthz must never be rate-limited -- it structurally never reaches v1Router");
+    // Asserts the exact 404, not just "not 429" (review comment, PR #70)
+    // -- notEqual alone would also pass for a 500 or any other
+    // unexpected status, which wouldn't actually prove mount-point
+    // separation is what's happening here.
+    assert.equal(postHealth.status, 404, "POST /healthz must 404 (no route matches it), never reach v1Router's rate limiter at all");
   });
 });
 
