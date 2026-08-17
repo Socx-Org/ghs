@@ -70,7 +70,17 @@ async function applyAndRecord(client: PoolClient, filename: string, sql: string,
     await client.query("INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)", [filename, checksum]);
     await client.query("COMMIT");
   } catch (err) {
-    await client.query("ROLLBACK");
+    // Best-effort only, same convention as the advisory-unlock below
+    // (caught in review, PR #37, for the exact same reason): if the
+    // migration's own SQL is what failed, ROLLBACK can itself throw
+    // (e.g. a dropped connection) -- swallowed here so that secondary
+    // failure can never replace and hide the real migration error the
+    // caller needs to see.
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // ignored -- see comment above
+    }
     throw err;
   }
 }
