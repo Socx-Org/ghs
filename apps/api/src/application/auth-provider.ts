@@ -37,6 +37,12 @@ export interface AuthProvider {
   // issueTokens with it. Splitting it this way avoids the alternative of
   // this function needing a "fetch user by id" dependency of its own.
   validateAndRotateRefreshToken(refreshToken: string): Promise<string>;
+  // ghs#59: real logout -- revokes exactly the presented refresh token,
+  // never other sessions (distinct from validateAndRotateRefreshToken's
+  // own revokeAllForUser reuse-detection path, which is a theft
+  // response, not a user action). No access-token revocation -- it
+  // remains short-lived and unrevoked by design (approved decision).
+  revokeRefreshToken(refreshToken: string): Promise<void>;
   issueMfaPendingToken(userId: string): string;
   verifyMfaPendingToken(token: string): string;
 }
@@ -117,6 +123,10 @@ export function createLocalAuthProvider(config: AuthConfig, refreshTokens: Refre
 
       await refreshTokens.markRotated(record.id);
       return record.userId;
+    },
+
+    async revokeRefreshToken(refreshToken) {
+      await refreshTokens.revokeByHash(hashRefreshToken(refreshToken));
     },
 
     issueMfaPendingToken(userId) {

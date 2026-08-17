@@ -103,6 +103,29 @@ export function authRouter(service: AuthService, settings: SystemSettingsService
     }
   });
 
+  // ghs#59: real logout -- unauthenticated, matching /auth/refresh's own
+  // shape (the refresh token itself is the credential presented, not a
+  // Bearer access token). Revokes exactly this one token; never other
+  // sessions. Idempotent (repository.revokeByHash is a no-op for an
+  // unknown or already-revoked hash) -- an unknown/expired/already-used
+  // refreshToken still returns 200, matching this auth system's existing
+  // enumeration-safe posture elsewhere, and letting the frontend clear
+  // local state unconditionally after calling this, without needing to
+  // branch on the response.
+  router.post("/auth/logout", async (req, res, next) => {
+    try {
+      const { refreshToken } = req.body as Record<string, unknown>;
+      if (!isNonEmptyString(refreshToken)) {
+        res.status(400).json({ error: "refreshToken is required" });
+        return;
+      }
+      await service.logout(refreshToken);
+      res.status(200).json({ message: "Logged out." });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.post("/auth/activate", async (req, res, next) => {
     try {
       const { token } = req.body as Record<string, unknown>;

@@ -18,6 +18,15 @@ export interface RefreshTokensRepository {
   // database per the platform owner's decision (ghs#8).
   markRotated(id: string): Promise<void>;
   revokeAllForUser(userId: string): Promise<void>;
+  // ghs#59: revokes exactly the one record matching this hash -- real
+  // logout, distinct from revokeAllForUser (reuse-detection's response
+  // to a theft signal, which deliberately ends every session). A no-op,
+  // not an error, when the hash matches nothing or the record is
+  // already revoked -- logout is idempotent by design, matching this
+  // auth system's existing enumeration-safe posture elsewhere (e.g.
+  // resend-activation's identical response regardless of whether the
+  // account exists).
+  revokeByHash(tokenHash: string): Promise<void>;
 }
 
 interface RefreshTokenRow {
@@ -57,6 +66,13 @@ export function createRefreshTokensRepository(pool: Pool): RefreshTokensReposito
       await pool.query(
         "UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
         [userId],
+      );
+    },
+
+    async revokeByHash(tokenHash) {
+      await pool.query(
+        "UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL",
+        [tokenHash],
       );
     },
   };

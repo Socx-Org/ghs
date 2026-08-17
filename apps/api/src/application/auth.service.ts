@@ -52,6 +52,9 @@ export interface AuthService {
   login(email: string, password: string): Promise<LoginResult>;
   completeMfaLogin(mfaPendingToken: string, code: string): Promise<TokenPair>;
   refresh(refreshToken: string): Promise<TokenPair>;
+  // ghs#59: real logout -- revokes exactly the presented refresh token,
+  // never other active sessions belonging to the same user.
+  logout(refreshToken: string): Promise<void>;
   activateAccount(rawToken: string): Promise<void>;
   resendActivation(email: string): Promise<void>;
   requestPasswordReset(email: string): Promise<void>;
@@ -146,6 +149,10 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       const user = await users.findById(userId);
       if (!user || user.status !== "active") throw new Error("account not active");
       return authProvider.issueTokens(user, ["pwd"]);
+    },
+
+    async logout(refreshToken) {
+      await authProvider.revokeRefreshToken(refreshToken);
     },
 
     async activateAccount(rawToken) {
