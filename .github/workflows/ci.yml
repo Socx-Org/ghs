@@ -135,6 +135,10 @@ jobs:
       # in production. Verified for real: built this exact tarball shape,
       # extracted it on prod-lab-01, and ran apps/worker/dist/index.js
       # against it directly before ever wiring this into automated CI.
+      # apps/web/dist (ghs#62): a static SPA build, not a Node process --
+      # included in the same tarball as the API/worker for a single
+      # release artifact/version, but deployed differently below (rsync'd
+      # to a location nginx can actually read, not started as a service).
       - name: Package release
         run: |
           tar -czf release.tar.gz \
@@ -143,6 +147,7 @@ jobs:
             apps/api/package.json \
             apps/worker/dist \
             apps/worker/package.json \
+            apps/web/dist \
             node_modules \
             package-lock.json
 
@@ -177,3 +182,26 @@ jobs:
           ssh "${SSH_OPTS[@]}" "$REMOTE" \
             "sudo SERVICES='ghs-api.service ghs-worker.service' HEALTH_URL=http://127.0.0.1:3001/healthz /opt/deploy/scripts/deploy-release.sh ghs '${VERSION}' '${REMOTE_TARBALL}'"
           ssh "${SSH_OPTS[@]}" "$REMOTE" "rm -f '${REMOTE_TARBALL}'"
+
+          # Static web build synced to /var/www/ghs, not served from
+          # /opt/ghs/current directly -- /opt/ghs is 750 ghs:ghs
+          # (reference/systemd's hardening), unreadable to nginx
+          # (www-data). Matches RMS's own real, proven pattern exactly
+          # (infra/nginx/rms-prod-lab-01.conf's own reasoning, rms repo).
+          # Deliberately a separate copy, not perfectly atomic with the
+          # API/worker release swap above -- acceptable for static
+          # assets, where a stale bundle for a few seconds is much
+          # lower-risk than for the API.
+          #
+          # mkdir -p before the sync (review finding, PR #77): rsync -a
+          # alone auto-creates a single missing leaf directory (verified
+          # directly -- `rsync -a src/ existing-parent/missing-leaf/`
+          # succeeds), so this was never a bug on a normally-provisioned
+          # box (nginx already created /var/www when installed). It only
+          # bites if /var/www itself is also missing -- real rsync (unlike
+          # openrsync) doesn't create multiple missing levels without
+          # --mkpath (rsync 3.2.3+), a case worth covering cheaply
+          # (a full droplet rebuild) rather than relying on that nuance.
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo mkdir -p /var/www/ghs"
+          ssh "${SSH_OPTS[@]}" "$REMOTE" \
+            "sudo rsync -a --delete /opt/ghs/current/apps/web/dist/ /var/www/ghs/"
