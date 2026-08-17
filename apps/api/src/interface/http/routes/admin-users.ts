@@ -28,6 +28,19 @@ export function adminUsersRouter(service: AdminUsersService, mfaService: MfaServ
         res.status(400).json({ error: "role must be one of: player, admin, super_admin" });
         return;
       }
+      // ghs#50: only super_admin may create or promote to admin/
+      // super_admin -- a plain admin may still create player accounts
+      // (unchanged). Explicit 403, never a silent downgrade to player --
+      // the caller's literal request is honestly rejected, not
+      // reinterpreted as something else. Same placement/pattern as
+      // authorization.ts's authorizeForPlayer: an authorization decision
+      // enforced at the route layer, not a domain error thrown by the
+      // service (the service has no concept of "who is calling" at all,
+      // by design, matching every other route's own ownership checks).
+      if (resolvedRole !== "player" && req.identity!.ghsRole !== "super_admin") {
+        res.status(403).json({ error: "only super_admin may create admin or super_admin accounts" });
+        return;
+      }
       if (typeof firstName !== "string" || typeof lastName !== "string" || firstName.trim().length === 0 || lastName.trim().length === 0) {
         res.status(400).json({ error: "firstName and lastName are required" });
         return;
