@@ -59,6 +59,11 @@ function hashRefreshToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+// ghs#53: pinned explicitly on both sign and verify, rather than left to
+// jsonwebtoken's own default -- an auditable allow-list stated in one
+// place, not inferred from library behaviour.
+const JWT_ALGORITHM = "HS256";
+
 export function createLocalAuthProvider(config: AuthConfig, refreshTokens: RefreshTokensRepository): AuthProvider {
   async function issueTokens(user: User, amr: string[]): Promise<TokenPair> {
     const claims: AccessTokenClaims = {
@@ -69,7 +74,7 @@ export function createLocalAuthProvider(config: AuthConfig, refreshTokens: Refre
       ghs_role: user.role,
       tokenType: "access",
     };
-    const accessToken = jwt.sign(claims, config.jwtSecret, { expiresIn: config.jwtAccessExpiresInSeconds });
+    const accessToken = jwt.sign(claims, config.jwtSecret, { expiresIn: config.jwtAccessExpiresInSeconds, algorithm: JWT_ALGORITHM });
 
     const rawRefreshToken = randomBytes(32).toString("hex");
     const refreshTokenHash = hashRefreshToken(rawRefreshToken);
@@ -83,7 +88,7 @@ export function createLocalAuthProvider(config: AuthConfig, refreshTokens: Refre
     issueTokens,
 
     verifyAccessToken(token) {
-      const claims = jwt.verify(token, config.jwtSecret) as AccessTokenClaims;
+      const claims = jwt.verify(token, config.jwtSecret, { algorithms: [JWT_ALGORITHM] }) as AccessTokenClaims;
       if (claims.tokenType !== "access") {
         throw new Error("not an access token");
       }
@@ -116,11 +121,11 @@ export function createLocalAuthProvider(config: AuthConfig, refreshTokens: Refre
 
     issueMfaPendingToken(userId) {
       const claims: MfaPendingClaims = { sub: userId, tokenType: "mfa_pending" };
-      return jwt.sign(claims, config.jwtSecret, { expiresIn: config.mfaPendingExpiresInSeconds });
+      return jwt.sign(claims, config.jwtSecret, { expiresIn: config.mfaPendingExpiresInSeconds, algorithm: JWT_ALGORITHM });
     },
 
     verifyMfaPendingToken(token) {
-      const claims = jwt.verify(token, config.jwtSecret) as MfaPendingClaims;
+      const claims = jwt.verify(token, config.jwtSecret, { algorithms: [JWT_ALGORITHM] }) as MfaPendingClaims;
       if (claims.tokenType !== "mfa_pending") {
         throw new Error("not an MFA-pending token");
       }
