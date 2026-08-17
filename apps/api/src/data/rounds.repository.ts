@@ -446,8 +446,18 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
          -- Oldest submission first (updated_at is set the moment a round
          -- transitions to 'pending', ghs#58's setStatus) -- a real FIFO
          -- queue order, not played_at (when the round was played, which
-         -- is unrelated to how long it's been waiting for review).
-         ORDER BY r.updated_at ASC`,
+         -- is unrelated to how long it's been waiting for review). r.id
+         -- as a stable tie-breaker: Postgres's now() is constant for the
+         -- whole transaction (not per-statement), and even across
+         -- separate transactions two submissions can land within the
+         -- same timestamp resolution -- without a tie-breaker, rows with
+         -- an identical updated_at would sort in a non-deterministic,
+         -- potentially different order on every call (review finding,
+         -- PR #76). id itself carries no ordering meaning (UUIDs aren't
+         -- sequential) -- this only makes ties deterministic, not
+         -- "more correct" among genuinely-simultaneous submissions,
+         -- which have no real distinguishable order anyway.
+         ORDER BY r.updated_at ASC, r.id ASC`,
       );
       return result.rows.map((row) => ({
         id: row.id,
