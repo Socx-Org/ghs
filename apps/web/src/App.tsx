@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
+import ComponentsCatalogue from "./ComponentsCatalogue";
 
-// ghs#62: deliberately a placeholder, not a designed screen -- proves the
-// pipeline (build, deploy, Tailwind, and a real API round-trip through
-// the dev-server proxy / production nginx split) end-to-end. Visual
-// language and reusable UI primitives are their own, later increment;
-// this gets replaced once that work lands, not extended in place.
+// ghs#62/#78: no real product screens exist yet (#64 onward), so this
+// stays a placeholder in production/test. In the actual dev server it
+// renders the Components Catalogue instead -- the living design-system
+// reference, not a mockup. import.meta.env.DEV is true under Vitest's
+// "test" mode too (verified directly, not assumed), which would route
+// tests into the catalogue and break these assertions -- MODE is the
+// correct check here: "development" only for `vite`/`vite dev`.
 type ApiStatus = "checking" | "ok" | "error";
 
-export default function App() {
+function ProductionPlaceholder() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("checking");
 
   useEffect(() => {
@@ -27,10 +30,15 @@ export default function App() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-2 bg-slate-50 text-slate-900">
       <h1 className="text-2xl font-semibold">GHS</h1>
-      <p className="text-sm text-slate-600">Frontend scaffold placeholder -- ghs#62</p>
+      <p className="text-sm text-slate-600">Product screens land in a later issue -- see ghs#64 onward.</p>
       <p className="text-sm" data-testid="api-status">
         API: {apiStatus}
       </p>
     </main>
   );
+}
+
+export default function App() {
+  const isDev = import.meta.env.MODE === "development";
+  return isDev ? <ComponentsCatalogue /> : <ProductionPlaceholder />;
 }
