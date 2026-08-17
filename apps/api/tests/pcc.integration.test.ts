@@ -229,14 +229,14 @@ test("HTTP: admin can calculate/override PCC for a tee-configuration/day; a play
     const playerLogin = await authService.login("pcc-player@example.com", "player-pw-1");
     if (adminLogin.status !== "authenticated" || playerLogin.status !== "authenticated") throw new Error("unreachable");
 
-    const playerResponse = await fetch(`${baseUrl}/admin/tee-configurations/${teeConfigurationId}/pcc`, {
+    const playerResponse = await fetch(`${baseUrl}/api/v1/admin/tee-configurations/${teeConfigurationId}/pcc`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${playerLogin.tokens.accessToken}` },
       body: JSON.stringify({ playedOn: "2026-05-01", pcc: 1 }),
     });
     assert.equal(playerResponse.status, 403);
 
-    const adminResponse = await fetch(`${baseUrl}/admin/tee-configurations/${teeConfigurationId}/pcc`, {
+    const adminResponse = await fetch(`${baseUrl}/api/v1/admin/tee-configurations/${teeConfigurationId}/pcc`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminLogin.tokens.accessToken}` },
       body: JSON.stringify({ playedOn: "2026-05-01", pcc: 1 }),

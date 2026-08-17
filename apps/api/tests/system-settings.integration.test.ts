@@ -133,7 +133,7 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on -
 
   try {
     // Off by default (matches legacy's conservative default).
-    const blockedResponse = await fetch(`${baseUrl}/auth/register`, {
+    const blockedResponse = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "gated@example.com", password: "gated-test-pw", firstName: "Gated", lastName: "User" }),
@@ -142,7 +142,7 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on -
 
     await systemSettingsService.setSelfRegistrationEnabled(true, null);
 
-    const allowedResponse = await fetch(`${baseUrl}/auth/register`, {
+    const allowedResponse = await fetch(`${baseUrl}/api/v1/auth/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "gated@example.com", password: "gated-test-pw", firstName: "Gated", lastName: "User" }),

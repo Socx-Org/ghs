@@ -326,27 +326,27 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
 
     // A player cannot reject, reopen, or delete -- these are real
     // workflow actions, admin-only (matching legacy's own behaviour).
-    const playerReject = await fetch(`${baseUrl}/rounds/${round.id}/status`, {
+    const playerReject = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/status`, {
       method: "PATCH", headers: asPlayer, body: JSON.stringify({ status: "rejected", rejectionReason: "x" }),
     });
     assert.equal(playerReject.status, 403);
 
-    const playerReopen = await fetch(`${baseUrl}/rounds/${round.id}/status`, {
+    const playerReopen = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/status`, {
       method: "PATCH", headers: asPlayer, body: JSON.stringify({ status: "amending", reason: "x" }),
     });
     assert.equal(playerReopen.status, 403);
 
-    const playerDelete = await fetch(`${baseUrl}/rounds/${round.id}`, { method: "DELETE", headers: asPlayer });
+    const playerDelete = await fetch(`${baseUrl}/api/v1/rounds/${round.id}`, { method: "DELETE", headers: asPlayer });
     assert.equal(playerDelete.status, 403);
 
     // Admin reject without a reason is a validation error, not a silent no-op.
-    const rejectNoReason = await fetch(`${baseUrl}/rounds/${round.id}/status`, {
+    const rejectNoReason = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/status`, {
       method: "PATCH", headers: asAdmin, body: JSON.stringify({ status: "rejected" }),
     });
     assert.equal(rejectNoReason.status, 400);
 
     // Admin rejects for real.
-    const rejectResponse = await fetch(`${baseUrl}/rounds/${round.id}/status`, {
+    const rejectResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/status`, {
       method: "PATCH", headers: asAdmin, body: JSON.stringify({ status: "rejected", rejectionReason: "Incomplete scorecard" }),
     });
     assert.equal(rejectResponse.status, 200);
@@ -354,30 +354,30 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
     assert.equal(rejected.round!.status, "rejected");
 
     // A rejected round cannot be reopened for amendment -- only 'approved' may.
-    const reopenRejected = await fetch(`${baseUrl}/rounds/${round.id}/status`, {
+    const reopenRejected = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/status`, {
       method: "PATCH", headers: asAdmin, body: JSON.stringify({ status: "amending", reason: "x" }),
     });
     assert.equal(reopenRejected.status, 409);
 
     // A rejected round cannot be rejected again.
-    const rejectAgain = await fetch(`${baseUrl}/rounds/${round.id}/status`, {
+    const rejectAgain = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/status`, {
       method: "PATCH", headers: asAdmin, body: JSON.stringify({ status: "rejected", rejectionReason: "again" }),
     });
     assert.equal(rejectAgain.status, 409);
 
     // A missing round is 404, not a 500, on both endpoints.
     const missingId = "00000000-0000-0000-0000-000000000000";
-    const missingStatus = await fetch(`${baseUrl}/rounds/${missingId}/status`, {
+    const missingStatus = await fetch(`${baseUrl}/api/v1/rounds/${missingId}/status`, {
       method: "PATCH", headers: asAdmin, body: JSON.stringify({ status: "approved" }),
     });
     assert.equal(missingStatus.status, 404);
-    const missingDelete = await fetch(`${baseUrl}/rounds/${missingId}`, { method: "DELETE", headers: asAdmin });
+    const missingDelete = await fetch(`${baseUrl}/api/v1/rounds/${missingId}`, { method: "DELETE", headers: asAdmin });
     assert.equal(missingDelete.status, 404);
 
     // A blank rejectionReason must not shadow a real value in reason, and
     // both are trimmed before persisting (caught in review, PR #32).
     const thirdRound = await roundsRepo.create({ playerId: playerRecord!.id, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
-    const reasonFallbackResponse = await fetch(`${baseUrl}/rounds/${thirdRound.id}/status`, {
+    const reasonFallbackResponse = await fetch(`${baseUrl}/api/v1/rounds/${thirdRound.id}/status`, {
       method: "PATCH", headers: asAdmin, body: JSON.stringify({ status: "rejected", rejectionReason: "", reason: "  Scorecard illegible  " }),
     });
     assert.equal(reasonFallbackResponse.status, 200);
@@ -389,7 +389,7 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
     // (soft-deleted, no longer a visible resource) but the call itself
     // succeeds.
     const secondRound = await roundsRepo.create({ playerId: playerRecord!.id, teeConfigurationId, playedAt: "2026-05-02T09:00:00.000Z" });
-    const deleteResponse = await fetch(`${baseUrl}/rounds/${secondRound.id}`, { method: "DELETE", headers: asAdmin });
+    const deleteResponse = await fetch(`${baseUrl}/api/v1/rounds/${secondRound.id}`, { method: "DELETE", headers: asAdmin });
     assert.equal(deleteResponse.status, 200);
     const deleted = await deleteResponse.json() as RoundWorkflowResult;
     assert.equal(deleted.round, null);

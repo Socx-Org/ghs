@@ -182,7 +182,7 @@ test("HTTP: a player can view their own handicap override history but not anothe
     const playerAToken = playerALogin.tokens.accessToken;
 
     // Player A cannot create an override for themselves.
-    const playerCreateResponse = await fetch(`${baseUrl}/players/${playerARecord!.id}/handicap-overrides`, {
+    const playerCreateResponse = await fetch(`${baseUrl}/api/v1/players/${playerARecord!.id}/handicap-overrides`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${playerAToken}` },
       body: JSON.stringify({ newIndex: 10.0, reason: "Self-override attempt" }),
@@ -190,7 +190,7 @@ test("HTTP: a player can view their own handicap override history but not anothe
     assert.equal(playerCreateResponse.status, 403);
 
     // Admin creates a real override for Player A.
-    const adminCreateResponse = await fetch(`${baseUrl}/players/${playerARecord!.id}/handicap-overrides`, {
+    const adminCreateResponse = await fetch(`${baseUrl}/api/v1/players/${playerARecord!.id}/handicap-overrides`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
       body: JSON.stringify({ previousIndex: 14.0, newIndex: 12.0, reason: "Admin-verified correction" }),
@@ -198,7 +198,7 @@ test("HTTP: a player can view their own handicap override history but not anothe
     assert.equal(adminCreateResponse.status, 201);
 
     // Player A can view their own history.
-    const ownHistoryResponse = await fetch(`${baseUrl}/players/${playerARecord!.id}/handicap-overrides`, {
+    const ownHistoryResponse = await fetch(`${baseUrl}/api/v1/players/${playerARecord!.id}/handicap-overrides`, {
       headers: { Authorization: `Bearer ${playerAToken}` },
     });
     assert.equal(ownHistoryResponse.status, 200);
@@ -206,7 +206,7 @@ test("HTTP: a player can view their own handicap override history but not anothe
     assert.equal(ownHistory.length, 1);
 
     // Player A cannot view Player B's history.
-    const otherHistoryResponse = await fetch(`${baseUrl}/players/${playerBRecord!.id}/handicap-overrides`, {
+    const otherHistoryResponse = await fetch(`${baseUrl}/api/v1/players/${playerBRecord!.id}/handicap-overrides`, {
       headers: { Authorization: `Bearer ${playerAToken}` },
     });
     assert.equal(otherHistoryResponse.status, 403);
