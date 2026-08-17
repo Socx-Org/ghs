@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import jwt from "jsonwebtoken";
 import { createLocalAuthProvider } from "../src/application/auth-provider.ts";
 import type { RefreshTokenRecord, RefreshTokensRepository } from "../src/data/refresh-tokens.repository.ts";
 import type { User } from "../src/data/users.repository.ts";
@@ -123,4 +124,17 @@ test("an access token is rejected by verifyMfaPendingToken", async () => {
   const tokens = await provider.issueTokens(fakeUser, ["pwd"]);
 
   assert.throws(() => provider.verifyMfaPendingToken(tokens.accessToken));
+});
+
+// ghs#53: proves the pinned algorithm is actually enforced by
+// verification, not merely declared on the signing side -- a token with
+// valid claims and a valid signature under the real secret, but signed
+// with a different algorithm than the pin, must still be rejected.
+test("verifyAccessToken rejects a validly-signed token using a non-pinned algorithm", async () => {
+  const provider = createLocalAuthProvider(config, fakeRefreshTokens());
+
+  const claims = { sub: fakeUser.id, email: fakeUser.email, email_verified: true, amr: ["pwd"], ghs_role: fakeUser.role, tokenType: "access" };
+  const differentAlgToken = jwt.sign(claims, config.jwtSecret, { algorithm: "HS384", expiresIn: 900 });
+
+  assert.throws(() => provider.verifyAccessToken(differentAlgToken));
 });
