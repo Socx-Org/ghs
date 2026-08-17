@@ -56,13 +56,13 @@ export function createGeneralApiLimiter(override: RateLimitTierOverride = {}): R
     limit: override.limit ?? GENERAL_API_LIMIT,
     standardHeaders: true,
     legacyHeaders: false,
-    // /healthz is an infrastructure liveness probe -- must never be
-    // inadvertently throttled (ghs#49's own explicit acceptance
-    // criterion). Belt-and-braces alongside app.ts's own mount order
-    // (healthRouter is mounted before this limiter, so a healthy request
-    // never even reaches it); this skip is the real guarantee, immune to
-    // a future reordering of app.use() calls.
-    skip: (req) => req.path === "/healthz",
+    // ghs#57: this limiter is mounted only on v1Router (app.ts), under
+    // /api/v1 -- /healthz is mounted separately, directly on app, and
+    // Express never reaches this middleware for it at all. That mount-
+    // point separation is now the sole guarantee (no skip predicate here
+    // pretending to be a second one -- req.path inside v1Router is
+    // already relative to /api/v1, so a literal "/healthz" comparison
+    // could never match here regardless).
     message: { error: "too many requests" },
   });
 }

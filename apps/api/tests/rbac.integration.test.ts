@@ -185,7 +185,7 @@ for (const route of ADMIN_GATED_ROUTES) {
       const superAdmin = await createUserWithRole(ctx, "super_admin");
 
       const fetchAs = (token: string) =>
-        fetch(`${baseUrl}${route.path}`, {
+        fetch(`${baseUrl}/api/v1${route.path}`, {
           method: route.method,
           headers: authHeader(token),
           body: route.body ? JSON.stringify(route.body) : undefined,
@@ -206,7 +206,7 @@ for (const route of ADMIN_GATED_ROUTES) {
 test("no route accepts an unauthenticated request for an admin-gated operation (POST /clubs as a real example)", async () => {
   const ctx = buildApp();
   await withServer(ctx.app, async (baseUrl) => {
-    const res = await fetch(`${baseUrl}/clubs`, {
+    const res = await fetch(`${baseUrl}/api/v1/clubs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "No Auth Club" }),
@@ -224,7 +224,7 @@ test("admin may create a player account", async () => {
   const ctx = buildApp();
   await withServer(ctx.app, async (baseUrl) => {
     const admin = await createUserWithRole(ctx, "admin");
-    const res = await fetch(`${baseUrl}/admin/users`, {
+    const res = await fetch(`${baseUrl}/api/v1/admin/users`, {
       method: "POST",
       headers: authHeader(admin.token),
       body: JSON.stringify({ email: "new-player@example.com", password: "player-pw-123", role: "player", firstName: "New", lastName: "Player", autoActivate: true }),
@@ -237,7 +237,7 @@ test("admin CANNOT create an admin account -- 403, not a silent downgrade to pla
   const ctx = buildApp();
   await withServer(ctx.app, async (baseUrl) => {
     const admin = await createUserWithRole(ctx, "admin");
-    const res = await fetch(`${baseUrl}/admin/users`, {
+    const res = await fetch(`${baseUrl}/api/v1/admin/users`, {
       method: "POST",
       headers: authHeader(admin.token),
       body: JSON.stringify({ email: "escalation-attempt@example.com", password: "escalation-pw-123", role: "admin", firstName: "Escalation", lastName: "Attempt", autoActivate: true }),
@@ -253,7 +253,7 @@ test("admin CANNOT create a super_admin account -- the exact escalation path fou
   const ctx = buildApp();
   await withServer(ctx.app, async (baseUrl) => {
     const admin = await createUserWithRole(ctx, "admin");
-    const res = await fetch(`${baseUrl}/admin/users`, {
+    const res = await fetch(`${baseUrl}/api/v1/admin/users`, {
       method: "POST",
       headers: authHeader(admin.token),
       body: JSON.stringify({ email: "self-service-super-admin@example.com", password: "escalation-pw-123", role: "super_admin", firstName: "Self", lastName: "Service", autoActivate: true }),
@@ -268,7 +268,7 @@ test("super_admin may create player, admin, and super_admin accounts", async () 
   await withServer(ctx.app, async (baseUrl) => {
     const superAdmin = await createUserWithRole(ctx, "super_admin");
     for (const role of ["player", "admin", "super_admin"] as const) {
-      const res = await fetch(`${baseUrl}/admin/users`, {
+      const res = await fetch(`${baseUrl}/api/v1/admin/users`, {
         method: "POST",
         headers: authHeader(superAdmin.token),
         body: JSON.stringify({ email: `super-admin-created-${role}@example.com`, password: "super-admin-pw-123", role, firstName: "Created", lastName: role, autoActivate: true }),
@@ -289,7 +289,7 @@ test("PATCH /admin/users/:id/status ignores a smuggled role field -- only status
     const superAdmin = await createUserWithRole(ctx, "super_admin");
     const player = await createUserWithRole(ctx, "player");
 
-    const res = await fetch(`${baseUrl}/admin/users/${player.user.id}/status`, {
+    const res = await fetch(`${baseUrl}/api/v1/admin/users/${player.user.id}/status`, {
       method: "PATCH",
       headers: authHeader(superAdmin.token),
       body: JSON.stringify({ status: "active", role: "super_admin" }),
@@ -314,7 +314,7 @@ test("a role field smuggled into an unrelated endpoint (round creation) has no e
       teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113, holes: [] }],
     });
 
-    const res = await fetch(`${baseUrl}/rounds`, {
+    const res = await fetch(`${baseUrl}/api/v1/rounds`, {
       method: "POST",
       headers: authHeader(player.token),
       body: JSON.stringify({
@@ -334,7 +334,7 @@ test("invalid role values are rejected at the input-validation layer (POST /admi
   await withServer(ctx.app, async (baseUrl) => {
     const superAdmin = await createUserWithRole(ctx, "super_admin");
     for (const badRole of ["viewer", "SuperAdmin", "", "administrator"]) {
-      const res = await fetch(`${baseUrl}/admin/users`, {
+      const res = await fetch(`${baseUrl}/api/v1/admin/users`, {
         method: "POST",
         headers: authHeader(superAdmin.token),
         body: JSON.stringify({ email: `bad-role-${badRole || "empty"}@example.com`, password: "bad-role-pw-123", role: badRole, firstName: "Bad", lastName: "Role", autoActivate: true }),
@@ -370,7 +370,7 @@ test("a JWT with a role claim re-signed under the WRONG secret is rejected -- si
       "a-completely-different-secret-the-attacker-made-up",
       { expiresIn: 900 },
     );
-    const res = await fetch(`${baseUrl}/admin/settings`, { headers: { Authorization: `Bearer ${forgedToken}` } });
+    const res = await fetch(`${baseUrl}/api/v1/admin/settings`, { headers: { Authorization: `Bearer ${forgedToken}` } });
     assert.equal(res.status, 401, "a token signed with the wrong secret must be rejected outright, regardless of how privileged its claims claim to be");
   });
 });
@@ -382,7 +382,7 @@ test("a completely unsigned JWT ('alg: none') is rejected", async () => {
     const payload = Buffer.from(JSON.stringify({ sub: "x", ghs_role: "super_admin", tokenType: "access" })).toString("base64url");
     const unsignedToken = `${header}.${payload}.`;
 
-    const res = await fetch(`${baseUrl}/admin/settings`, { headers: { Authorization: `Bearer ${unsignedToken}` } });
+    const res = await fetch(`${baseUrl}/api/v1/admin/settings`, { headers: { Authorization: `Bearer ${unsignedToken}` } });
     assert.equal(res.status, 401);
   });
 });
@@ -395,7 +395,7 @@ test("a token with a tampered payload (same header/signature, altered ghs_role c
     const forgedPayload = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(parts[1]!, "base64url").toString()), ghs_role: "super_admin" })).toString("base64url");
     const tamperedToken = `${parts[0]}.${forgedPayload}.${parts[2]}`;
 
-    const res = await fetch(`${baseUrl}/admin/settings`, { headers: { Authorization: `Bearer ${tamperedToken}` } });
+    const res = await fetch(`${baseUrl}/api/v1/admin/settings`, { headers: { Authorization: `Bearer ${tamperedToken}` } });
     assert.equal(res.status, 401, "changing the payload invalidates the signature -- the tampered claim is never trusted");
   });
 });
@@ -414,10 +414,10 @@ test("ownership boundary: a player cannot view another player's rounds, an admin
     await ctx.players.create({ userId: playerA.user.id, firstName: "A", lastName: "Player" });
     const playerBProfile = await ctx.players.create({ userId: playerB.user.id, firstName: "B", lastName: "Player" });
 
-    const asPlayerA = await fetch(`${baseUrl}/players/${playerBProfile.id}/rounds`, { headers: authHeader(playerA.token) });
+    const asPlayerA = await fetch(`${baseUrl}/api/v1/players/${playerBProfile.id}/rounds`, { headers: authHeader(playerA.token) });
     assert.equal(asPlayerA.status, 403, "player A cannot list player B's rounds");
 
-    const asAdmin = await fetch(`${baseUrl}/players/${playerBProfile.id}/rounds`, { headers: authHeader(admin.token) });
+    const asAdmin = await fetch(`${baseUrl}/api/v1/players/${playerBProfile.id}/rounds`, { headers: authHeader(admin.token) });
     assert.equal(asAdmin.status, 200, "an admin can list any player's rounds");
   });
 });
@@ -428,7 +428,7 @@ test("ownership boundary: a player CAN view their own rounds", async () => {
     const player = await createUserWithRole(ctx, "player");
     const playerProfile = await ctx.players.create({ userId: player.user.id, firstName: "Own", lastName: "Player" });
 
-    const res = await fetch(`${baseUrl}/players/${playerProfile.id}/rounds`, { headers: authHeader(player.token) });
+    const res = await fetch(`${baseUrl}/api/v1/players/${playerProfile.id}/rounds`, { headers: authHeader(player.token) });
     assert.equal(res.status, 200);
   });
 });

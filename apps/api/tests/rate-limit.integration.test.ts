@@ -122,10 +122,10 @@ test("general API tier: requests under the threshold succeed, the request that c
   const app = buildApp({ general: { limit: 5, windowMs: 60_000 } });
   await withServer(app, async (baseUrl) => {
     for (let i = 0; i < 5; i++) {
-      const res = await fetch(`${baseUrl}/clubs`);
+      const res = await fetch(`${baseUrl}/api/v1/clubs`);
       assert.equal(res.status, 200, `request ${i + 1} of 5 (within the limit) should succeed`);
     }
-    const rejected = await fetch(`${baseUrl}/clubs`);
+    const rejected = await fetch(`${baseUrl}/api/v1/clubs`);
     assert.equal(rejected.status, 429, "the 6th request, past the limit of 5, must be rejected");
     const body = await rejected.json();
     assert.match(body.error, /too many requests/);
@@ -135,9 +135,9 @@ test("general API tier: requests under the threshold succeed, the request that c
 test("/healthz is never subject to the general API tier, even after it's exhausted", async () => {
   const app = buildApp({ general: { limit: 2, windowMs: 60_000 } });
   await withServer(app, async (baseUrl) => {
-    await fetch(`${baseUrl}/clubs`);
-    await fetch(`${baseUrl}/clubs`);
-    const exhausted = await fetch(`${baseUrl}/clubs`);
+    await fetch(`${baseUrl}/api/v1/clubs`);
+    await fetch(`${baseUrl}/api/v1/clubs`);
+    const exhausted = await fetch(`${baseUrl}/api/v1/clubs`);
     assert.equal(exhausted.status, 429, "the general tier is genuinely exhausted at this point");
 
     const health = await fetch(`${baseUrl}/healthz`);
@@ -146,13 +146,18 @@ test("/healthz is never subject to the general API tier, even after it's exhaust
     // healthRouter only registers GET /healthz -- a GET here would be
     // exempt purely from mount order (it's handled and responded to
     // before the request ever reaches the limiter), which wouldn't
-    // actually prove the limiter's own `skip` predicate does anything
-    // (caught in review, PR #51). POST /healthz matches no router's
-    // route at all, so it falls through to the general limiter for
-    // real -- only the skip predicate (matching on req.path, not
-    // method) can be what protects it here.
+    // actually prove anything beyond that ordering. POST /healthz
+    // matches no router's route at all, so if it were reachable it
+    // would fall through to whatever's mounted next. ghs#57: that's no
+    // longer this limiter -- /healthz is mounted directly on app,
+    // entirely outside v1Router, so a request to it never reaches
+    // /api/v1 at all. POST /healthz therefore 404s (no route matches),
+    // never 429 -- proving mount-point separation itself is the
+    // guarantee now, not a `skip` predicate (removed in ghs#57; a path
+    // comparison against "/healthz" could never match from inside
+    // v1Router, where req.path is already relative to /api/v1).
     const postHealth = await fetch(`${baseUrl}/healthz`, { method: "POST" });
-    assert.notEqual(postHealth.status, 429, "POST /healthz reaches the limiter's own middleware (no route handles it) -- the skip predicate, not mount order, is what must exempt it");
+    assert.notEqual(postHealth.status, 429, "POST /healthz must never be rate-limited -- it structurally never reaches v1Router");
   });
 });
 
@@ -160,13 +165,13 @@ test("general API tier: per-IP isolation -- one IP's exhausted budget does not a
   const app = buildApp({ general: { limit: 3, windowMs: 60_000 } });
   await withServer(app, async (baseUrl) => {
     for (let i = 0; i < 3; i++) {
-      const res = await fetch(`${baseUrl}/clubs`, { headers: { "X-Forwarded-For": "10.0.0.1" } });
+      const res = await fetch(`${baseUrl}/api/v1/clubs`, { headers: { "X-Forwarded-For": "10.0.0.1" } });
       assert.equal(res.status, 200);
     }
-    const exhaustedForA = await fetch(`${baseUrl}/clubs`, { headers: { "X-Forwarded-For": "10.0.0.1" } });
+    const exhaustedForA = await fetch(`${baseUrl}/api/v1/clubs`, { headers: { "X-Forwarded-For": "10.0.0.1" } });
     assert.equal(exhaustedForA.status, 429, "10.0.0.1's budget is now genuinely exhausted");
 
-    const stillOkForB = await fetch(`${baseUrl}/clubs`, { headers: { "X-Forwarded-For": "10.0.0.2" } });
+    const stillOkForB = await fetch(`${baseUrl}/api/v1/clubs`, { headers: { "X-Forwarded-For": "10.0.0.2" } });
     assert.equal(stillOkForB.status, 200, "a different IP is not cross-throttled by 10.0.0.1 exhausting its own budget");
   });
 });
@@ -178,7 +183,7 @@ test("auth tier: requests under the threshold reach the route (401 for bad crede
   });
   await withServer(app, async (baseUrl) => {
     for (let i = 0; i < 3; i++) {
-      const res = await fetch(`${baseUrl}/auth/login`, {
+      const res = await fetch(`${baseUrl}/api/v1/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: "nobody@example.com", password: "wrong" }),
@@ -189,7 +194,7 @@ test("auth tier: requests under the threshold reach the route (401 for bad crede
       // a rate-limit rejection, for these first 3.
       assert.equal(res.status, 401, `login attempt ${i + 1} of 3 (within the auth-tier limit) should reach the route`);
     }
-    const rejected = await fetch(`${baseUrl}/auth/login`, {
+    const rejected = await fetch(`${baseUrl}/api/v1/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "nobody@example.com", password: "wrong" }),
@@ -200,7 +205,7 @@ test("auth tier: requests under the threshold reach the route (401 for bad crede
     // general tier (limit: 100) has only seen 4 requests total -- a
     // non-auth route must still succeed, proving the two counters are
     // genuinely separate, not one shared budget.
-    const clubs = await fetch(`${baseUrl}/clubs`);
+    const clubs = await fetch(`${baseUrl}/api/v1/clubs`);
     assert.equal(clubs.status, 200, "the general tier's own separate budget was not exhausted by auth-tier-counted requests");
   });
 });
@@ -212,14 +217,14 @@ test("sensitive-action tier: the email-keyed limiter rejects repeated requests f
   });
   await withServer(app, async (baseUrl) => {
     for (let i = 0; i < 3; i++) {
-      const res = await fetch(`${baseUrl}/auth/resend-activation`, {
+      const res = await fetch(`${baseUrl}/api/v1/auth/resend-activation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: "victim@example.com" }),
       });
       assert.equal(res.status, 200, `resend ${i + 1} of 3 for the same email (within the email-tier limit) should reach the route`);
     }
-    const rejected = await fetch(`${baseUrl}/auth/resend-activation`, {
+    const rejected = await fetch(`${baseUrl}/api/v1/auth/resend-activation`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "victim@example.com" }),
@@ -237,13 +242,13 @@ test("sensitive-action tier: the email-keyed limiter does not block a DIFFERENT 
   });
   await withServer(app, async (baseUrl) => {
     for (let i = 0; i < 4; i++) {
-      await fetch(`${baseUrl}/auth/resend-activation`, {
+      await fetch(`${baseUrl}/api/v1/auth/resend-activation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: "victim@example.com" }),
       });
     }
-    const differentEmail = await fetch(`${baseUrl}/auth/resend-activation`, {
+    const differentEmail = await fetch(`${baseUrl}/api/v1/auth/resend-activation`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "someone-else@example.com" }),
@@ -259,14 +264,14 @@ test("sensitive-action tier: the IP-keyed limiter rejects repeated requests from
   });
   await withServer(app, async (baseUrl) => {
     for (let i = 0; i < 3; i++) {
-      const res = await fetch(`${baseUrl}/auth/password-reset/request`, {
+      const res = await fetch(`${baseUrl}/api/v1/auth/password-reset/request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: `target-${i}@example.com` }),
       });
       assert.equal(res.status, 200, `request ${i + 1} of 3 from the same IP (within the IP-tier limit) should reach the route`);
     }
-    const rejected = await fetch(`${baseUrl}/auth/password-reset/request`, {
+    const rejected = await fetch(`${baseUrl}/api/v1/auth/password-reset/request`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "target-3@example.com" }),
@@ -282,11 +287,11 @@ test("sensitive-action tier's combined budget is shared across resend-activation
   });
   await withServer(app, async (baseUrl) => {
     const email = "shared-budget@example.com";
-    await fetch(`${baseUrl}/auth/resend-activation`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
-    await fetch(`${baseUrl}/auth/password-reset/request`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
-    await fetch(`${baseUrl}/auth/resend-activation`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+    await fetch(`${baseUrl}/api/v1/auth/resend-activation`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+    await fetch(`${baseUrl}/api/v1/auth/password-reset/request`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+    await fetch(`${baseUrl}/api/v1/auth/resend-activation`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
 
-    const rejected = await fetch(`${baseUrl}/auth/password-reset/request`, {
+    const rejected = await fetch(`${baseUrl}/api/v1/auth/password-reset/request`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),

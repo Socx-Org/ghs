@@ -234,7 +234,7 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
     const tokenA = loginA.tokens.accessToken;
 
     // Player A submits their own round -- allowed.
-    const createOwnResponse = await fetch(`${baseUrl}/rounds`, {
+    const createOwnResponse = await fetch(`${baseUrl}/api/v1/rounds`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
       body: JSON.stringify({ playerId: playerARecord!.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" }),
@@ -242,7 +242,7 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
     assert.equal(createOwnResponse.status, 201);
 
     // Player A attempts to submit a round for Player B -- forbidden.
-    const createOtherResponse = await fetch(`${baseUrl}/rounds`, {
+    const createOtherResponse = await fetch(`${baseUrl}/api/v1/rounds`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
       body: JSON.stringify({ playerId: playerBRecord!.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" }),
@@ -251,7 +251,7 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
 
     // Player A cannot approve their own round.
     const ownRound = await createOwnResponse.json() as { id: string };
-    const statusResponse = await fetch(`${baseUrl}/rounds/${ownRound.id}/status`, {
+    const statusResponse = await fetch(`${baseUrl}/api/v1/rounds/${ownRound.id}/status`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
       body: JSON.stringify({ status: "approved" }),
@@ -263,7 +263,7 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
     // configuration created by createTeeConfiguration() above has no
     // hole metadata at all, so any hole number reaches
     // HoleMetadataNotFoundError (PR #27 review fix).
-    const invalidHoleResponse = await fetch(`${baseUrl}/rounds/${ownRound.id}/holes`, {
+    const invalidHoleResponse = await fetch(`${baseUrl}/api/v1/rounds/${ownRound.id}/holes`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
       body: JSON.stringify({ holeNumber: 1, strokes: 4 }),

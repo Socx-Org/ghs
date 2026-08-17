@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Router } from "express";
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Logger } from "../../logger.ts";
 import type { ClubsService } from "../../application/clubs.service.ts";
@@ -83,32 +83,50 @@ export function createApp(deps: AppDeps): Express {
     next();
   });
 
+  // /healthz stays outside the versioned API entirely -- an
+  // infrastructure liveness probe, not an application-API concern, and
+  // deliberately never renumbered by a future /api/v2 (ghs#57). Mounted
+  // directly on app, before v1Router below, so Express never even
+  // considers v1Router (or anything mounted on it, including the rate
+  // limiters) for a /healthz request.
   app.use(healthRouter());
 
-  // General API baseline -- mounted after healthRouter (so a healthy
-  // request never even reaches it) and before every other route, so
-  // everything else is covered by the broad, outer tier. The auth and
-  // sensitive-action tiers below are layered ON TOP of this for the
-  // paths they cover, not an alternative to it -- each request to
-  // /auth/resend-activation, for example, is independently checked
-  // against all three, and any one being exceeded is enough to reject.
-  app.use(createGeneralApiLimiter(deps.rateLimitOverrides?.general));
+  // ghs#57: every application API route lives under /api/v1 -- an
+  // intentional versioning boundary (a future /api/v2 can be added as a
+  // sibling router here without touching any existing route module's
+  // own internal paths, all of which are unchanged by this issue). Every
+  // router below already declares its own full path internally (e.g.
+  // auth.ts has router.post("/auth/register", ...)), so mounting them
+  // unchanged onto v1Router and then mounting v1Router at /api/v1 is the
+  // entire change -- no route module's path strings were touched.
+  const v1Router = Router();
 
-  app.use("/auth", createAuthTierLimiter(deps.rateLimitOverrides?.auth));
+  // General API baseline -- mounted first on v1Router, before every
+  // other route, so everything else under /api/v1 is covered by the
+  // broad, outer tier. The auth and sensitive-action tiers below are
+  // layered ON TOP of this for the paths they cover, not an alternative
+  // to it -- each request to /auth/resend-activation, for example, is
+  // independently checked against all three, and any one being exceeded
+  // is enough to reject.
+  v1Router.use(createGeneralApiLimiter(deps.rateLimitOverrides?.general));
+
+  v1Router.use("/auth", createAuthTierLimiter(deps.rateLimitOverrides?.auth));
   const sensitiveActionIpLimiter = createSensitiveActionIpLimiter(deps.rateLimitOverrides?.sensitiveIp);
   const sensitiveActionEmailLimiter = createSensitiveActionEmailLimiter(deps.rateLimitOverrides?.sensitiveEmail);
-  app.use("/auth/resend-activation", sensitiveActionIpLimiter, sensitiveActionEmailLimiter);
-  app.use("/auth/password-reset/request", sensitiveActionIpLimiter, sensitiveActionEmailLimiter);
+  v1Router.use("/auth/resend-activation", sensitiveActionIpLimiter, sensitiveActionEmailLimiter);
+  v1Router.use("/auth/password-reset/request", sensitiveActionIpLimiter, sensitiveActionEmailLimiter);
 
-  app.use(authRouter(deps.authService, deps.systemSettingsService));
-  app.use(mfaRouter(deps.mfaService, deps.authProvider));
-  app.use(adminUsersRouter(deps.adminUsersService, deps.mfaService, deps.authProvider));
-  app.use(adminSettingsRouter(deps.systemSettingsService, deps.authProvider));
-  app.use(adminPccRouter(deps.pccService, deps.authProvider));
-  app.use(clubsRouter(deps.clubsService, deps.authProvider));
-  app.use(coursesRouter(deps.coursesService, deps.authProvider));
-  app.use(roundsRouter(deps.roundsService, deps.playersRepository, deps.authProvider));
-  app.use(handicapOverridesRouter(deps.handicapOverridesService, deps.playersRepository, deps.authProvider));
+  v1Router.use(authRouter(deps.authService, deps.systemSettingsService));
+  v1Router.use(mfaRouter(deps.mfaService, deps.authProvider));
+  v1Router.use(adminUsersRouter(deps.adminUsersService, deps.mfaService, deps.authProvider));
+  v1Router.use(adminSettingsRouter(deps.systemSettingsService, deps.authProvider));
+  v1Router.use(adminPccRouter(deps.pccService, deps.authProvider));
+  v1Router.use(clubsRouter(deps.clubsService, deps.authProvider));
+  v1Router.use(coursesRouter(deps.coursesService, deps.authProvider));
+  v1Router.use(roundsRouter(deps.roundsService, deps.playersRepository, deps.authProvider));
+  v1Router.use(handicapOverridesRouter(deps.handicapOverridesService, deps.playersRepository, deps.authProvider));
+
+  app.use("/api/v1", v1Router);
 
   // Centralised error handling -- errors from any route are logged
   // structurally (OPS-050.3: never the raw request body, which may contain
