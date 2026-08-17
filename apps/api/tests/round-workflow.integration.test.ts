@@ -148,6 +148,55 @@ test("rejectRound skips recalculation for a round that never had a differential 
   assert.equal(result.recalculation, null);
 });
 
+test("addHoleScore's editable-status check is genuinely atomic with the write -- a concurrent holder of the round's row lock blocks it until released (ghs#58, review fix)", async () => {
+  // Real hole metadata, unlike createTeeConfiguration()'s bare
+  // holes: [] -- this test goes through roundsService.addHoleScore (not
+  // the repository directly), which computes net_double_bogey_adjusted
+  // via scoring.computeHoleAdjustment and needs a real hole 1 to do so.
+  const courses = createCoursesRepository(pool);
+  const course = await courses.create({
+    name: "Round Workflow Lock Test Course",
+    country: "ES",
+    teeConfigurations: [{
+      name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113,
+      holes: [{ holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 7 }],
+    }],
+  });
+  const teeConfigurationId = course.teeConfigurations[0]!.id;
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Locked", lastName: "Hole" });
+  const { roundsRepo, roundsService } = buildServices();
+
+  const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+
+  // Manually hold exactly the row lock addHoleScore's own getForUpdate
+  // call needs to acquire -- the same real SQL that method runs.
+  const holdingClient = await pool.connect();
+  await holdingClient.query("BEGIN");
+  await holdingClient.query("SELECT id FROM rounds WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", [round.id]);
+
+  let completed = false;
+  const addHoleScorePromise = roundsService
+    .addHoleScore(round.id, { holeNumber: 1, strokes: 4 })
+    .then((result) => {
+      completed = true;
+      return result;
+    });
+
+  // Give it every real chance to run if it were (wrongly) not actually
+  // blocked -- if the status check and insert still ran against the
+  // unlocked pool (the pre-fix behaviour), this would complete well
+  // within this window.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(completed, false, "still blocked -- the row lock is real, not just a status check against a stale snapshot");
+
+  await holdingClient.query("COMMIT");
+  holdingClient.release();
+
+  const holeScore = await addHoleScorePromise;
+  assert.equal(holeScore.holeNumber, 1, "proceeds correctly, using a fresh locked read, once the held lock is released");
+});
+
 test("deleteRound soft-deletes and recalculates when the round had a differential, real database proof", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   const players = createPlayersRepository(pool);

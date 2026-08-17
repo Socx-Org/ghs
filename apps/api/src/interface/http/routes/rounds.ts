@@ -165,6 +165,16 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         res.status(409).json({ error: err.message });
         return;
       }
+      // addHoleScore's own row-locked existence check (review fix, PR
+      // #73) can in principle still throw this in the narrow window
+      // between the round-existence check above and its own lock --
+      // same 404 treatment as every other round route below, for
+      // consistency, not left to fall through to the generic 500
+      // handler.
+      if (err instanceof RoundNotFoundError) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });

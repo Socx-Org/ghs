@@ -243,19 +243,14 @@ export function createRoundsService(
       const round = (preloadedRound && preloadedRound.id === roundId) ? preloadedRound : await repository.get(roundId);
       if (!round) throw new Error("round not found");
 
-      // ghs#58: hole scores are only writable while the player actually
-      // owns the round's content -- draft (still entering), or
-      // rejected/amending (correcting before resubmission). Not pending
-      // (an admin may be reviewing it right now) or approved (correcting
-      // that requires reopenForAmendment first, the existing, deliberate
-      // gate -- unchanged by this issue).
-      if (!isEditableStatus(round.status)) {
-        throw new InvalidRoundTransitionError(`cannot add a hole score to a round in status '${round.status}'`);
-      }
-
       const teeConfiguration = await courses.getTeeConfiguration(round.teeConfigurationId);
       if (!teeConfiguration) throw new Error("tee configuration not found");
 
+      // playingHandicap and the tee configuration's own hole data never
+      // change after a round/course is created (no edit path exists for
+      // either), so computing this from the caller's own round snapshot
+      // is safe even though that snapshot's STATUS may be stale -- unlike
+      // status, this doesn't need the fresh, locked read below.
       const netDoubleBogeyAdjusted = scoring.computeHoleAdjustment({
         holeNumber: input.holeNumber,
         strokes: input.strokes,
@@ -264,9 +259,40 @@ export function createRoundsService(
         holeCount: teeConfiguration.holeCount,
       });
 
-      const holeScore = await repository.addHoleScore(roundId, { ...input, netDoubleBogeyAdjusted });
-      logger.info("hole score recorded", { roundId, holeNumber: holeScore.holeNumber });
-      return holeScore;
+      // ghs#58: the actual editable-status decision is made against a
+      // freshly row-locked read, not the caller's (possibly stale)
+      // snapshot -- preloadedRound in particular may be minutes old by
+      // the time this runs (the HTTP route fetches it once, up front,
+      // for its own ownership check). Locking + checking + inserting on
+      // the SAME transaction closes the race a concurrent submit/admin
+      // transition could otherwise slip through between the check and
+      // the write -- the same FOR UPDATE discipline runWorkflowTransition
+      // already gives every other status-sensitive round operation in
+      // this file, found missing here in review (PR #73).
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const locked = await repository.getForUpdate(roundId, client);
+        if (!locked) throw new RoundNotFoundError(`round ${roundId} not found`);
+        if (!isEditableStatus(locked.status)) {
+          throw new InvalidRoundTransitionError(`cannot add a hole score to a round in status '${locked.status}'`);
+        }
+        const holeScore = await repository.addHoleScore(roundId, { ...input, netDoubleBogeyAdjusted }, client);
+        await client.query("COMMIT");
+        logger.info("hole score recorded", { roundId, holeNumber: holeScore.holeNumber });
+        return holeScore;
+      } catch (err) {
+        try {
+          await client.query("ROLLBACK");
+        } catch {
+          // Best-effort only, same convention as apply.ts's advisory
+          // unlock / migration rollback -- never let a secondary
+          // rollback failure replace and hide the real error above.
+        }
+        throw err;
+      } finally {
+        client.release();
+      }
     },
 
     async updateScores(id, update) {

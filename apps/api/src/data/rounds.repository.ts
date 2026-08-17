@@ -134,7 +134,12 @@ export interface RoundsRepository {
   // manages its own self-contained transaction exactly as before --
   // existing callers are unaffected.
   create(input: CreateRoundInput, client?: PoolClient): Promise<Round>;
-  addHoleScore(roundId: string, input: CreateHoleScoreInput): Promise<HoleScore>;
+  // client: same optional-participation convention as create() above --
+  // threaded through so ghs#58's status guard (rounds.service.ts) can
+  // take a real row lock (getForUpdate) and this insert on the SAME
+  // client/transaction, closing the race between checking the round's
+  // status and writing the hole score (review finding, PR #73).
+  addHoleScore(roundId: string, input: CreateHoleScoreInput, client?: PoolClient): Promise<HoleScore>;
   updateScores(id: string, update: RoundScoreUpdate): Promise<Round>;
   get(id: string): Promise<Round | null>;
   listByPlayer(playerId: string): Promise<RoundSummary[]>;
@@ -327,8 +332,8 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       }
     },
 
-    async addHoleScore(roundId, input) {
-      return insertHoleScore(pool, roundId, input);
+    async addHoleScore(roundId, input, client) {
+      return insertHoleScore(client ?? pool, roundId, input);
     },
 
     async updateScores(id, update) {
