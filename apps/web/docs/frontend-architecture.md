@@ -1,6 +1,33 @@
 # GHS Frontend Architecture
 
-GHS-specific frontend conventions, established by the component library / design system foundation (`ghs#78`, revised and substantially extended by `ghs#82`: emerald rebrand, light/dark theme, logo, iconography, skeleton loading, Toast, ToggleGroup) and extended into the API/auth layer by `ghs#63`. This is a local, application-level convention document, not a `socx-platform` ADR -- if these conventions prove out across multiple SOCX applications, the relevant subset can be promoted to a Platform ADR later. Not required to re-litigate this document; it records decisions already approved, and should be kept in sync as the frontend evolves.
+GHS-specific frontend conventions, established by the component library / design system foundation (`ghs#78`, revised and substantially extended by `ghs#82`: emerald rebrand, light/dark theme, logo, iconography, skeleton loading, Toast, ToggleGroup), extended into the API/auth layer by `ghs#63`, and into real routing and the first product screen by `ghs#64` (Login/MFA). This is a local, application-level convention document, not a `socx-platform` ADR -- if these conventions prove out across multiple SOCX applications, the relevant subset can be promoted to a Platform ADR later. Not required to re-litigate this document; it records decisions already approved, and should be kept in sync as the frontend evolves.
+
+## Routing & the first real screen (`ghs#64`)
+
+**`react-router-dom` introduced here, not earlier.** `#63` deliberately deferred this decision ("whichever issue first needs real multi-screen navigation") rather than guessing ahead of a concrete need -- a real login screen needing somewhere to redirect *to* on success and *from* when unauthenticated is that concrete need. `AppRoutes.tsx` is kept separate from `App.tsx` specifically so tests can drive it inside a `MemoryRouter` (controlling the initial route directly) instead of the real `BrowserRouter`, which reads from `window.location`.
+
+**Two route guards, two different jobs.** `components/domain/RequireRole.tsx` (from `#63`) stayed router-agnostic -- it gates *rendering*, not navigation, and still doesn't import `react-router-dom`. `routes/RequireAuth.tsx` and `routes/RedirectIfAuthenticated.tsx` are the actual navigation guards this issue adds, both thin (`useAuth()` + `<Navigate>`/`<Outlet>`), living in their own `routes/` directory since they're tied to the router in a way `RequireRole` deliberately isn't.
+
+**The dev-catalogue/production-placeholder split in `App.tsx` is retired, not extended.** `ghs#78`'s own comment already named this moment: "once real application routing is introduced, the catalogue can become a development-only `/components` route." It's now `/dev/components`, gated the same way the old split was (`MODE === "development"`, not `import.meta.env.DEV` -- still true under Vitest's test mode, confirmed directly in the original scaffold). The old scaffold's live `/healthz` check is retired along with it, not carried forward into the new placeholder -- a real, working login is a stronger end-to-end proof that the frontend can reach the backend than a liveness ping ever was.
+
+**`DashboardPlaceholder` is deliberately real, not a stub.** Player Dashboard is its own later issue (`#65`), but `RequireAuth` needs a genuine authenticated destination to send the user to, and logout needs something real to exercise -- both matter for this issue's own acceptance criteria (real end-to-end login), so the placeholder does real work (`useAuth()`, a working sign-out button) rather than rendering static text.
+
+### Split-screen login layout
+
+Structurally adapted from Tailwind UI's "Split screen" sign-in block (approved direction: match its layout, not its content) -- a form panel plus a full-height visual panel. Several elements from that reference were deliberately dropped, because none of them are real for GHS yet:
+
+- **"Or continue with Google/GitHub"** -- no OAuth provider exists anywhere in the backend (verified directly against `apps/api/src/interface/http/routes/auth.ts`). Fake buttons for a login method that doesn't exist would be exactly the kind of fabricated UI this project avoids.
+- **"Forgot password?"** -- no password-reset UI exists; it's explicit Wave 2 (`#64`'s own non-scope), not built yet. A link to a route that doesn't exist isn't better than no link.
+- **"Remember me"** -- the refresh token already persists the session for 30 days regardless of any checkbox (`apps/api/src/config.ts`'s `jwtRefreshExpiresInSeconds`); there's no backend concept of a shorter "non-remembered" session to opt out of. A checkbox with no real effect would be decorative, not functional.
+- **The marketing "Start a free trial" copy** -- GHS has no such flow.
+
+**The right-hand panel is a solid brand-colour gradient with a short tagline, not a stock photo.** No photography asset exists anywhere in this app, and sourcing an external image for this one placement would be a real licensing/provenance question worth raising explicitly rather than quietly deciding by embedding a random web image. The `Logo` mark itself isn't repeated on this panel -- its circle/S colours are token-driven (`fill-text`/`fill-surface`) for correct contrast against `surface`/`bg-page`, not tuned for an arbitrary solid brand-colour background, and duplicating it there wasn't worth extending the component's API for a single decorative placement.
+
+**A real bug found in this issue's own visual verification, worth recording:** the login page's outer container had no explicit background class. In light theme this was invisible (white text container against the browser's own default white), but in dark theme it left the panel white while the theme-aware text inside correctly switched to light colours -- rendering the entire left panel illegible. Caught by actually toggling dark mode and looking at a screenshot, not by trusting the component tokens to "just work" without checking. Fixed with an explicit `bg-surface` on the page's root container.
+
+### Real end-to-end verification, including MFA
+
+Login was verified against the real running API with real test users seeded directly into the database (`argon2.hash()`, matching `apps/api/src/lib/password.ts` exactly) -- not just mocked. The MFA path was verified with a genuinely MFA-enrolled user: real enrollment via the actual `/auth/mfa/enroll` and `/auth/mfa/enroll/confirm` endpoints, using `otplib`'s real TOTP generation (the same library the backend itself uses) to produce a real, currently-valid 6-digit code at verification time -- not a hardcoded fixture code, which would have gone stale immediately (TOTP codes are time-windowed, ~30s).
 
 ## API client & auth foundation (`ghs#63`)
 

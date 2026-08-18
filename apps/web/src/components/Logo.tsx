@@ -47,7 +47,7 @@ export function Logo({ variant = "full", className, label = "SOCX" }: LogoProps)
   }
 
   return (
-    <span role="img" aria-label={label} className={cn("inline-flex items-center gap-2", className)}>
+    <span role="img" aria-label={label} className={cn("inline-flex items-center", className)}>
       <Mark />
       {/* tracking-tight + font-semibold on the same system stack, not a
           second (webfont) typeface -- the "premium" character comes
