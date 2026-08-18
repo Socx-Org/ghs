@@ -2,6 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
+import type { UserRole } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -163,6 +164,30 @@ export async function verifyMfa(input: MfaVerifyRequest): Promise<AuthTokens> {
     if (error instanceof ApiError) throw error;
     throw new ApiError(errorMessage(error), axios.isAxiosError(error) ? error.response?.status : undefined);
   }
+}
+
+export interface CreateUserRequest {
+  email: string;
+  password: string;
+  role: UserRole;
+  firstName: string;
+  lastName: string;
+  autoActivate: boolean;
+}
+
+export interface CreateUserResult {
+  userId: string;
+}
+
+// ghs#86. Routed through `api`, not bootstrapClient -- unlike login/
+// verifyMfa/refresh/logout (the auth bootstrap flow itself), this is a
+// real authenticated feature call: it needs the bearer token api's
+// request interceptor attaches, and its response interceptor already
+// normalises any failure into an ApiError (including a 401 -> refresh
+// retry), so there's no need to duplicate that wrapping here.
+export async function createUser(input: CreateUserRequest): Promise<CreateUserResult> {
+  const { data } = await api.post<CreateUserResult>("/admin/users", input);
+  return data;
 }
 
 // Always clears local state, regardless of whether the network call
