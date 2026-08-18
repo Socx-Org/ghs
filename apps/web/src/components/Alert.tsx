@@ -4,10 +4,10 @@ import { cn } from "../lib/cn";
 export type AlertVariant = "success" | "error" | "warning" | "info";
 
 const VARIANT_CLASSES: Record<AlertVariant, string> = {
-  success: "bg-success-surface text-green-800 ring-green-200",
-  error: "bg-danger-surface text-red-800 ring-red-200",
-  warning: "bg-warning-surface text-amber-800 ring-amber-200",
-  info: "bg-info-surface text-blue-800 ring-blue-200",
+  success: "bg-success-surface text-success ring-success-border",
+  error: "bg-danger-surface text-danger ring-danger-border",
+  warning: "bg-warning-surface text-warning ring-warning-border",
+  info: "bg-info-surface text-info ring-info-border",
 };
 
 // Announced textually as well as by colour, so the state doesn't rely on

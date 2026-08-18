@@ -75,7 +75,7 @@ export function Modal({ open, onClose, title, children, footer, className }: Mod
         }
       }}
       className={cn(
-        "m-0 w-full max-w-lg rounded-t-lg border border-slate-200 bg-white p-0 shadow-xl backdrop:bg-slate-900/50",
+        "m-0 w-full max-w-lg rounded-t-lg border border-border bg-surface p-0 shadow-xl backdrop:bg-slate-900/50",
         // top-auto is required, not decorative -- Chromium's UA stylesheet
         // sets `inset: 0` on dialog:modal, so without an explicit
         // override here `top` stays 0 and, combined with bottom-0 and
@@ -87,15 +87,15 @@ export function Modal({ open, onClose, title, children, footer, className }: Mod
         className,
       )}
     >
-      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-6">
-        <h2 id={titleId} className="text-lg font-semibold text-slate-900">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-6">
+        <h2 id={titleId} className="text-lg font-semibold text-text">
           {title}
         </h2>
         <button
           type="button"
           aria-label="Close"
           onClick={() => dialogRef.current?.close()}
-          className="rounded-md p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-600"
+          className="rounded-md p-2 text-text-muted hover:bg-text/5 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
         >
           <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="currentColor">
             <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
@@ -103,7 +103,7 @@ export function Modal({ open, onClose, title, children, footer, className }: Mod
         </button>
       </div>
       <div className="max-h-[60vh] overflow-y-auto px-4 py-4 sm:px-6">{children}</div>
-      {footer && <div className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3 sm:px-6">{footer}</div>}
+      {footer && <div className="flex justify-end gap-2 border-t border-border px-4 py-3 sm:px-6">{footer}</div>}
     </dialog>
   );
 }

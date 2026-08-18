@@ -26,3 +26,27 @@ if (typeof HTMLDialogElement !== "undefined") {
     };
   }
 }
+
+// jsdom doesn't implement window.matchMedia at all (confirmed directly:
+// typeof window.matchMedia is "undefined" under jsdom, not just a stub).
+// ThemeToggle depends on it to track prefers-color-scheme. This is a
+// real, working EventTarget-based MediaQueryList (not just a
+// matches:false stub), so a test can flip `.matches` and dispatch a
+// real "change" event to exercise ThemeToggle's system-preference
+// listener -- ghs#82's ThemeToggle.test.tsx does exactly that.
+if (typeof window !== "undefined" && !window.matchMedia) {
+  window.matchMedia = (query: string) => {
+    const target = new EventTarget();
+    const mql = {
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: target.addEventListener.bind(target),
+      removeEventListener: target.removeEventListener.bind(target),
+      addListener: target.addEventListener.bind(target),
+      removeListener: target.removeEventListener.bind(target),
+      dispatchEvent: target.dispatchEvent.bind(target),
+    } as unknown as MediaQueryList;
+    return mql;
+  };
+}

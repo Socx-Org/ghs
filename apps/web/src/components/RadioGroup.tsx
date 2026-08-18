@@ -28,7 +28,7 @@ export function RadioGroup({ name, options, value, onChange, disabled, className
           <label
             key={option.value}
             className={cn(
-              "flex min-h-11 items-center gap-2 py-2 text-sm text-slate-900",
+              "flex min-h-11 items-center gap-2 py-2 text-sm text-text",
               isDisabled && "cursor-not-allowed opacity-50",
             )}
           >
@@ -39,7 +39,7 @@ export function RadioGroup({ name, options, value, onChange, disabled, className
               checked={value === option.value}
               disabled={isDisabled}
               onChange={() => onChange?.(option.value)}
-              className="h-5 w-5 border-slate-300 text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-600"
+              className="h-5 w-5 border-border-strong text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
             />
             {option.label}
           </label>

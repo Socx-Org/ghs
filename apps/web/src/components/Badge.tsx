@@ -8,21 +8,24 @@ import { cn } from "../lib/cn";
 export type BadgeVariant = "neutral" | "success" | "warning" | "danger" | "info" | "amending";
 
 const VARIANT_CLASSES: Record<BadgeVariant, string> = {
-  neutral: "bg-slate-100 text-slate-700 ring-slate-200",
-  success: "bg-success-surface text-green-800 ring-green-200",
-  warning: "bg-warning-surface text-amber-800 ring-amber-200",
-  danger: "bg-danger-surface text-red-800 ring-red-200",
-  info: "bg-info-surface text-blue-800 ring-blue-200",
-  amending: "bg-amending-surface text-violet-800 ring-violet-200",
+  neutral: "bg-border text-text-muted ring-border-strong",
+  success: "bg-success-surface text-success ring-success-border",
+  warning: "bg-warning-surface text-warning ring-warning-border",
+  danger: "bg-danger-surface text-danger ring-danger-border",
+  info: "bg-info-surface text-info ring-info-border",
+  amending: "bg-amending-surface text-amending ring-amending-border",
 };
 
 export interface BadgeProps {
   variant?: BadgeVariant;
   children: ReactNode;
   className?: string;
+  /** Renders a small dismiss control -- no current GHS screen needs this
+   *  yet, but it's cheap to support now for likely future filter chips. */
+  onRemove?: () => void;
 }
 
-export function Badge({ variant = "neutral", children, className }: BadgeProps) {
+export function Badge({ variant = "neutral", children, className, onRemove }: BadgeProps) {
   return (
     <span
       className={cn(
@@ -32,6 +35,18 @@ export function Badge({ variant = "neutral", children, className }: BadgeProps) 
       )}
     >
       {children}
+      {onRemove && (
+        <button
+          type="button"
+          aria-label="Remove"
+          onClick={onRemove}
+          className="-mr-1 rounded-full p-0.5 hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
+        >
+          <svg aria-hidden="true" viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor">
+            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+          </svg>
+        </button>
+      )}
     </span>
   );
 }
