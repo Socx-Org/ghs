@@ -94,6 +94,14 @@ export default function AdminCreateUserPage() {
         <form className="mt-8 flex flex-col gap-6" onSubmit={handleSubmit(onSubmit)} noValidate>
           {feedback && <Alert variant={feedback.variant}>{feedback.message}</Alert>}
 
+          {/* autoComplete="off" throughout this form, deliberately unlike
+              LoginPage's autoComplete="email" -- every field here
+              describes the *new* account holder, not the signed-in
+              admin filling out the form. Semantic tokens like "email"/
+              "given-name"/"family-name" invite the browser to autofill
+              the admin's own saved identity into someone else's record,
+              which would be a real, silent data-entry bug, not just a
+              missed convenience (review finding, PR #87). */}
           <FormField label="Email address" error={errors.email?.message}>
             <Input type="email" autoComplete="off" {...register("email")} />
           </FormField>

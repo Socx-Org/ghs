@@ -24,7 +24,7 @@ export default function DashboardPlaceholder() {
         brand={<Logo variant="mark" label="GHS" />}
         nav={
           isAdmin && (
-            <NavItem icon={<ShieldCheck className="h-4 w-4" />} onClick={() => navigate("/admin/users/new")}>
+            <NavItem icon={<ShieldCheck className="h-4 w-4" />} href="/admin/users/new">
               Admin
             </NavItem>
           )
