@@ -1,11 +1,23 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import ComponentsCatalogue from "./ComponentsCatalogue";
+import { useAuth } from "./hooks/useAuth";
 import AdminCreateUserPage from "./pages/AdminCreateUserPage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
 import LoginPage from "./pages/LoginPage";
+import PlayerDashboardPage from "./pages/PlayerDashboardPage";
 import { RedirectIfAuthenticated } from "./routes/RedirectIfAuthenticated";
 import { RequireAdmin } from "./routes/RequireAdmin";
 import { RequireAuth } from "./routes/RequireAuth";
+
+// ghs#65: player is the only role with a real landing screen so far --
+// admin/super_admin still get DashboardPlaceholder (its own Admin nav
+// entry point is all they need today; a real admin dashboard is future
+// scope, not invented here). A small dispatcher rather than two
+// separate routes, since both live at the same "/" path.
+function HomeRoute() {
+  const { user } = useAuth();
+  return user?.role === "player" ? <PlayerDashboardPage /> : <DashboardPlaceholder />;
+}
 
 // Extracted from App.tsx so tests can drive it inside a MemoryRouter
 // (controlling the initial route directly) instead of the real
@@ -17,7 +29,7 @@ export default function AppRoutes() {
         <Route path="/login" element={<LoginPage />} />
       </Route>
       <Route element={<RequireAuth />}>
-        <Route path="/" element={<DashboardPlaceholder />} />
+        <Route path="/" element={<HomeRoute />} />
         <Route element={<RequireAdmin />}>
           <Route path="/admin/users/new" element={<AdminCreateUserPage />} />
         </Route>

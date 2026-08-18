@@ -43,6 +43,18 @@ Login was verified against the real running API with real test users seeded dire
 
 **Verified end-to-end against the real running API and database**, not just mocked: a real `super_admin` and a real plain `admin` seeded directly into Postgres (`argon2.hash()`, matching the backend exactly), driven through the actual browser login -> Admin nav -> create-account flow twice -- once as `super_admin` creating a `player` with activation deferred (confirmed `status = pending_verification`), once as plain `admin` with "Activate immediately" checked (confirmed `status = active`, `email_verified_at` set, and the Role field absent from the form entirely for this caller).
 
+## Player dashboard (`ghs#65`) and `GET /players/me` (`ghs#89`)
+
+**A real backend gap found while scoping this issue, fixed first.** A logged-in player had no way to discover their own player id -- every player-scoped endpoint requires one in the URL, and the JWT carries no `playerId` claim. `GET /players/me` (`#89`, its own small `apps/api` PR ahead of this one) resolves it via the route authorizer's existing internal `findByUserId` lookup, newly exposed over HTTP. Deliberately not solved by adding `playerId` to the JWT or login response instead -- that would couple the auth layer to player-profile data (`IAM-020` keeps `users`/`players` strictly separated) and go stale across a token refresh if a player's linkage ever changed.
+
+**First real use of TanStack Query, per the issue's own approved choice** -- not `useEffect`+`useState`. One `QueryClient` at the app root (`App.tsx`, wrapping everything, same level as `ToastProvider`/`BrowserRouter`), not per-screen, so a query started on one screen stays cached across navigation. Real server state (`GET /players/me`, `GET /players/:playerId/rounds`) is exactly what it's for, distinct from local UI state (`useState`, still used everywhere else in this app).
+
+**`/` now dispatches on role, not a single fixed screen.** `AppRoutes.tsx`'s `HomeRoute` renders `PlayerDashboardPage` for `role === "player"` and falls back to the existing `DashboardPlaceholder` for `admin`/`super_admin` -- there's no real admin dashboard yet (future scope, not invented here), and `DashboardPlaceholder`'s own Admin-nav entry point is still all an admin needs today.
+
+**The null-handicap-index empty state is a real acceptance criterion** (`#65`: "an eligibility-appropriate empty/insufficient-holes state when `handicapIndex` is null"), not a generic "no data" placeholder -- the copy names the real WHS minimum (3 rounds / 54 holes, `apps/api`'s own eligibility rule) rather than a vague "check back later."
+
+**Verified end-to-end against the real running API and database**: a real player seeded directly into Postgres (no rounds yet), driven through the actual browser login -> dashboard flow -- confirmed the real `null`/empty states render correctly from genuine `GET /players/me`/`GET /players/:playerId/rounds` responses, in both light and dark theme. The "recent rounds with real statuses" rendering path (badges, date formatting) is covered by `PlayerDashboardPage.test.tsx` against exact-shape mocked data instead of a second live round -- creating a real approved round requires a full club/course/tee-configuration chain this issue has no other reason to seed.
+
 **`DashboardPlaceholder` gained a real `AppHeader`**, with an "Admin" nav item that's a genuine destination now (`navigate("/admin/users/new")`) rather than the non-functional stub the catalogue demo shows -- rendered only for `admin`/`super_admin` users, mirroring the same role check `RequireAdmin` enforces at the route level.
 
 ## API client & auth foundation (`ghs#63`)

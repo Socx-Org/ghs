@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import AppRoutes from "./AppRoutes";
 import { setTokens } from "./lib/auth-store";
@@ -23,11 +24,20 @@ const ADMIN_TOKENS = {
   expiresIn: 900,
 };
 
+// ghs#65: PlayerDashboardPage (rendered at "/" for a player role) uses
+// TanStack Query -- a real QueryClientProvider ancestor is required or
+// useQuery throws synchronously, same as the real App.tsx tree. retry:
+// false so an unmocked network call (this file doesn't mock `api`,
+// only cares about routing) settles into its error state immediately
+// instead of retrying with backoff and slowing the test down.
 function renderAt(path: string) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <AppRoutes />
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <AppRoutes />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -48,18 +58,28 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
   });
 
-  it("renders the dashboard placeholder at / when authenticated", () => {
+  it("renders the player dashboard at / for a player (ghs#65)", () => {
     setTokens(AUTHENTICATED_TOKENS);
     renderAt("/");
+    // "Recent rounds" is static JSX, not gated behind either query's
+    // state -- a deterministic marker that PlayerDashboardPage rendered,
+    // regardless of how its (unmocked, in this routing-focused file)
+    // network calls resolve.
+    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
+  });
+
+  it("renders the dashboard placeholder at / for a non-player (admin) -- PlayerDashboardPage is player-only (ghs#65)", () => {
+    setTokens(ADMIN_TOKENS);
+    renderAt("/");
     expect(screen.getByText(/Signed in as/)).toBeInTheDocument();
-    expect(screen.getByText("alice@example.com", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("admin@example.com", { exact: false })).toBeInTheDocument();
   });
 
   it("redirects /login to / when already authenticated", () => {
     setTokens(AUTHENTICATED_TOKENS);
     renderAt("/login");
     expect(screen.queryByRole("heading", { name: "Sign in to your account" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Signed in as/)).toBeInTheDocument();
+    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
   });
 
   it("redirects an unknown route to / (which itself redirects to /login when unauthenticated)", () => {
@@ -76,7 +96,7 @@ describe("AppRoutes", () => {
     setTokens(AUTHENTICATED_TOKENS);
     renderAt("/admin/users/new");
     expect(screen.queryByRole("heading", { name: "Create account" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Signed in as/)).toBeInTheDocument();
+    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
   });
 
   it("renders the admin create-user form at /admin/users/new for an admin (ghs#86)", () => {

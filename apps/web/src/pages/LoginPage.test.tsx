@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import MockAdapter from "axios-mock-adapter";
 import AppRoutes from "../AppRoutes";
@@ -32,12 +33,19 @@ afterEach(() => {
 // Rendered through the real AppRoutes (not LoginPage in isolation) so
 // "logs in successfully" means what the acceptance criteria actually
 // ask for: real end-to-end navigation to the authenticated destination,
-// not just a mocked callback firing.
+// not just a mocked callback firing. QueryClientProvider is required
+// once login lands on PlayerDashboardPage (ghs#65, TanStack Query) --
+// retry: false so its unmocked `api` calls (this file only cares about
+// the login flow, not dashboard data) settle to an error state quickly
+// instead of retrying with backoff.
 function renderLogin() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={["/login"]}>
-      <AppRoutes />
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/login"]}>
+        <AppRoutes />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -64,8 +72,12 @@ describe("LoginPage", () => {
     await userEvent.type(screen.getByLabelText("Password"), "correct-password");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-    await waitFor(() => expect(screen.getByText(/Signed in as/)).toBeInTheDocument());
-    expect(screen.getByText("a@example.com", { exact: false })).toBeInTheDocument();
+    // Sign out is present on every authenticated-area screen regardless
+    // of which one a given role lands on (ghs#65: this is now
+    // PlayerDashboardPage for a player) -- proves real navigation past
+    // login without coupling this login-flow test to a specific
+    // dashboard's content.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument());
   });
 
   it("shows the MFA step when the backend requires it, then verifies and navigates (including an MFA-enrolled user, acceptance criterion)", async () => {
