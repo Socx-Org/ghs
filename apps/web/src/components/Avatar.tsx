@@ -9,13 +9,16 @@ const SIZE_CLASSES: Record<AvatarSize, string> = {
 };
 
 // Deterministic colour per name so the same person looks the same
-// everywhere without a lookup table.
+// everywhere without a lookup table. Reuses the existing semantic
+// surface/text token pairs (already theme-aware) rather than a second,
+// parallel hardcoded light-only palette that would need its own dark
+// variants -- same visual technique as Badge, not a new mechanism.
 const PALETTE = [
-  "bg-blue-100 text-blue-800",
-  "bg-green-100 text-green-800",
-  "bg-amber-100 text-amber-800",
-  "bg-violet-100 text-violet-800",
-  "bg-slate-200 text-slate-800",
+  "bg-info-surface text-info",
+  "bg-success-surface text-success",
+  "bg-warning-surface text-warning",
+  "bg-amending-surface text-amending",
+  "bg-border text-text-muted",
 ];
 
 function initials(name: string): string {

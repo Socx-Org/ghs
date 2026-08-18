@@ -1,26 +1,43 @@
 # GHS Frontend Architecture
 
-GHS-specific frontend conventions, established by the component library / design system foundation (`ghs#78`). This is a local, application-level convention document, not a `socx-platform` ADR -- if these conventions prove out across multiple SOCX applications, the relevant subset can be promoted to a Platform ADR later. Not required to re-litigate this document; it records decisions already approved, and should be kept in sync as the frontend evolves.
+GHS-specific frontend conventions, established by the component library / design system foundation (`ghs#78`, revised and substantially extended by `ghs#82`: emerald rebrand, light/dark theme, logo, iconography, skeleton loading, Toast, ToggleGroup). This is a local, application-level convention document, not a `socx-platform` ADR -- if these conventions prove out across multiple SOCX applications, the relevant subset can be promoted to a Platform ADR later. Not required to re-litigate this document; it records decisions already approved, and should be kept in sync as the frontend evolves.
 
 ## Visual design direction
 
-Clean, professional, governance/clubhouse-oriented -- GHS produces official handicap indices, so the UI should read closer to "committee" than "sports app." Deliberately distinct from RMS's own frontend (indigo primary, no design tokens, one shared component across 14 pages) rather than a visual reskin of it -- see "Component layering" and "RMS precedent" below.
+Modern SaaS structure (clean, structured, information-dense without feeling cluttered) with a subtle premium golf/clubhouse character carried through colour, restraint and the brand mark -- not through golf imagery, ornamental styling, or a second typeface. Deliberately distinct from RMS's own frontend (indigo primary, no design tokens, no dark mode, one shared component across 14 pages) rather than a visual reskin of it -- see "Component layering" and "RMS precedent" below.
 
 ## Semantic colour system
 
-Tailwind's stock palette, aliased to intent via a `@theme` block (`apps/web/src/styles/theme.css`) rather than new colours:
+Tailwind's stock palette, aliased to intent via CSS custom properties (`apps/web/src/styles/theme.css`) rather than new colours. Two layers: `@theme` registers the semantic *names* so Tailwind generates `bg-primary`/`text-primary`/etc. utilities; plain `:root` custom properties underneath hold the actual light/dark values (`@theme` tokens are resolved once at build time, so the runtime-switchable light/dark split has to live one level below it, not inside the `@theme` block itself).
 
-| Token | Colour | Used for |
-|---|---|---|
-| `primary` | `blue-600`/`700` | Buttons, links, focus rings, active nav |
-| `success` | `green-600` | Approved rounds, success banners |
-| `warning` | `amber-600` | Pending rounds, warning banners |
-| `danger` | `red-600`/`700` | Rejected rounds, destructive actions, errors |
-| `info` | `blue-500` | Informational banners (shares the primary family deliberately -- both read as neutral/non-alarming) |
-| `amending` | `violet-600` | Round sent back for player resubmission |
-| neutral | `slate` | Draft, disabled, muted text/borders (no alias -- slate's own scale is used directly) |
+| Token | Light | Dark | Used for |
+|---|---|---|---|
+| `primary` | `emerald-700` | `emerald-500` | Buttons, links, focus rings, active nav |
+| `success` | `green-700` | `green-400` | Approved rounds, success banners |
+| `warning` | `amber-700` | `amber-400` | Pending rounds, warning banners |
+| `danger` | `red-600` | `red-400` | Rejected rounds, destructive actions, errors |
+| `info` | `blue-700` | `blue-400` | Informational banners |
+| `amending` | `violet-600` | `violet-400` | Round sent back for player resubmission |
+| `surface` / `surface-raised` | `white` / `white` | `slate-800` / `slate-700` | Cards, modals, table rows / a step lighter still, for hover-within-a-surface |
+| `bg-page` | `slate-50` | `slate-900` | Page background |
+| `border` / `border-strong` | `slate-200` / `slate-300` | `slate-700` / `slate-600` | Dividers, card borders / input borders needing more definition |
+| `text` / `text-muted` | `slate-900` / `slate-500` | `slate-100` / `slate-400` | Body text / help, captions, secondary text |
+| `text-on-primary` | `white` | `slate-900` | Text/icon colour on a solid `primary`/`danger` fill |
 
-**Why primary (blue) and success (green) are kept distinct**: green is reserved unambiguously for "Approved"/success semantics, a governance-critical, frequently-shown state. Reusing it as the primary action colour would compete with that meaning. Blue also differs enough from RMS's indigo that the two sibling SOCX apps don't read as reskins of each other.
+### Why the shade numbers aren't what you'd guess
+
+Every pairing below was measured (canvas-rasterized real sRGB from Tailwind v4's OKLCH values, not assumed from the class name), because several intuitive choices turned out to fail WCAG AA (4.5:1 for normal text):
+
+- **`emerald-600` fails as the primary shade.** White text on `emerald-600` is 3.65:1 (fails); `emerald-700` is 5.36:1 (passes). `emerald-600` is kept, but only for *non-text* accents (icons, borders, focus rings), where the looser 3:1 non-text/UI-component threshold applies.
+- **The same pattern repeats for `success` and `warning`.** `green-600`/`amber-600` text on white measured 3.22:1/3.20:1 (fail); `green-700`/`amber-700` measured 4.95:1/5.03:1 (pass). `info`'s original `blue-500` measured 3.76:1 (fail); `blue-700` measured 6.83:1 (pass).
+- **`amending` (`violet-600`) needed no correction** -- it measured 5.89:1 as text, passing at `600` already. This is a genuine per-hue finding (Tailwind's OKLCH lightness doesn't map uniformly to perceived contrast across hue families), not an inconsistency to "fix" for false symmetry.
+- **`danger`'s `red-600` also needed no correction** -- 4.77:1 as both button-fill text and standalone text, passing directly.
+- **Dark mode is not an inversion.** `emerald-500` against `slate-900`/`slate-950` measured 7.21:1/8.15:1 -- dark mode shifts *up* in lightness (a dark background needs a *brighter* accent to read clearly, the opposite of light mode needing a *darker* one against white). The `-400` shades used for `success`/`warning`/`info`/`amending` in dark mode all measured 5:1+ against `slate-800`/`slate-900`.
+- **`text-on-primary` flips to dark text in dark mode, and this matters for `danger` too, not just `primary`.** White text on dark-mode `danger`'s `red-400` fill measured only 2.89:1 (fails badly); `slate-900` text on `red-400` measured 6.17:1 (passes). Both `Button`'s `primary` and `destructive` variants reuse the same `text-on-primary` token rather than each needing their own -- the underlying need ("bright dark-mode accent fill needs dark text, not white") is identical for both.
+
+### Why `primary` (emerald) and `success` (green) are kept distinct
+
+Real hue separation is ~14 degrees (`green-600` at 149deg vs `emerald-600` at 163deg in OKLCH) -- confirmed visually distinguishable side by side (a genuine teal-vs-grass difference), though not dramatic. Disambiguated primarily by **role**, not hue alone: emerald appears on solid buttons/links/focus rings; green appears only on pill-shaped status badges and alerts, always paired with a text label (never colour alone, per the accessibility section below). Emerald also differs enough from RMS's indigo that the two sibling SOCX apps don't read as reskins of each other.
 
 **RoundStatus colour semantics** (`components/domain/RoundStatusBadge.tsx`):
 
@@ -30,6 +47,30 @@ Tailwind's stock palette, aliased to intent via a `@theme` block (`apps/web/src/
 - `rejected` -> danger/red
 - `amending` -> **violet**, deliberately distinct from `pending`. Different urgency and different owner: `pending` means waiting on the committee; `amending` means waiting on the player to resubmit. Reusing amber for both would blur that distinction on a player's own round list.
 
+## Light / dark theme
+
+`data-theme` attribute on `<html>` + a three-layer CSS cascade: bare `:root` holds the light-theme values (the default); `@media (prefers-color-scheme: dark)` guarded by `:root:not([data-theme="light"])` overrides them for users with no explicit choice; `:root[data-theme="dark"]` overrides again so an explicit `ThemeToggle` choice always wins over system preference, in either direction. No dependency -- this is a small, standard CSS pattern, not a library concern.
+
+**No flash of the wrong theme**: a small inline script in `index.html`'s `<head>` reads `localStorage` and sets `data-theme` before React hydrates (React can't run early enough to prevent the flash on its own -- its own JS bundle hasn't loaded yet). If there's no stored preference, the script leaves the attribute absent entirely and lets the `prefers-color-scheme` media query govern, per "respect system preference as the default."
+
+**`ThemeToggle` must not silently "lock in" system preference.** Merely mounting the component (or loading the catalogue with system dark mode active) does not write to `localStorage`/`data-theme` -- only an actual click does. Until a real choice is made, the displayed icon tracks live system-preference changes (a `matchMedia` `"change"` listener); once toggled, that listener is dropped and the explicit choice governs from then on.
+
+**Elevation in dark mode comes from lightness steps** (`surface-raised` lighter than `surface`, lighter again than `bg-page`), not shadow -- a shadow is nearly invisible against an already-dark background, a well-established dark-UI convention (GitHub/Linear/Vercel dashboards all do this), not a stylistic flourish.
+
+## Logo
+
+`Logo` component (`variant: "full" | "mark"`). No SOCX logo asset existed anywhere in the workspace before this (checked directly across `ghs`, `rms`, and `socx-platform` -- confirmed absent, not assumed). The mark is a custom-drawn S-glyph SVG path (not `<text>`, which depends on whatever font happens to be available and can render inconsistently across platforms/browsers at small sizes) inside a circle.
+
+**Colour comes from the existing `text`/`surface` tokens, not new logo-specific ones**: circle = `fill-text`, S = `fill-surface`. In light theme that resolves to exactly "white S in a near-black circle" as specified; in dark theme `text`/`surface` themselves invert (`slate-100` circle, `slate-800` S) -- the same relationship, automatically, with no separate dark-mode asset or component-level `dark:` styling needed. Approved dark-theme treatment: simple inversion, not a third colour introduced into the mark.
+
+Minimum rendered size: 24px (the S stroke starts losing legibility below that). `variant="full"` pairs the mark with the "ocx" wordmark in the same system sans stack (`font-semibold tracking-tight`) -- deliberately not a second (serif/display) typeface, which would reintroduce the webfont cost this project has avoided since `ghs#78` and risk looking bolted-on. The "premium" character lives in the mark and in weight/spacing restraint, not in a different font family.
+
+## Iconography
+
+`lucide-react` -- the one new runtime dependency this issue introduces. React 19 peer-compatible (verified via `npm view`), ISC licensed (verified against `package-lock.json` directly -- an earlier draft of this doc said MIT, a real discrepancy caught in review, PR #83), tree-shakeable ESM (confirmed for real: the production bundle grew by ~60 bytes after adding ~15 icon imports, despite the package's large *unpacked* size -- per-icon imports really are tree-shaken, not a marketing claim taken on faith). One consistent stroke-width line-icon set, large enough to cover navigation/action/status icons without gaps, avoiding RMS's hand-rolled-SVG-per-page pattern (confirmed: RMS has no icon library dependency at all, just inline `<svg>` per usage site).
+
+Icon-only buttons keep `Button`'s existing `aria-label` requirement (dev-time console error if neither visible children nor `aria-label` are present). Decorative icons are `aria-hidden`. Status/feedback icons (`CheckCircle2`, `AlertTriangle`, etc.) are used sparingly and always paired with a text label -- never as the sole indicator of state.
+
 ## Typography
 
 System font stack (`font-sans`) -- no webfont, no licensing/perf cost, appropriate for a utility application. Tailwind's stock type scale, used as-is (no invented sizes):
@@ -37,8 +78,9 @@ System font stack (`font-sans`) -- no webfont, no licensing/perf cost, appropria
 - Page heading: `text-3xl font-semibold` (also `text-2xl` for tighter contexts, e.g. the catalogue's own section headings)
 - Section heading: `text-lg font-semibold`
 - Body: `text-sm`/`text-base`
-- Muted/help text: `text-sm text-slate-500`
+- Muted/help text: `text-sm text-text-muted`
 - Form label: `text-sm font-medium`
+- Numeric/stat values (`Stat`): `tabular-nums` -- a handicap/scoring app where digits routinely sit in aligned columns benefits from monospaced-width digits; a small, disciplined touch, not decoration.
 
 ## Spacing
 
@@ -46,21 +88,21 @@ Tailwind's default 4px scale throughout -- no arbitrary values. Standard contain
 
 ## Radius / elevation
 
-Two-tier radius, not one: `rounded-md` for interactive controls (buttons, inputs, selects), `rounded-lg` for surfaces/containers (cards, modals, tables). Elevation is minimal by design: `shadow-sm` for cards/dropdowns, `shadow-lg`/`shadow-xl` reserved for modals only. Separation is mostly via `border-slate-200`, not heavy shadows -- consistent rather than visually elaborate.
+Three tiers in practice, now formalised explicitly: `rounded-full` for compact pill-shaped controls (`Badge`, `Avatar`, `ToggleGroup`'s track), `rounded-md` for standard interactive controls (buttons, inputs, selects), `rounded-lg` for surfaces/containers (cards, modals, tables). Elevation is minimal by design: `shadow-sm` for cards/dropdowns, `shadow-lg`/`shadow-xl` reserved for modals only, separation mostly via `border` -- consistent rather than visually elaborate. See "Light / dark theme" above for how this changes (lightness steps, not shadow) in dark mode.
 
 ## Focus conventions
 
-One convention everywhere, not styled per component:
+One convention everywhere, not styled per component -- now using the `primary` token (emerald) rather than a fixed blue, per the approved direction that focus indicators should carry the brand colour:
 
 ```
-focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-600
+focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary
 ```
 
 ## Touch targets
 
 44px minimum on default-size interactive controls (`Button`'s `md` size is `h-11`, the default; `Input`/`Select` are `h-11`). `Button`'s `sm` size (`h-9`, 36px) is intentionally smaller and reserved for dense desktop-only contexts (e.g. inline table row actions) -- never the only way to reach a primary action on a mobile flow.
 
-Checkbox/radio glyphs stay a normal visual size (20px, `h-5 w-5`) rather than being forced to look like oversized 44px dots -- WCAG 2.5.5 allows the *tappable target* to include adjacent label text, so `Checkbox`/`RadioGroup` usage wraps the control and its label in a `min-h-11` row instead of enlarging the glyph itself.
+Checkbox/radio glyphs stay a normal visual size (20px, `h-5 w-5`) rather than being forced to look like oversized 44px dots -- WCAG 2.5.5 allows the *tappable target* to include adjacent label text, so `Checkbox`/`RadioGroup`/`ToggleGroup` usage wraps the control and its label in a `min-h-11` row instead of enlarging the glyph itself.
 
 ## Component layering
 
@@ -75,8 +117,9 @@ This separation exists so the generic layer stays reusable if GHS's domain vocab
 
 - `Table` wraps in a horizontal-scroll container by default -- a fixed multi-column table is unusable on a phone otherwise. Prefer `List` for the same data at narrow widths (round history), reserving `Table` for the data-dense desktop admin case.
 - `Modal` is one component, responsive by breakpoint: bottom-anchored, full-width sheet below `sm:`, centred dialog at `sm:` and above. No separate mobile/desktop modal implementations.
+- `Toast` centres bottom on every viewport, rather than switching between a desktop corner and a mobile centre position -- one responsive rule instead of two positioning schemes, and it avoids edge-cutoff on narrow phones entirely.
 - Admin density comes from responsive Tailwind breakpoints (more columns/tighter padding at `lg:`), not a JS-driven "density mode" -- avoids a second prop-driven state system for what breakpoints already solve.
-- No interaction anywhere depends on hover (this is why Tooltip is excluded -- see below) -- directly serves round entry on a phone.
+- No interaction anywhere depends on hover (this is why Tooltip is excluded -- see below) -- directly serves round entry on a phone. `Toast`'s pause-on-hover is a progressive enhancement, not a requirement -- dismissal still happens automatically without it, so it doesn't violate this rule; it just doesn't do anything extra on touch, which is fine.
 
 ## Accessibility expectations (part of the component contract, not a later pass)
 
@@ -84,41 +127,60 @@ This separation exists so the generic layer stays reusable if GHS's domain vocab
 - Help/error text is linked via `aria-describedby`; error text uses `role="alert"`.
 - Required fields are communicated via sr-only text ("(required)"), not colour/symbol alone -- the visible `*` is `aria-hidden`.
 - Icon-only buttons require `aria-label` (`Button` logs a dev-time console error if one renders with neither visible children nor an `aria-label`).
-- `Alert` variants are announced textually (an sr-only "Success:"/"Error:"/etc. prefix), not communicated by colour alone.
+- `Alert`/`Toast` variants are announced textually (an sr-only "Success:"/"Error:"/etc. prefix), not communicated by colour alone, and use the same `role="alert"`/`role="status"` split (error/warning = alert/assertive, success/info = status/polite) so an individually-roled element is its own implicit live region -- no wrapping `aria-live` container layered on top, which would risk double-announcing in some screen readers.
 - Disabled-because-of-permissions actions get adjacent static help text, not a tooltip (tooltips are hover-dependent, which fails on touch -- see "Deferred: Tooltip" below).
+- `ToggleGroup` is built on real `<input type="radio">` elements (visually hidden via `sr-only`, not `display:none`, so they stay in the accessibility tree and stay label-clickable for real users) rather than a custom div/button implementation -- arrow-key navigation between options is native browser behaviour this way, not hand-rolled JS. This is the same lesson `ghs#78`'s review pass already taught once (`ListItem` needed retrofitted keyboard handling after shipping without it) -- built in this time rather than fixed after the fact.
+- `Skeleton` is `aria-hidden` (a loading placeholder is not content) and respects `prefers-reduced-motion` via Tailwind's built-in `motion-reduce:animate-none` variant -- no custom JS/media-query handling needed for that.
 
 ## The native `<dialog>` decision
 
 `Modal` is built on the native HTML `<dialog>` element via `showModal()`, not a headless-UI dependency (Radix, Headless UI). `showModal()` gives, for free, in every evergreen browser: a real focus trap, Escape-to-close, an inert background (verified directly: clicking behind an open dialog does not activate it), and focus restored to the trigger on close. This was the entire justification for reaching for a dependency here, so none was added.
 
-**A real gotcha found during implementation, worth recording**: Chromium's UA stylesheet sets `inset: 0` on `dialog:modal`. `Modal`'s mobile styling only overrides `left`/`right` (`inset-x-0`) and `bottom` (`bottom-0`) -- without an explicit `top-auto`, the inherited `top: 0` combines with `bottom: 0` and `height: auto` to anchor the dialog to the *top* of the viewport instead of the bottom. Found by real browser measurement (`getComputedStyle`), not assumed from the class list. Fixed by adding `top-auto` explicitly alongside `bottom-0`.
+**A real gotcha found during implementation, worth recording**: Chromium's UA stylesheet sets `inset: 0` on `dialog:modal`. `Modal`'s mobile styling only overrides `left`/`right` (`inset-x-0`) and `bottom` (`bottom-0`) -- without an explicit `top-auto`, the inherited `top: 0` combines with `bottom: 0` and `height: auto` to anchor the dialog to the *top* of the viewport instead of the bottom. Found by real browser measurement (`getComputedStyle`), not assumed from the class list. Fixed by adding `top-auto` explicitly alongside `bottom-0`. Re-verified after the `ghs#82` token refactor (touched `Modal`'s className list) in both themes and both viewport classes -- still bottom-anchors correctly on mobile, still centres correctly on desktop.
 
-jsdom does not implement `<dialog>`'s `showModal()`/`close()` at all (confirmed directly, not assumed) -- `src/test-setup.ts` polyfills just enough (`open` attribute toggling, a `close` event) for Vitest/RTL tests to exercise `Modal`'s own wiring. It does **not** attempt to replicate real focus-trap or Escape-key dispatch; those are verified against a real running browser instead (this issue's PR notes), not asserted in the jsdom test suite.
+**A second real gotcha, found and fixed in review** (`ghs#79`): `onClose` could double-fire when the *parent* set `open` to `false` itself (its own state update, not a click on Modal's own close button) -- the resulting internal `dialog.close()` call echoes back through the native `"close"` event listener. Fixed with a ref flag that suppresses the echo specifically for the parent-driven path, covered by a regression test.
+
+jsdom does not implement `<dialog>`'s `showModal()`/`close()` at all (confirmed directly, not assumed) -- `src/test-setup.ts` polyfills just enough (`open` attribute toggling, a `close` event) for Vitest/RTL tests to exercise `Modal`'s own wiring. It does **not** attempt to replicate real focus-trap or Escape-key dispatch; those are verified against a real running browser instead, not asserted in the jsdom test suite. jsdom is also missing `window.matchMedia` entirely (same category of gap, confirmed directly) -- polyfilled with a real `EventTarget`-based `MediaQueryList` so `ThemeToggle`'s system-preference tests can flip `.matches` and dispatch a real `"change"` event, not just a `matches: false` stub.
+
+## Toast
+
+Built now (`ghs#78` deferred it; `ghs#82` reverses that with a concrete design). In-repo `ToastProvider` (React context) + `useToast()` hook + `Toast` presentational component -- no toast library. `ToastContext` lives in its own file (`ToastContext.ts`), separate from `ToastProvider.tsx`, specifically so `ToastProvider.tsx` only exports components (`react-refresh/only-export-components` correctly flags a file that exports both a component and a context value; the fix is separating them, not suppressing the rule).
+
+Default 5s auto-dismiss (`duration` overridable per call, `0` disables it), pause-on-hover (a progressive enhancement, not required for correctness -- see "Mobile-first" above), bottom-centre position on every viewport. Stacking is chronological (oldest toast nearer the top of the stack, newest appended at the bottom, closest to the screen edge) via plain array order in a `flex-col` container -- no `flex-col-reverse` trick needed.
+
+## ToggleGroup
+
+For mutually exclusive choices (e.g. a list/table view switch) where a segmented-button visual reads better than stacked radio dots. See "Accessibility expectations" above for why it's built on real radio inputs rather than custom keyboard handling.
 
 ## Deferred: Sidebar, Breadcrumb, Tabs
 
-Not built in this issue. The admin/player information architecture (how many sections, what nests under what) hasn't been decided yet -- building nav structure ahead of real screens would be designing for a hypothetical. `AppHeader` alone covers what's needed until a real multi-section screen requires more.
-
-## Deferred: Toast
-
-Not built in this issue. `Alert` and the other approved feedback components cover the catalogue's demonstrated feedback states. When a real product screen establishes a concrete requirement for transient, non-blocking notification (e.g. autosave confirmation, an inline approve/reject action from a list), that becomes its own separate piece of work, deciding the implementation then -- not speculative infrastructure built ahead of a real need.
+Not built yet. The admin/player information architecture (how many sections, what nests under what) still hasn't been decided -- building nav structure ahead of real screens would be designing for a hypothetical. `AppHeader` + `NavItem` cover what's needed until a real multi-section screen requires more.
 
 ## Deferred: Tooltip
 
 Excluded rather than built. The one clear candidate use case ("disabled action because of permissions") is served by static inline help text next to the control instead. A tooltip is inherently hover-dependent, which directly conflicts with this project's "interactions should not depend on hover" principle for mobile/touch use.
 
-## Excluded: Skeleton loading placeholders
+## Excluded: separate SkeletonAvatar/SkeletonCard/etc. components
 
-GHS is single-club scale with fast queries (established in earlier backend phases). A centred `Spinner` with accompanying text is sufficient for this app's realistic latency profile; a skeleton component here would be cosmetic, not solving a real problem.
+One `Skeleton` primitive (`variant: "text" | "circle" | "rect"`), not six separate named components. Avatar/card/list/table/stat "skeletons" are documented compositions of the one primitive (see the Components Catalogue's Feedback section) matching each real layout, not a parallel component for each -- keeps the component count small per the "small but powerful" API principle.
 
 ## RMS precedent
 
-**Kept**: `rounded-md` + `shadow-sm` + `ring`-based borders (proven, professional, no reason to reinvent), the page-container spacing convention, `focus-visible` discipline as a goal (RMS is inconsistent about it across pages; GHS is consistent from the start via one shared convention).
+**Kept**: `rounded-md`/`rounded-lg` + `shadow-sm` + border-based separation (proven, professional, no reason to reinvent), the page-container spacing convention, `focus-visible` discipline as a goal (RMS is inconsistent about it across pages; GHS is consistent from the start via one shared convention).
 
-**Explicitly not carried forward**: RMS's near-total lack of componentisation (one shared component, `ApiStatusBadge`, across 14 pages -- everything else copy-pasted Tailwind-in-JSX per page). This issue exists specifically to avoid that outcome for GHS. Also not carried forward: RMS's per-page inline `STATUS_STYLES` object pattern (superseded here by `RoundStatusBadge`/`RoleBadge`), indigo as the primary colour (see rationale above), Tailwind 3 classic config / JS-not-TS (GHS is already committed to Tailwind v4 CSS-first + strict TS from the scaffold, `ghs#62`).
+**Explicitly not carried forward**: RMS's near-total lack of componentisation (one shared component, `ApiStatusBadge`, across 14 pages -- everything else copy-pasted Tailwind-in-JSX per page); RMS's per-page inline `STATUS_STYLES` object pattern (superseded here by `RoundStatusBadge`/`RoleBadge`); indigo as the primary colour (emerald, distinct from both RMS and from semantic success -- see rationale above); Tailwind 3 classic config / JS-not-TS; hand-rolled inline SVGs per usage site with no icon library (confirmed: RMS has none); no dark mode at all (confirmed: RMS's `tailwind.config.js` has no dark-mode config, no `dark:` classes anywhere in its `src/`, no theme context of any kind).
 
 ## Dependencies
 
-No new runtime dependencies were introduced by this issue -- `cn()` is a ~3-line local classname-join helper (no `clsx`/`cva`/`tailwind-merge`); `Modal` uses native `<dialog>` (no Radix/Headless UI); feedback uses `Alert` only (no toast library); no `react-router-dom`, `react-hook-form`, `zod`, TanStack Query, or `axios` -- none of those have a concrete requirement yet (routing/forms/data-fetching decisions belong to the screens that actually need them, e.g. `#63`, `#64`).
+**One new runtime dependency**: `lucide-react` (icon library -- justified above). Everything else added by `ghs#82` -- Toast, Skeleton, ToggleGroup, Logo, ThemeToggle, the entire dark-mode mechanism -- is hand-built with zero new dependencies. `cn()` is still a ~3-line local classname-join helper (no `clsx`/`cva`/`tailwind-merge`); `Modal` still uses native `<dialog>` (no Radix/Headless UI); no `react-router-dom`, `react-hook-form`, `zod`, TanStack Query, or `axios` -- none of those have a concrete requirement yet (routing/forms/data-fetching decisions belong to the screens that actually need them, e.g. `#63`, `#64`).
 
-`@testing-library/user-event` was added as a **devDependency only** (no production/runtime impact) -- the standard RTL companion for realistic click/keyboard interaction, needed to test `Modal`'s behaviour properly. This is a different kind of dependency from the runtime/UI libraries this issue otherwise avoided.
+`@testing-library/user-event` (added in `ghs#78`) remains a **devDependency only** (no production/runtime impact).
+
+## Future platform-ADR candidates (not created now)
+
+Two patterns from this issue are genuinely reusable beyond GHS, flagged here rather than promoted prematurely (GHS is still the only proof point):
+
+- The three-layer dark-mode CSS-token pattern (`@theme` name registration + plain `:root` values + media-query/attribute override layering).
+- "Brand colour and semantic colour must stay role-distinguishable, not just hue-distinguishable" -- the emerald/green reasoning above.
+
+If RMS (currently zero dark-mode, zero componentisation) or a future SOCX application is ever revisited with this in mind, these are the two decisions worth lifting into a `socx-platform` ADR.

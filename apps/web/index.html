@@ -4,6 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GHS</title>
+    <!-- ghs#82: sets data-theme before first paint if the user has an
+         explicit stored preference, so there's no flash of the wrong
+         theme -- React can't run early enough to prevent that flash on
+         its own (its own JS bundle hasn't loaded/hydrated yet). No
+         stored preference -- leave the attribute absent entirely and
+         let theme.css's `prefers-color-scheme` media query govern, per
+         the "respect system preference as the default" rule. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("ghs-theme");
+          if (stored === "light" || stored === "dark") {
+            document.documentElement.setAttribute("data-theme", stored);
+          }
+        } catch (e) {
+          /* localStorage unavailable (private browsing, disabled) -- fall
+             back to prefers-color-scheme, same as "no stored preference". */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

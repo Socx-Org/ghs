@@ -7,18 +7,18 @@ import { cn } from "../lib/cn";
 // Table for the data-dense desktop admin case (see frontend-architecture.md).
 export function Table({ className, ...rest }: TableHTMLAttributes<HTMLTableElement>) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200">
-      <table className={cn("min-w-full divide-y divide-slate-200 text-sm", className)} {...rest} />
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className={cn("min-w-full divide-y divide-border text-sm", className)} {...rest} />
     </div>
   );
 }
 
 export function TableHead(props: HTMLAttributes<HTMLTableSectionElement>) {
-  return <thead className="bg-slate-50" {...props} />;
+  return <thead className="bg-bg-page" {...props} />;
 }
 
 export function TableBody(props: HTMLAttributes<HTMLTableSectionElement>) {
-  return <tbody className="divide-y divide-slate-200 bg-white" {...props} />;
+  return <tbody className="divide-y divide-border bg-surface" {...props} />;
 }
 
 export function TableRow(props: HTMLAttributes<HTMLTableRowElement>) {
@@ -29,12 +29,12 @@ export function TableHeaderCell({ className, ...rest }: ThHTMLAttributes<HTMLTab
   return (
     <th
       scope="col"
-      className={cn("px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500", className)}
+      className={cn("px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted", className)}
       {...rest}
     />
   );
 }
 
 export function TableCell({ className, ...rest }: TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn("px-4 py-3 text-slate-700", className)} {...rest} />;
+  return <td className={cn("px-4 py-3 text-text", className)} {...rest} />;
 }

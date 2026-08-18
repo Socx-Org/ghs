@@ -1,6 +1,23 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  LayoutDashboard,
+  Flag,
+  ShieldCheck,
+  Plus,
+  Pencil,
+  Trash2,
+  Save,
+  Check,
+  X,
+  Search,
+  Filter,
+  CheckCircle2,
+  AlertTriangle,
+  AlertCircle,
+  Info,
+} from "lucide-react";
+import {
   Alert,
   AppHeader,
   Avatar,
@@ -16,11 +33,14 @@ import {
   Input,
   List,
   ListItem,
+  Logo,
   Modal,
+  NavItem,
   RadioGroup,
   RoleBadge,
   RoundStatusBadge,
   Select,
+  Skeleton,
   Spinner,
   Stat,
   Table,
@@ -29,16 +49,18 @@ import {
   TableHead,
   TableHeaderCell,
   TableRow,
+  ThemeToggle,
+  ToggleGroup,
 } from "./components";
-import type { BadgeVariant } from "./components";
+import { useToast } from "./components/useToast";
 import type { RoundStatus, UserRole } from "./types/domain";
 
-// ghs#78: the living visual reference for GHS. Every component rendered
-// here is the actual component apps/web/src/components exports -- nothing
-// on this page is a one-off styled to look similar; subsequent screens
-// (starting with Login/MFA, #64) import from the same components/ module.
-// Dev-only -- see App.tsx's `MODE === "development"` gate (not
-// import.meta.env.DEV, which is also true under Vitest's own test mode).
+// ghs#78/#82: the living visual reference for GHS. Every component
+// rendered here is the actual component apps/web/src/components exports
+// -- nothing on this page is a one-off styled to look similar; subsequent
+// screens (starting with Login/MFA, #64) import from the same
+// components/ module. Dev-only -- see App.tsx's `MODE === "development"`
+// gate (not import.meta.env.DEV, which is also true under Vitest's test mode).
 
 const ROUND_STATUSES: RoundStatus[] = ["draft", "pending", "approved", "rejected", "amending"];
 const ROLES: UserRole[] = ["player", "admin", "super_admin"];
@@ -69,22 +91,22 @@ const SAMPLE_MEMBERS: Array<{ name: string; role: UserRole }> = [
   { name: "Carys Newton", role: "super_admin" },
 ];
 
-const SEMANTIC_SWATCHES: Array<{ name: string; variant: BadgeVariant; swatch: string; note: string }> = [
-  { name: "Primary", variant: "info", swatch: "bg-primary", note: "Buttons, links, focus rings, active nav" },
-  { name: "Success", variant: "success", swatch: "bg-success", note: "Approved rounds, success banners" },
-  { name: "Warning", variant: "warning", swatch: "bg-warning", note: "Pending rounds, warning banners" },
-  { name: "Danger", variant: "danger", swatch: "bg-danger", note: "Rejected rounds, destructive actions, errors" },
-  { name: "Amending", variant: "amending", swatch: "bg-amending", note: "Round sent back for player resubmission" },
-  { name: "Neutral", variant: "neutral", swatch: "bg-slate-500", note: "Draft, disabled, muted text" },
+const SEMANTIC_SWATCHES: Array<{ name: string; swatch: string; note: string }> = [
+  { name: "Primary (emerald-700 / dark: emerald-500)", swatch: "bg-primary", note: "Buttons, links, focus rings, active nav -- measured 5.36:1 as text/button fill (light), 7.21:1 (dark)" },
+  { name: "Success (green-700 / dark: green-400)", swatch: "bg-success", note: "Approved rounds, success banners -- distinct hue from primary (~14deg), not just a darker emerald" },
+  { name: "Warning (amber-700 / dark: amber-400)", swatch: "bg-warning", note: "Pending rounds, warning banners" },
+  { name: "Danger (red-600 / dark: red-400)", swatch: "bg-danger", note: "Rejected rounds, destructive actions, errors" },
+  { name: "Info (blue-700 / dark: blue-400)", swatch: "bg-info", note: "Informational banners" },
+  { name: "Amending (violet-600 / dark: violet-400)", swatch: "bg-amending", note: "Round sent back for player resubmission -- distinct from warning/pending" },
 ];
 
 function SectionHeading({ headingId, title, description }: { headingId: string; title: string; description?: string }) {
   return (
     <div className="mb-6">
-      <h2 id={headingId} className="text-2xl font-semibold text-slate-900 scroll-mt-20">
+      <h2 id={headingId} className="text-2xl font-semibold text-text scroll-mt-20">
         {title}
       </h2>
-      {description && <p className="mt-1 max-w-2xl text-sm text-slate-500">{description}</p>}
+      {description && <p className="mt-1 max-w-2xl text-sm text-text-muted">{description}</p>}
     </div>
   );
 }
@@ -92,7 +114,7 @@ function SectionHeading({ headingId, title, description }: { headingId: string; 
 function Example({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-text-muted">{label}</p>
       {children}
     </div>
   );
@@ -105,10 +127,34 @@ function Section({ id, title, description, children }: { id: string; title: stri
   // duplicate-id bug via real browser verification, ghs#78).
   const headingId = `${id}-heading`;
   return (
-    <section id={id} aria-labelledby={headingId} className="border-b border-slate-200 py-12 first:pt-0 last:border-b-0">
+    <section id={id} aria-labelledby={headingId} className="border-b border-border py-12 first:pt-0 last:border-b-0">
       <SectionHeading headingId={headingId} title={title} description={description} />
       <div className="flex flex-col gap-8">{children}</div>
     </section>
+  );
+}
+
+function ToastDemo() {
+  const { show } = useToast();
+  return (
+    <div className="flex flex-wrap gap-3">
+      <Button size="sm" variant="secondary" onClick={() => show({ variant: "success", message: "Round saved." })}>
+        Show success
+      </Button>
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={() => show({ variant: "error", title: "Failed to submit", message: "Strokes must be a positive number." })}
+      >
+        Show error
+      </Button>
+      <Button size="sm" variant="secondary" onClick={() => show({ variant: "warning", message: "Your session will expire in 5 minutes." })}>
+        Show warning
+      </Button>
+      <Button size="sm" variant="secondary" onClick={() => show({ variant: "info", message: "Admin review can take up to 48 hours." })}>
+        Show info
+      </Button>
+    </div>
   );
 }
 
@@ -120,6 +166,9 @@ export default function ComponentsCatalogue() {
   const [nineHole, setNineHole] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
+  const [viewMode, setViewMode] = useState("list");
+  const [activeNav, setActiveNav] = useState("dashboard");
+  const [showSkeletons, setShowSkeletons] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,50 +187,77 @@ export default function ComponentsCatalogue() {
   const nameError = formSubmitted && playerName.trim() === "" ? "Player name is required." : undefined;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-screen bg-bg-page text-text">
       <AppHeader
-        title="GHS Components"
+        brand={<Logo />}
         nav={
           <>
-            <a href="#foundations" className="whitespace-nowrap text-sm font-medium text-slate-600 hover:text-primary">
-              Foundations
-            </a>
-            <a href="#actions" className="whitespace-nowrap text-sm font-medium text-slate-600 hover:text-primary">
-              Actions
-            </a>
-            <a href="#forms" className="whitespace-nowrap text-sm font-medium text-slate-600 hover:text-primary">
-              Forms
-            </a>
-            <a href="#feedback" className="whitespace-nowrap text-sm font-medium text-slate-600 hover:text-primary">
-              Feedback
-            </a>
-            <a href="#data-display" className="whitespace-nowrap text-sm font-medium text-slate-600 hover:text-primary">
-              Data/Display
-            </a>
-            <a href="#overlays" className="whitespace-nowrap text-sm font-medium text-slate-600 hover:text-primary">
-              Overlays
-            </a>
-            <a href="#navigation" className="whitespace-nowrap text-sm font-medium text-slate-600 hover:text-primary">
-              Navigation
-            </a>
+            <NavItem icon={<LayoutDashboard className="h-4 w-4" />} active={activeNav === "dashboard"} onClick={() => setActiveNav("dashboard")}>
+              Dashboard
+            </NavItem>
+            <NavItem icon={<Flag className="h-4 w-4" />} active={activeNav === "rounds"} onClick={() => setActiveNav("rounds")}>
+              Rounds
+            </NavItem>
+            <NavItem icon={<ShieldCheck className="h-4 w-4" />} active={activeNav === "admin"} onClick={() => setActiveNav("admin")}>
+              Admin
+            </NavItem>
           </>
         }
-        actions={<Badge variant={apiHealth === "ok" ? "success" : apiHealth === "error" ? "danger" : "neutral"}>API: {apiHealth}</Badge>}
+        actions={
+          <>
+            <Badge variant={apiHealth === "ok" ? "success" : apiHealth === "error" ? "danger" : "neutral"}>API: {apiHealth}</Badge>
+            <ThemeToggle />
+          </>
+        }
       />
+
+      {/* In-page section nav -- dogfoods NavItem/Button styling rather than one-off link classes. */}
+      <div className="border-b border-border bg-surface">
+        <nav aria-label="Catalogue sections" className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 py-2 sm:px-6 lg:px-8">
+          {[
+            ["foundations", "Foundations"],
+            ["actions", "Actions"],
+            ["forms", "Forms"],
+            ["feedback", "Feedback"],
+            ["data-display", "Data/Display"],
+            ["overlays", "Overlays"],
+            ["navigation", "Navigation"],
+          ].map(([id, label]) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className="whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-text-muted hover:bg-text/5 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
+      </div>
 
       <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <Section
           id="foundations"
           title="Foundations"
-          description="Colour, type, spacing, radius, elevation and focus conventions. Everything below is built from these, not invented per component."
+          description="Brand, colour, type, spacing, radius, elevation, focus and iconography. Everything below is built from these, not invented per component."
         >
-          <Example label="Semantic colour system">
+          <Example label="Brand mark -- Logo, full and mark-only variants">
+            <div className="flex flex-wrap items-center gap-8">
+              <Logo variant="full" />
+              <Logo variant="mark" className="h-10 w-10" />
+            </div>
+            <p className="text-sm text-text-muted">
+              Circle = text colour, S = surface colour -- automatically inverts with theme (black circle/white S in light, white
+              circle/black S in dark) without a separate dark-mode-specific asset. Minimum rendered size 24px.
+            </p>
+          </Example>
+
+          <Example label="Semantic colour system (validated WCAG contrast, not assumed -- see frontend-architecture.md)">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
               {SEMANTIC_SWATCHES.map((s) => (
                 <div key={s.name} className="flex flex-col gap-2">
                   <div className={`h-12 w-full rounded-md ${s.swatch}`} aria-hidden="true" />
-                  <p className="text-sm font-medium text-slate-900">{s.name}</p>
-                  <p className="text-xs text-slate-500">{s.note}</p>
+                  <p className="text-sm font-medium text-text">{s.name}</p>
+                  <p className="text-xs text-text-muted">{s.note}</p>
                 </div>
               ))}
             </div>
@@ -189,10 +265,11 @@ export default function ComponentsCatalogue() {
 
           <Example label="Typography hierarchy">
             <div className="flex flex-col gap-2">
-              <h1 className="text-3xl font-semibold text-slate-900">Page heading -- text-3xl font-semibold</h1>
-              <h2 className="text-lg font-semibold text-slate-900">Section heading -- text-lg font-semibold</h2>
-              <p className="text-base text-slate-700">Body text -- text-base, default paragraph copy.</p>
-              <p className="text-sm text-slate-500">Muted / help text -- text-sm text-slate-500, used for hints and captions.</p>
+              <h1 className="text-3xl font-semibold text-text">Page heading -- text-3xl font-semibold</h1>
+              <h2 className="text-lg font-semibold text-text">Section heading -- text-lg font-semibold</h2>
+              <p className="text-base text-text">Body text -- text-base, default paragraph copy.</p>
+              <p className="text-sm text-text-muted">Muted / help text -- text-sm text-text-muted, used for hints and captions.</p>
+              <p className="text-2xl font-semibold tabular-nums text-text">14.2 -- numeric/stat values use tabular-nums</p>
               <a href="#foundations" className="text-sm font-medium text-primary hover:underline">
                 Link -- text-primary, underline on hover
               </a>
@@ -203,36 +280,49 @@ export default function ComponentsCatalogue() {
             <div className="flex flex-wrap items-end gap-4">
               {[1, 2, 3, 4, 6, 8].map((n) => (
                 <div key={n} className="flex flex-col items-center gap-1">
-                  <div className={`w-8 bg-primary/20`} style={{ height: `${n * 4}px` }} aria-hidden="true" />
-                  <span className="text-xs text-slate-500">{n * 4}px</span>
+                  <div className="w-8 bg-primary/20" style={{ height: `${n * 4}px` }} aria-hidden="true" />
+                  <span className="text-xs text-text-muted">{n * 4}px</span>
                 </div>
               ))}
             </div>
           </Example>
 
-          <Example label="Radius -- rounded-md (controls) vs rounded-lg (surfaces)">
-            <div className="flex gap-4">
-              <div className="h-16 w-24 rounded-md border border-slate-300 bg-white" />
-              <div className="h-16 w-24 rounded-lg border border-slate-300 bg-white" />
+          <Example label="Radius -- rounded-full (pills) / rounded-md (controls) / rounded-lg (surfaces)">
+            <div className="flex items-center gap-4">
+              <div className="h-12 w-12 rounded-full border border-border bg-surface" />
+              <div className="h-16 w-24 rounded-md border border-border bg-surface" />
+              <div className="h-16 w-24 rounded-lg border border-border bg-surface" />
             </div>
           </Example>
 
-          <Example label="Elevation -- shadow-sm (default) vs shadow-lg (modals only)">
+          <Example label="Elevation -- shadow-sm (default) vs shadow-lg (modals only); dark theme uses lightness steps, not shadow">
             <div className="flex gap-6">
-              <div className="h-16 w-24 rounded-lg bg-white shadow-sm" />
-              <div className="h-16 w-24 rounded-lg bg-white shadow-lg" />
+              <div className="h-16 w-24 rounded-lg bg-surface shadow-sm" />
+              <div className="h-16 w-24 rounded-lg bg-surface shadow-lg" />
+              <div className="h-16 w-24 rounded-lg bg-surface-raised" />
             </div>
           </Example>
 
-          <Example label="Focus behaviour -- Tab through these to see the ring">
+          <Example label="Focus behaviour -- Tab through these to see the emerald ring">
             <div className="flex flex-wrap gap-3">
               <Button size="sm">First</Button>
               <Button size="sm" variant="secondary">
                 Second
               </Button>
-              <a href="#foundations" className="rounded-md px-3 py-2 text-sm text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-600">
+              <a
+                href="#foundations"
+                className="rounded-md px-3 py-2 text-sm text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
+              >
                 Third (link)
               </a>
+            </div>
+          </Example>
+
+          <Example label="Iconography -- lucide-react, one consistent stroke-width line-icon set">
+            <div className="flex flex-wrap items-center gap-4 text-text-muted">
+              {[Plus, Pencil, Trash2, Save, Check, X, Search, Filter].map((Icon, i) => (
+                <Icon key={i} aria-hidden="true" className="h-5 w-5" />
+              ))}
             </div>
           </Example>
         </Section>
@@ -265,22 +355,36 @@ export default function ComponentsCatalogue() {
             </div>
           </Example>
 
-          <Example label="Icon-only (requires aria-label -- no visible text)">
+          <Example label="Icon + text, and icon-only (requires aria-label -- no visible text)">
             <div className="flex flex-wrap items-center gap-3">
-              <Button variant="ghost" aria-label="Close">
-                <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="currentColor">
-                  <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
-                </svg>
+              <Button variant="secondary">
+                <Plus aria-hidden="true" className="h-4 w-4" />
+                Add round
               </Button>
-              <p className="text-sm text-slate-500">Compact affordances (e.g. remove a hole-score row) get an accessible name via aria-label, not visible text.</p>
+              <Button variant="ghost" aria-label="Close">
+                <X aria-hidden="true" className="h-5 w-5" />
+              </Button>
+              <p className="text-sm text-text-muted">Compact affordances (e.g. remove a hole-score row) get an accessible name via aria-label, not visible text.</p>
             </div>
+          </Example>
+
+          <Example label="ToggleGroup -- mutually exclusive choices, native radios styled as segmented buttons (arrow-key nav is free)">
+            <ToggleGroup
+              name="view-mode"
+              value={viewMode}
+              onChange={setViewMode}
+              options={[
+                { value: "list", label: "List" },
+                { value: "table", label: "Table" },
+              ]}
+            />
           </Example>
         </Section>
 
         <Section id="forms" title="Forms" description="FormField wires label, help/error text and ARIA linkage automatically. Try submitting the demo below empty.">
           <Card>
             <CardHeader>
-              <h3 className="text-sm font-semibold text-slate-900">Demo: new round -- try Save with the name field empty</h3>
+              <h3 className="text-sm font-semibold text-text">Demo: new round -- try Save with the name field empty</h3>
             </CardHeader>
             <CardBody>
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
@@ -320,7 +424,7 @@ export default function ComponentsCatalogue() {
                 </FormField>
 
                 <FormField label="Preferences">
-                  <label className="flex min-h-11 items-center gap-2 py-2 text-sm text-slate-900">
+                  <label className="flex min-h-11 items-center gap-2 py-2 text-sm text-text">
                     <Checkbox checked={nineHole} onChange={(e) => setNineHole(e.target.checked)} />
                     This is a tournament round
                   </label>
@@ -338,10 +442,10 @@ export default function ComponentsCatalogue() {
           </Example>
         </Section>
 
-        <Section id="feedback" title="Feedback" description="Alert covers success/error/warning/info. No Toast in this issue -- see frontend-architecture.md for why.">
+        <Section id="feedback" title="Feedback" description="Alert, Toast, Spinner, Skeleton and EmptyState. Toast auto-dismisses (pauses on hover) and announces via role=alert/status.">
           <Example label="Live example -- real /healthz result, rendered through Alert">
             {apiHealth === "checking" && (
-              <div className="flex items-center gap-2 text-sm text-slate-500">
+              <div className="flex items-center gap-2 text-sm text-text-muted">
                 <Spinner size="sm" />
                 Checking API status…
               </div>
@@ -350,7 +454,7 @@ export default function ComponentsCatalogue() {
             {apiHealth === "error" && <Alert variant="error">Could not reach the GHS API. This is a real request to /healthz, not a mock.</Alert>}
           </Example>
 
-          <Example label="Variants">
+          <Example label="Alert variants">
             <div className="flex flex-col gap-3">
               <Alert variant="success">Round saved.</Alert>
               <Alert variant="error">Failed to submit round: strokes must be a positive number.</Alert>
@@ -359,11 +463,85 @@ export default function ComponentsCatalogue() {
             </div>
           </Example>
 
-          <Example label="Spinner sizes">
+          <Example label="Toast -- click to trigger a real toast (bottom-centre, auto-dismisses after 5s)">
+            <ToastDemo />
+          </Example>
+
+          <Example label="Spinner sizes -- reserved for button-loading/indeterminate operations">
             <div className="flex items-center gap-4">
               <Spinner size="sm" />
               <Spinner size="md" />
               <Spinner size="lg" />
+            </div>
+          </Example>
+
+          <Example label="Skeleton -- one primitive, composed to match each layout it stands in for">
+            <div className="flex items-center gap-3">
+              <Button size="sm" variant="secondary" onClick={() => setShowSkeletons((v) => !v)}>
+                {showSkeletons ? "Show loaded content" : "Show skeletons"}
+              </Button>
+              <p className="text-sm text-text-muted">Respects prefers-reduced-motion (static block instead of a pulse).</p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <Card>
+                <CardHeader>
+                  <p className="text-xs font-medium uppercase tracking-wide text-text-muted">Avatar + text</p>
+                </CardHeader>
+                <CardBody className="flex items-center gap-3">
+                  {showSkeletons ? (
+                    <>
+                      <Skeleton variant="circle" width={40} height={40} />
+                      <div className="flex flex-col gap-2">
+                        <Skeleton variant="text" width={120} />
+                        <Skeleton variant="text" width={80} />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Avatar name="Alice Whitfield" />
+                      <div>
+                        <p className="text-sm text-text">Alice Whitfield</p>
+                        <RoleBadge role="player" />
+                      </div>
+                    </>
+                  )}
+                </CardBody>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <p className="text-xs font-medium uppercase tracking-wide text-text-muted">Card content</p>
+                </CardHeader>
+                <CardBody className="flex flex-col gap-2">
+                  {showSkeletons ? (
+                    <>
+                      <Skeleton variant="text" width="70%" />
+                      <Skeleton variant="text" width="90%" />
+                      <Skeleton variant="rect" height={60} />
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium text-text">Sunningdale (Old)</p>
+                      <p className="text-sm text-text-muted">Played 10 Aug 2026</p>
+                      <Stat label="Differential" value="14.2" />
+                    </>
+                  )}
+                </CardBody>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <p className="text-xs font-medium uppercase tracking-wide text-text-muted">Stat</p>
+                </CardHeader>
+                <CardBody>
+                  {showSkeletons ? (
+                    <div className="flex flex-col gap-2">
+                      <Skeleton variant="text" width={100} height={14} />
+                      <Skeleton variant="text" width={60} height={28} />
+                    </div>
+                  ) : (
+                    <Stat label="Handicap Index" value="14.2" />
+                  )}
+                </CardBody>
+              </Card>
             </div>
           </Example>
 
@@ -381,7 +559,7 @@ export default function ComponentsCatalogue() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Card>
                 <CardHeader className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-900">Sunningdale (Old)</span>
+                  <span className="text-sm font-semibold text-text">Sunningdale (Old)</span>
                   <RoundStatusBadge status="approved" />
                 </CardHeader>
                 <CardBody className="flex gap-6">
@@ -391,7 +569,7 @@ export default function ComponentsCatalogue() {
               </Card>
               <Card>
                 <CardHeader className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-slate-900">Wentworth (West)</span>
+                  <span className="text-sm font-semibold text-text">Wentworth (West)</span>
                   <RoundStatusBadge status="rejected" />
                 </CardHeader>
                 <CardBody>
@@ -406,7 +584,7 @@ export default function ComponentsCatalogue() {
             </div>
           </Example>
 
-          <Example label="Badge -- generic variants">
+          <Example label="Badge -- generic variants, and a removable pill">
             <div className="flex flex-wrap gap-2">
               <Badge variant="neutral">Neutral</Badge>
               <Badge variant="success">Success</Badge>
@@ -414,6 +592,9 @@ export default function ComponentsCatalogue() {
               <Badge variant="danger">Danger</Badge>
               <Badge variant="info">Info</Badge>
               <Badge variant="amending">Amending</Badge>
+              <Badge variant="info" onRemove={() => {}}>
+                Removable
+              </Badge>
             </div>
           </Example>
 
@@ -433,9 +614,9 @@ export default function ComponentsCatalogue() {
             </div>
           </Example>
 
-          <Example label="Handicap statistics">
+          <Example label="Handicap statistics (with icon)">
             <div className="flex gap-8">
-              <Stat label="Handicap Index" value="14.2" />
+              <Stat icon={<Flag className="h-4 w-4" />} label="Handicap Index" value="14.2" />
               <Stat label="Low HI" value="12.9" hint="Lowest in the last 12 months" />
             </div>
           </Example>
@@ -472,8 +653,8 @@ export default function ComponentsCatalogue() {
               {SAMPLE_ROUNDS.map((r) => (
                 <ListItem key={r.id} interactive className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-medium text-slate-900">{r.course}</p>
-                    <p className="text-xs text-slate-500">{r.playedAt}</p>
+                    <p className="text-sm font-medium text-text">{r.course}</p>
+                    <p className="text-xs text-text-muted">{r.playedAt}</p>
                   </div>
                   <RoundStatusBadge status={r.status} />
                 </ListItem>
@@ -487,7 +668,7 @@ export default function ComponentsCatalogue() {
                 <div key={m.name} className="flex items-center gap-2">
                   <Avatar name={m.name} />
                   <div>
-                    <p className="text-sm text-slate-900">{m.name}</p>
+                    <p className="text-sm text-text">{m.name}</p>
                     <RoleBadge role={m.role} />
                   </div>
                 </div>
@@ -498,7 +679,24 @@ export default function ComponentsCatalogue() {
           <Example label="Disabled action because of permissions">
             <div className="flex items-center gap-3">
               <Button disabled>Approve round</Button>
-              <p className="text-sm text-slate-500">Only committee members can approve rounds. Inline text, not a hover-only tooltip -- see frontend-architecture.md.</p>
+              <p className="text-sm text-text-muted">Only committee members can approve rounds. Inline text, not a hover-only tooltip -- see frontend-architecture.md.</p>
+            </div>
+          </Example>
+
+          <Example label="Status feedback icons -- sparingly, never decoration-only">
+            <div className="flex flex-wrap items-center gap-6">
+              <span className="flex items-center gap-1.5 text-sm text-success">
+                <CheckCircle2 aria-hidden="true" className="h-4 w-4" /> Approved
+              </span>
+              <span className="flex items-center gap-1.5 text-sm text-warning">
+                <AlertTriangle aria-hidden="true" className="h-4 w-4" /> Pending
+              </span>
+              <span className="flex items-center gap-1.5 text-sm text-danger">
+                <AlertCircle aria-hidden="true" className="h-4 w-4" /> Rejected
+              </span>
+              <span className="flex items-center gap-1.5 text-sm text-info">
+                <Info aria-hidden="true" className="h-4 w-4" /> Info
+              </span>
             </div>
           </Example>
         </Section>
@@ -513,9 +711,7 @@ export default function ComponentsCatalogue() {
               Open modal
             </Button>
             <Modal open={infoModalOpen} onClose={() => setInfoModalOpen(false)} title="Round details">
-              <p className="text-sm text-slate-700">
-                Sunningdale (Old), played 10 Aug 2026. Approved, differential 14.2.
-              </p>
+              <p className="text-sm text-text">Sunningdale (Old), played 10 Aug 2026. Approved, differential 14.2.</p>
             </Modal>
           </Example>
 
@@ -538,7 +734,7 @@ export default function ComponentsCatalogue() {
                 </>
               }
             >
-              <p className="text-sm text-slate-700">
+              <p className="text-sm text-text">
                 The player will be notified and asked to amend and resubmit. This is a composition of Modal with a footer, not a
                 separate ConfirmDialog component.
               </p>
@@ -546,10 +742,15 @@ export default function ComponentsCatalogue() {
           </Example>
         </Section>
 
-        <Section id="navigation" title="Navigation" description="AppHeader only -- Sidebar/Breadcrumb/Tabs deferred until the admin/player information architecture is decided.">
-          <p className="text-sm text-slate-600">
-            This page's own header above is a live <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">AppHeader</code> example:
-            title, a wrapping/scrolling nav, and an actions slot (the live API status badge).
+        <Section
+          id="navigation"
+          title="Navigation"
+          description="AppHeader + NavItem + Logo only -- Sidebar/Breadcrumb/Tabs deferred until the admin/player information architecture is decided."
+        >
+          <p className="text-sm text-text-muted">
+            This page's own header above is a live example: <code className="rounded bg-border px-1 py-0.5 text-xs">Logo</code> as the
+            brand slot, <code className="rounded bg-border px-1 py-0.5 text-xs">NavItem</code> for each link (icon + label + active
+            state), an actions slot (live API status badge), and <code className="rounded bg-border px-1 py-0.5 text-xs">ThemeToggle</code>.
           </p>
         </Section>
       </main>
