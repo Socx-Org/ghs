@@ -13,7 +13,13 @@ export function RequireAuth() {
   const location = useLocation();
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    // Just the pathname, not the whole Location object -- LoginPage only
+    // needs a plain string to navigate back to on success, and history
+    // state should stay small/serializable rather than carrying
+    // whatever arbitrary shape Location happens to have (review finding,
+    // PR #85 -- this was previously written but never actually read
+    // anywhere, a real "dead state" gap; now consumed in LoginPage).
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
   return <Outlet />;

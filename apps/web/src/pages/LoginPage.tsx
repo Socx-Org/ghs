@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -134,7 +134,14 @@ function MfaCodeForm({ mfaPendingToken, onBack, onSuccess }: { mfaPendingToken: 
       </FormField>
 
       <div className="flex gap-3">
-        <Button type="button" variant="ghost" onClick={onBack}>
+        {/* Disabled while submitting, not just Verify -- otherwise
+            clicking Back mid-request unmounts this form (the parent
+            switches step back to credentials), but the in-flight
+            verifyMfa() call can still resolve successfully afterwards
+            and call onSuccess() regardless, navigating the user into
+            the app even though they'd asked to go back (review
+            finding, PR #85). */}
+        <Button type="button" variant="ghost" onClick={onBack} disabled={isSubmitting}>
           Back
         </Button>
         <Button type="submit" isLoading={isSubmitting} className="flex-1">
@@ -147,12 +154,20 @@ function MfaCodeForm({ mfaPendingToken, onBack, onSuccess }: { mfaPendingToken: 
 
 type LoginStep = { kind: "credentials" } | { kind: "mfa"; mfaPendingToken: string };
 
+interface LoginLocationState {
+  /** The pathname RequireAuth redirected from, if that's how the user
+   *  got here -- see RequireAuth.tsx. Absent for a direct /login visit. */
+  from?: string;
+}
+
 export default function LoginPage() {
   const [step, setStep] = useState<LoginStep>({ kind: "credentials" });
   const navigate = useNavigate();
+  const location = useLocation();
 
   function handleSuccess() {
-    navigate("/", { replace: true });
+    const state = location.state as LoginLocationState | null;
+    navigate(state?.from ?? "/", { replace: true });
   }
 
   return (

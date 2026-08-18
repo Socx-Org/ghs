@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import MockAdapter from "axios-mock-adapter";
 import AppRoutes from "../AppRoutes";
+import LoginPage from "./LoginPage";
+import { RequireAuth } from "../routes/RequireAuth";
 import { bootstrapClient } from "../lib/api";
 import { setTokens } from "../lib/auth-store";
 
@@ -136,5 +138,78 @@ describe("LoginPage", () => {
 
     expect(await screen.findByText("Enter the 6-digit code from your authenticator app")).toBeInTheDocument();
     expect(mock.history.post?.filter((r) => r.url?.includes("mfa/verify"))).toHaveLength(0);
+  });
+
+  it("returns to the originally-requested protected page after login, not always / (review finding, PR #85)", async () => {
+    // A custom route tree (not the app's real one, which only has "/" as
+    // protected today) so this exercises the reusable from-state
+    // mechanism itself, not just its current trivial case -- future
+    // protected routes (#65 onward) get this for free.
+    const tokens = {
+      accessToken: makeAccessToken({ sub: "u1", email: "a@example.com", ghs_role: "player" }),
+      refreshToken: "r1",
+      expiresIn: 900,
+    };
+    mock.onPost("/auth/login").reply(200, tokens);
+
+    render(
+      <MemoryRouter initialEntries={["/some/protected/page"]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route element={<RequireAuth />}>
+            <Route path="/some/protected/page" element={<p>The protected page</p>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    // RequireAuth should have already redirected here with from state.
+    expect(await screen.findByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("Email address"), "a@example.com");
+    await userEvent.type(screen.getByLabelText("Password"), "correct-password");
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByText("The protected page")).toBeInTheDocument();
+  });
+
+  it("does not navigate after Back is clicked, even if the in-flight verify request later succeeds (review finding, PR #85)", async () => {
+    mock.onPost("/auth/login").reply(200, { mfaRequired: true, mfaPendingToken: "pending-1" });
+
+    let resolveVerify!: (value: [number, unknown]) => void;
+    const verifyResponse = new Promise<[number, unknown]>((resolve) => {
+      resolveVerify = resolve;
+    });
+    mock.onPost("/auth/mfa/verify").reply(() => verifyResponse);
+
+    renderLogin();
+    await userEvent.type(screen.getByLabelText("Email address"), "a@example.com");
+    await userEvent.type(screen.getByLabelText("Password"), "pw");
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("heading", { name: "Two-factor verification" })).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("Authentication code"), "123456");
+    await userEvent.click(screen.getByRole("button", { name: "Verify" }));
+
+    // Back is disabled while the request is in flight -- this click must
+    // have no effect, not queue up a step change for later.
+    const backButton = screen.getByRole("button", { name: "Back" });
+    expect(backButton).toBeDisabled();
+    await userEvent.click(backButton);
+    expect(screen.getByRole("heading", { name: "Two-factor verification" })).toBeInTheDocument();
+
+    const tokens = {
+      accessToken: makeAccessToken({ sub: "u2", email: "mfa@example.com", ghs_role: "admin" }),
+      refreshToken: "r1",
+      expiresIn: 900,
+    };
+    resolveVerify([200, tokens]);
+
+    // Because Back was correctly blocked (disabled, not just visually
+    // discouraged), the request that was already in flight completes
+    // normally and navigates through -- the fix closes the race without
+    // leaving the form stuck or the request orphaned.
+    await waitFor(() => expect(screen.getByText(/Signed in as/)).toBeInTheDocument());
+    expect(screen.getByText("mfa@example.com", { exact: false })).toBeInTheDocument();
   });
 });
