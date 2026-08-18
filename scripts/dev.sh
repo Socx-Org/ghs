@@ -11,6 +11,24 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# A fresh shell without nvm's version applied falls back to whatever
+# system Node is on PATH -- this repo's CI baseline (and apps/api's
+# `node --watch src/index.ts`, which relies on Node's native TypeScript
+# execution) is Node 24. Checked explicitly, with a clear message,
+# rather than letting a too-old Node fail cryptically deep inside one of
+# concurrently's own dependencies (found for real: Node 19 crashes
+# inside yargs-parser with an error that doesn't mention Node version at
+# all unless you already know to suspect it).
+REQUIRED_NODE_MAJOR=24
+NODE_VERSION="$(node -v)"
+NODE_MAJOR="${NODE_VERSION#v}"
+NODE_MAJOR="${NODE_MAJOR%%.*}"
+if [ "$NODE_MAJOR" -lt "$REQUIRED_NODE_MAJOR" ]; then
+  echo "GHS requires Node ${REQUIRED_NODE_MAJOR}+ (this repo's CI baseline) -- detected ${NODE_VERSION}." >&2
+  echo "If you use nvm: run 'nvm use' in the repo root (a .nvmrc is provided), or 'nvm install ${REQUIRED_NODE_MAJOR}' first." >&2
+  exit 1
+fi
+
 ENV_FILE=".env"
 
 if [ ! -f "$ENV_FILE" ]; then
