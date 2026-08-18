@@ -81,7 +81,29 @@ describe("PlayerDashboardPage", () => {
 
     renderDashboard();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/Couldn't load your handicap index/);
+    expect(await screen.findByRole("alert")).toHaveTextContent("internal server error");
+  });
+
+  it("surfaces the real server error message, e.g. the 404 for an account with no linked player row (review finding, PR #91)", async () => {
+    mock.onGet("/players/me").reply(404, { error: "no player profile linked to this account" });
+
+    renderDashboard();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("no player profile linked to this account");
+  });
+
+  it("does not get stuck showing rounds skeletons forever when the profile fails to load (review finding, PR #91)", async () => {
+    mock.onGet("/players/me").reply(404, { error: "no player profile linked to this account" });
+
+    renderDashboard();
+
+    await screen.findByRole("alert");
+    // A disabled query (no playerId to fetch rounds for) never leaves
+    // TanStack Query's "pending" status on its own -- rendering that as
+    // a loading skeleton would show it forever. The rounds section must
+    // render nothing here, and no request for rounds is ever made.
+    expect(screen.queryByText("No rounds yet")).not.toBeInTheDocument();
+    expect(mock.history.get?.some((r) => r.url?.includes("/rounds"))).toBe(false);
   });
 
   it("shows recent rounds with a status per row (acceptance criterion)", async () => {
@@ -112,7 +134,7 @@ describe("PlayerDashboardPage", () => {
 
     renderDashboard();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/Couldn't load your rounds/);
+    expect(await screen.findByRole("alert")).toHaveTextContent("internal server error");
   });
 
   it("signs out via the header button", async () => {

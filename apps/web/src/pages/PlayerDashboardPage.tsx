@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "../components";
 import { useAuth } from "../hooks/useAuth";
-import { getMyPlayerProfile, getPlayerRounds } from "../lib/api";
+import { ApiError, getMyPlayerProfile, getPlayerRounds } from "../lib/api";
 
 // ghs#65: the player's real landing screen after login -- current
 // handicap index and recent rounds. No chart/trend view (issue's own
@@ -28,6 +28,13 @@ import { getMyPlayerProfile, getPlayerRounds } from "../lib/api";
 
 function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+// Surfaces the API's own message (e.g. a real 404 "no player profile
+// linked to this account") rather than a fixed generic string -- same
+// reasoning as LoginPage's describeAuthError (review finding, PR #91).
+function describeQueryError(error: unknown, fallback: string): string {
+  return error instanceof ApiError ? error.message : fallback;
 }
 
 export default function PlayerDashboardPage() {
@@ -63,7 +70,9 @@ export default function PlayerDashboardPage() {
             {profileQuery.isPending ? (
               <Skeleton variant="text" width={140} height={32} />
             ) : profileQuery.isError ? (
-              <Alert variant="error">Couldn't load your handicap index. Try refreshing the page.</Alert>
+              <Alert variant="error">
+                {describeQueryError(profileQuery.error, "Couldn't load your handicap index. Try refreshing the page.")}
+              </Alert>
             ) : profileQuery.data.handicapIndex === null ? (
               <Stat
                 label="Handicap Index"
@@ -81,14 +90,23 @@ export default function PlayerDashboardPage() {
             <h2 className="text-sm font-semibold text-text">Recent rounds</h2>
           </CardHeader>
           <CardBody>
-            {roundsQuery.isPending ? (
+            {profileQuery.isError ? (
+              // No playerId to fetch rounds for at all -- the profile
+              // card above already surfaces this failure; showing a
+              // second, redundant error (or a skeleton that can never
+              // resolve, since a disabled query stays isPending forever
+              // -- review finding, PR #91) here would just be noise.
+              null
+            ) : profileQuery.isPending || roundsQuery.isPending ? (
               <div className="flex flex-col gap-2">
                 <Skeleton height={40} />
                 <Skeleton height={40} />
                 <Skeleton height={40} />
               </div>
             ) : roundsQuery.isError ? (
-              <Alert variant="error">Couldn't load your rounds. Try refreshing the page.</Alert>
+              <Alert variant="error">
+                {describeQueryError(roundsQuery.error, "Couldn't load your rounds. Try refreshing the page.")}
+              </Alert>
             ) : roundsQuery.data.length === 0 ? (
               <EmptyState title="No rounds yet" description="Rounds you play and submit will show up here." />
             ) : (
