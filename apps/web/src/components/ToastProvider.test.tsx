@@ -93,4 +93,32 @@ describe("ToastProvider / useToast", () => {
     });
     await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
   });
+
+  it("clears outstanding auto-dismiss timers on unmount, instead of updating state afterwards", async () => {
+    // Regression test for a real gap (review finding, PR #83): without
+    // clearing timers on unmount, this scheduled dismiss would still
+    // fire after the component tree (and the provider holding it) is
+    // gone, calling setState on an unmounted component -- React logs
+    // exactly that as a console.error, which is what this asserts
+    // never happens.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = render(
+      <ToastProvider>
+        <TestHarness />
+      </ToastProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Trigger" }));
+    expect(screen.getByRole("status")).toBeInTheDocument();
+
+    unmount();
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
 });

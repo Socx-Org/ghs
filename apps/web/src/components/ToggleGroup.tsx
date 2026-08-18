@@ -9,7 +9,16 @@ export interface ToggleOption {
 export interface ToggleGroupProps {
   name: string;
   options: ToggleOption[];
-  value?: string;
+  // Required, not optional -- every radio below is rendered with an
+  // explicit checked={value === option.value}, a fully controlled input.
+  // With value left undefined that's checked={false} on every option,
+  // permanently: React won't let a controlled input's checked state
+  // change without the value prop itself changing, so the group could
+  // never be selected at all (review finding, PR #83). There's no
+  // defaultValue/uncontrolled mode to fall back to, so the fix is
+  // requiring the only mode that actually works, not half-supporting one
+  // that doesn't.
+  value: string;
   onChange?: (value: string) => void;
   disabled?: boolean;
   className?: string;

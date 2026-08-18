@@ -28,9 +28,19 @@ function useTheme() {
   const hasExplicitChoice = useRef(getStoredTheme() !== null);
 
   useEffect(() => {
-    if (hasExplicitChoice.current) return;
+    // Checking the ref only here, at subscribe time, isn't enough --
+    // this effect runs once on mount, so a listener registered while
+    // there was no explicit choice yet would stay subscribed and keep
+    // firing even after setTheme() flips the ref to true later
+    // (discovered via a real test: toggling explicitly, then simulating
+    // a system-preference change, silently reverted the explicit
+    // choice). The handler itself has to re-check the ref on every
+    // firing, not just once at registration.
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const handler = (e: MediaQueryListEvent) => setThemeState(e.matches ? "dark" : "light");
+    const handler = (e: MediaQueryListEvent) => {
+      if (hasExplicitChoice.current) return;
+      setThemeState(e.matches ? "dark" : "light");
+    };
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);

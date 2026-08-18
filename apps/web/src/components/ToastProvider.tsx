@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Toast } from "./Toast";
 import { ToastContext } from "./ToastContext";
@@ -56,6 +56,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     },
     [scheduleDismiss],
   );
+
+  // ToastProvider is mounted once at the app root today (App.tsx), so
+  // this never fires in current usage -- but it's a generic primitive
+  // meant for reuse, and without this a conditionally-unmounted provider
+  // (a future route change, or a test's own unmount) would leave
+  // outstanding timers running, still holding references, and still
+  // calling setToasts after the component using them is gone (review
+  // finding, PR #83).
+  useEffect(() => {
+    const activeTimers = timers.current;
+    return () => {
+      activeTimers.forEach((timer) => clearTimeout(timer));
+      activeTimers.clear();
+    };
+  }, []);
 
   return (
     <ToastContext.Provider value={{ show }}>

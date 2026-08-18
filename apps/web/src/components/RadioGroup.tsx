@@ -9,7 +9,11 @@ export interface RadioOption {
 export interface RadioGroupProps {
   name: string;
   options: RadioOption[];
-  value?: string;
+  // Required, not optional -- same reasoning as ToggleGroup's identical
+  // value prop (review finding, PR #83, on ToggleGroup; the same
+  // checked={value === option.value} pattern here has the identical bug
+  // if value is left undefined).
+  value: string;
   onChange?: (value: string) => void;
   disabled?: boolean;
   className?: string;

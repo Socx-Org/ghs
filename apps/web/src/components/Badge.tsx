@@ -40,7 +40,13 @@ export function Badge({ variant = "neutral", children, className, onRemove }: Ba
           type="button"
           aria-label="Remove"
           onClick={onRemove}
-          className="-mr-1 rounded-full p-0.5 hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
+          // hover:bg-text/10, not a fixed hover:bg-black/10 -- most badge
+          // surfaces go very dark in dark theme, where a black overlay
+          // barely reads as a hover affordance at all. text/10 is the
+          // same overlay-tint pattern used elsewhere (Button's ghost
+          // variant, Modal's close button) and adapts with the theme
+          // (review finding, PR #83).
+          className="-mr-1 rounded-full p-0.5 hover:bg-text/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
         >
           <svg aria-hidden="true" viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor">
             <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
