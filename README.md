@@ -18,6 +18,17 @@ npm test --workspaces --if-present
 npm run build --workspaces --if-present
 ```
 
+### Running locally
+
+Requires a local Postgres instance (any recent version) reachable on `localhost:5432`.
+
+```
+npm install
+npm run dev
+```
+
+Starts the API (`:3000`) and the web dev server (`:5173`) together. On first run it creates `.env` (real, locally-generated secrets — see `.env.example` for what each variable is) and the `ghs_dev` database automatically; both are left untouched on subsequent runs. `Ctrl-C` stops both. `apps/worker` isn't included — run it separately (`npm run dev --workspace apps/worker`) if you need it.
+
 ## License
 
 Proprietary — see `LICENSE`. Not open source.
