@@ -516,6 +516,12 @@ test("GET /players/me returns the caller's own profile", async () => {
     const body = await res.json();
     assert.equal(body.id, playerProfile.id);
     assert.equal(body.firstName, "Own");
+    assert.equal(body.lastName, "Player");
+    // Same DTO shape as GET /players/:id, not a narrower one (review
+    // finding, PR #90) -- these are real, additive fields (ghs#60), null
+    // until a WHS calculation or admin override ever sets them.
+    assert.equal(body.handicapIndex, null);
+    assert.equal(body.lowHandicapIndex, null);
     assert.equal("userId" in body, false, "userId must not appear in the response DTO, same as GET /players/:id");
   });
 });
@@ -526,6 +532,11 @@ test("GET /players/me returns 404 for an account with no linked player row (e.g.
     const admin = await createUserWithRole(ctx, "admin");
     const res = await fetch(`${baseUrl}/api/v1/players/me`, { headers: authHeader(admin.token) });
     assert.equal(res.status, 404);
+    // The specific error payload the route sets, not just the status
+    // (review finding, PR #90) -- guards the actual wire contract, not
+    // only that *some* 404 comes back.
+    const body = await res.json();
+    assert.equal(body.error, "no player profile linked to this account");
   });
 });
 
