@@ -1,8 +1,10 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import ComponentsCatalogue from "./ComponentsCatalogue";
+import AdminCreateUserPage from "./pages/AdminCreateUserPage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
 import LoginPage from "./pages/LoginPage";
 import { RedirectIfAuthenticated } from "./routes/RedirectIfAuthenticated";
+import { RequireAdmin } from "./routes/RequireAdmin";
 import { RequireAuth } from "./routes/RequireAuth";
 
 // Extracted from App.tsx so tests can drive it inside a MemoryRouter
@@ -16,6 +18,9 @@ export default function AppRoutes() {
       </Route>
       <Route element={<RequireAuth />}>
         <Route path="/" element={<DashboardPlaceholder />} />
+        <Route element={<RequireAdmin />}>
+          <Route path="/admin/users/new" element={<AdminCreateUserPage />} />
+        </Route>
       </Route>
       {/* ghs#78's own stated intention: "once real application routing
           is introduced, the catalogue can become a development-only

@@ -17,6 +17,12 @@ const AUTHENTICATED_TOKENS = {
   expiresIn: 900,
 };
 
+const ADMIN_TOKENS = {
+  accessToken: makeAccessToken({ sub: "admin-1", email: "admin@example.com", ghs_role: "admin" }),
+  refreshToken: "refresh-2",
+  expiresIn: 900,
+};
+
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -59,5 +65,23 @@ describe("AppRoutes", () => {
   it("redirects an unknown route to / (which itself redirects to /login when unauthenticated)", () => {
     renderAt("/some/unknown/path");
     expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("redirects /admin/users/new to /login when unauthenticated (ghs#86)", () => {
+    renderAt("/admin/users/new");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("redirects /admin/users/new to / for an authenticated non-admin (ghs#86)", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/admin/users/new");
+    expect(screen.queryByRole("heading", { name: "Create account" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Signed in as/)).toBeInTheDocument();
+  });
+
+  it("renders the admin create-user form at /admin/users/new for an admin (ghs#86)", () => {
+    setTokens(ADMIN_TOKENS);
+    renderAt("/admin/users/new");
+    expect(screen.getByRole("heading", { name: "Create account" })).toBeInTheDocument();
   });
 });

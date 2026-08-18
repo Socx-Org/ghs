@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { cn } from "../lib/cn";
 
 export interface AppHeaderProps {
@@ -40,10 +41,18 @@ export interface NavItemProps {
 }
 
 // A single reusable nav-item treatment (icon + label + active state),
-// not a bespoke per-link className scattered across callers. Renders an
-// <a> when href is given, a <button> otherwise -- real navigation should
-// be a real link (browser back/forward, open-in-new-tab, etc. all keep
-// working), a button is only for a same-page action.
+// not a bespoke per-link className scattered across callers. Renders a
+// real <Link> when href is given, a <button> otherwise -- real
+// navigation should be a real link (browser back/forward, open-in-new-
+// tab, etc. all keep working), a button is only for a same-page action
+// (e.g. the catalogue demo's tab-switching, which isn't real navigation
+// at all). react-router's Link, not a plain <a> -- this app is an SPA
+// (#64), so an internal href should still route client-side rather than
+// forcing a full page reload; it still renders a real <a> under the
+// hood, so every link affordance Link exists to preserve is kept
+// (review finding, PR #87 -- the first real caller of href, ghs#86's
+// Admin nav item, exposed that the href branch had never actually been
+// exercised with react-router in the picture until now).
 export function NavItem({ icon, active = false, children, href, onClick }: NavItemProps) {
   const classes = cn(
     "flex min-h-11 items-center gap-2 whitespace-nowrap rounded-md px-3 text-sm font-medium transition-colors",
@@ -62,9 +71,9 @@ export function NavItem({ icon, active = false, children, href, onClick }: NavIt
   );
   if (href) {
     return (
-      <a href={href} aria-current={active ? "page" : undefined} className={classes}>
+      <Link to={href} aria-current={active ? "page" : undefined} className={classes}>
         {content}
-      </a>
+      </Link>
     );
   }
   return (
