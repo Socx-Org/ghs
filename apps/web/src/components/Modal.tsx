@@ -18,6 +18,16 @@ export interface ModalProps {
 // a dependency here. See frontend-architecture.md.
 export function Modal({ open, onClose, title, children, footer, className }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  // Native dialog.close() fires "close" the same as Escape/backdrop
+  // dismissal does. Without this flag, a parent that flips `open` to
+  // false itself (its own state update, not one of Modal's own dismiss
+  // paths) would cause onClose() to fire a second time for the same
+  // transition once the resulting dialog.close() below echoes back
+  // through the "close" listener -- a real duplicate-side-effect risk
+  // for consumers with more than a boolean toggle in onClose (review
+  // finding, PR #79). Set right before the parent-driven close() call,
+  // consumed by the very close event that call produces.
+  const closingProgrammaticallyRef = useRef(false);
   const titleId = useId();
 
   useEffect(() => {
@@ -26,6 +36,7 @@ export function Modal({ open, onClose, title, children, footer, className }: Mod
     if (open && !dialog.open) {
       dialog.showModal();
     } else if (!open && dialog.open) {
+      closingProgrammaticallyRef.current = true;
       dialog.close();
     }
   }, [open]);
@@ -34,10 +45,18 @@ export function Modal({ open, onClose, title, children, footer, className }: Mod
     const dialog = dialogRef.current;
     if (!dialog) return;
     // "close" fires however the dialog closed -- Escape, our own close
-    // button, or a backdrop click below -- so this is the single source
-    // of truth for syncing back to the parent's `open` state, rather than
-    // handling each dismissal path separately.
-    const handleClose = () => onClose();
+    // button, a backdrop click below, or the parent-driven path above --
+    // so this is the single source of truth for syncing back to the
+    // parent's `open` state, rather than handling each dismissal path
+    // separately. The parent-driven case is suppressed (see the ref
+    // above) since the parent already knows.
+    const handleClose = () => {
+      if (closingProgrammaticallyRef.current) {
+        closingProgrammaticallyRef.current = false;
+        return;
+      }
+      onClose();
+    };
     dialog.addEventListener("close", handleClose);
     return () => dialog.removeEventListener("close", handleClose);
   }, [onClose]);

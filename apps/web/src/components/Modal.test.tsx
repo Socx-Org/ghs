@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Modal } from "./Modal";
+import type { ModalProps } from "./Modal";
 
 afterEach(() => {
   cleanup();
@@ -48,5 +49,24 @@ describe("Modal", () => {
       </Modal>,
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("does not call onClose a second time when the parent itself sets open=false", () => {
+    // Regression test for PR #79's review finding: the parent flipping
+    // `open` to false (its own state update, not a click on Modal's own
+    // close button) triggers dialog.close() internally, which fires the
+    // native "close" event -- onClose must not fire again for that same,
+    // already-known transition.
+    const onClose = vi.fn();
+    function Controlled(props: Partial<ModalProps>) {
+      return (
+        <Modal open onClose={onClose} title="Reject this round?" {...props}>
+          <p>Body</p>
+        </Modal>
+      );
+    }
+    const { rerender } = render(<Controlled />);
+    rerender(<Controlled open={false} />);
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

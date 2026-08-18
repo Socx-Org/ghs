@@ -37,7 +37,8 @@ import type { RoundStatus, UserRole } from "./types/domain";
 // here is the actual component apps/web/src/components exports -- nothing
 // on this page is a one-off styled to look similar; subsequent screens
 // (starting with Login/MFA, #64) import from the same components/ module.
-// Dev-only -- see App.tsx's import.meta.env.DEV gate.
+// Dev-only -- see App.tsx's `MODE === "development"` gate (not
+// import.meta.env.DEV, which is also true under Vitest's own test mode).
 
 const ROUND_STATUSES: RoundStatus[] = ["draft", "pending", "approved", "rejected", "amending"];
 const ROLES: UserRole[] = ["player", "admin", "super_admin"];

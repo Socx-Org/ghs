@@ -26,7 +26,11 @@ export interface FormFieldProps {
 export function FormField({ label, required = false, helpText, error, children, className }: FormFieldProps) {
   const generatedId = useId();
   const inputId = children.props.id ?? generatedId;
-  const helpId = helpText ? `${inputId}-help` : undefined;
+  // Same condition as the help-text render below (helpText && !error) --
+  // otherwise aria-describedby can point at a help-text id that never
+  // actually renders when both helpText and error are given (review
+  // finding, PR #79).
+  const helpId = helpText && !error ? `${inputId}-help` : undefined;
   const errorId = error ? `${inputId}-error` : undefined;
   const describedBy = [helpId, errorId].filter(Boolean).join(" ") || undefined;
 
