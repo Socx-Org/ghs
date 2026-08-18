@@ -1,0 +1,30 @@
+/* ghs#78: semantic colour aliases layered onto Tailwind v4's existing
+   palette -- not new colours. Components reference intent (bg-danger)
+   rather than a hue (bg-red-600) that happens to currently mean "danger",
+   so the mapping can move without touching every component that uses it.
+   See apps/web/docs/frontend-architecture.md for the full rationale,
+   including why primary (blue) and success (green) are kept distinct. */
+@theme {
+  --color-primary: var(--color-blue-600);
+  --color-primary-hover: var(--color-blue-700);
+
+  --color-success: var(--color-green-600);
+  --color-success-surface: var(--color-green-50);
+
+  --color-warning: var(--color-amber-600);
+  --color-warning-surface: var(--color-amber-50);
+
+  --color-danger: var(--color-red-600);
+  --color-danger-hover: var(--color-red-700);
+  --color-danger-surface: var(--color-red-50);
+
+  --color-info: var(--color-blue-500);
+  --color-info-surface: var(--color-blue-50);
+
+  /* round status "amending" only -- not a general-purpose fifth semantic
+     colour, deliberately distinct from warning/pending so a player's
+     round list can't confuse "waiting on committee" with "waiting on
+     you to resubmit". */
+  --color-amending: var(--color-violet-600);
+  --color-amending-surface: var(--color-violet-50);
+}
