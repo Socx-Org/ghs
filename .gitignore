@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# reference/security's exact mandated block (SEC-010.2) -- every .env
+# variant is ignored except the placeholder-only .env.example.
 .env
-.env.local
+.env.*
+!.env.example
 *.log

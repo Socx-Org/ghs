@@ -2,5 +2,11 @@
   "name": "ghs-app",
   "version": "0.0.0",
   "private": true,
-  "workspaces": ["apps/*"]
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "bash scripts/dev.sh"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
 }
