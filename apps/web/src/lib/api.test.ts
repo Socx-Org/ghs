@@ -91,6 +91,34 @@ describe("api -- refresh failure (acceptance criterion)", () => {
   });
 });
 
+describe("api -- stale refresh response cannot resurrect a cleared session (review finding, PR #84)", () => {
+  it("does not apply a refresh response that arrives after the user logged out mid-flight", async () => {
+    setTokens(REAL_TOKENS);
+    mock.onGet("/rounds").reply(401, { error: "token expired" });
+
+    let resolveRefresh!: (value: [number, unknown]) => void;
+    const refreshResponse = new Promise<[number, unknown]>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    bootstrapMock.onPost("/auth/refresh").reply(() => refreshResponse);
+
+    const requestPromise = api.get("/rounds").catch((e: unknown) => e);
+
+    // Let the 401 -> refresh kick off before logging out mid-flight.
+    await Promise.resolve();
+    await Promise.resolve();
+    setTokens(null);
+
+    // The (now-stale) refresh response arrives after the logout.
+    resolveRefresh([200, REFRESHED_TOKENS]);
+    await requestPromise;
+
+    // Must still reflect the logout -- not resurrected by the stale response.
+    expect(getTokens()).toBeNull();
+    expect(getUser()).toBeNull();
+  });
+});
+
 describe("login / verifyMfa", () => {
   it("stores tokens on a direct (non-MFA) login", async () => {
     bootstrapMock.onPost("/auth/login").reply(200, REAL_TOKENS);
@@ -119,6 +147,24 @@ describe("login / verifyMfa", () => {
     const result = await verifyMfa({ mfaPendingToken: "pending-1", code: "123456" });
     expect(result).toEqual(REAL_TOKENS);
     expect(getTokens()).toEqual(REAL_TOKENS);
+  });
+
+  it("does not persist a login response that arrives after session state changed mid-flight (review finding, PR #84)", async () => {
+    let resolveLogin!: (value: [number, unknown]) => void;
+    const loginResponse = new Promise<[number, unknown]>((resolve) => {
+      resolveLogin = resolve;
+    });
+    bootstrapMock.onPost("/auth/login").reply(() => loginResponse);
+
+    const loginPromise = login({ email: "a@example.com", password: "pw" }).catch((e: unknown) => e);
+    await Promise.resolve();
+    setTokens(null); // something else changes session state mid-request
+
+    resolveLogin([200, REAL_TOKENS]);
+    const result = await loginPromise;
+
+    expect(result).toBeInstanceOf(ApiError);
+    expect(getTokens()).toBeNull();
   });
 });
 

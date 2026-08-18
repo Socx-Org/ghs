@@ -1,6 +1,6 @@
 import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
-import { getTokens, setTokens } from "./auth-store";
+import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
@@ -26,6 +26,21 @@ function errorMessage(error: unknown): string {
     return data?.error ?? error.message;
   }
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+// login/verifyMfa/refresh all capture auth-store's generation counter
+// before their request and check it again once the response arrives --
+// if setTokens() ran in the meantime (most concretely: the user logged
+// out while a background refresh was in flight), applying this response
+// now would resurrect session state that was just explicitly cleared.
+// Throwing here rather than silently skipping setTokens() and returning
+// "success" anyway -- a caller getting back a truthy TokenPair for a
+// login that was never actually persisted would be a worse trap (review
+// finding, PR #84).
+function assertSessionUnchangedSince(generationAtRequest: number): void {
+  if (getGeneration() !== generationAtRequest) {
+    throw new ApiError("Session changed while this request was in flight", 409);
+  }
 }
 
 // Deliberately NOT the `api` instance below -- login/mfa-verify/refresh/
@@ -65,9 +80,11 @@ async function refreshTokens(): Promise<AuthTokens> {
   if (!current?.refreshToken) {
     throw new ApiError("No refresh token available", 401);
   }
+  const generationAtRequest = getGeneration();
   const { data } = await bootstrapClient.post<AuthTokens>("/auth/refresh", {
     refreshToken: current.refreshToken,
   });
+  assertSessionUnchangedSince(generationAtRequest);
   setTokens(data);
   return data;
 }
@@ -112,13 +129,20 @@ export interface LoginRequest {
 export type LoginResult = { mfaRequired: true; mfaPendingToken: string } | (AuthTokens & { mfaRequired?: never });
 
 export async function login(input: LoginRequest): Promise<LoginResult> {
+  const generationAtRequest = getGeneration();
   try {
     const { data } = await bootstrapClient.post<LoginResult>("/auth/login", input);
     if (!data.mfaRequired) {
+      assertSessionUnchangedSince(generationAtRequest);
       setTokens(data);
     }
     return data;
   } catch (error) {
+    // Pass an ApiError we raised ourselves (the staleness guard above)
+    // through unchanged -- re-wrapping it via errorMessage()/
+    // axios.isAxiosError() below would lose its .status (it's not an
+    // axios error) and just re-derive the same .message anyway.
+    if (error instanceof ApiError) throw error;
     throw new ApiError(errorMessage(error), axios.isAxiosError(error) ? error.response?.status : undefined);
   }
 }
@@ -129,11 +153,14 @@ export interface MfaVerifyRequest {
 }
 
 export async function verifyMfa(input: MfaVerifyRequest): Promise<AuthTokens> {
+  const generationAtRequest = getGeneration();
   try {
     const { data } = await bootstrapClient.post<AuthTokens>("/auth/mfa/verify", input);
+    assertSessionUnchangedSince(generationAtRequest);
     setTokens(data);
     return data;
   } catch (error) {
+    if (error instanceof ApiError) throw error;
     throw new ApiError(errorMessage(error), axios.isAxiosError(error) ? error.response?.status : undefined);
   }
 }

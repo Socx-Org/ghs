@@ -31,4 +31,18 @@ describe("decodeJwtPayload", () => {
     const token = makeToken({ sub: "user-1", amr: ["pwd", "totp"], email: "a+b@example.com" });
     expect(decodeJwtPayload<{ sub: string }>(token)?.sub).toBe("user-1");
   });
+
+  it("decodes correctly regardless of how much base64url padding the payload actually needs", () => {
+    // base64url strips "=" padding entirely (makeToken's own encoder
+    // does this too, matching real JWTs) -- exercising all three
+    // possible padding lengths (0, 1, 2 characters) directly, not just
+    // incidentally through whatever length the other tests' payloads
+    // happen to produce (review finding, PR #84: atob() needs the
+    // padding restored, and only happens to tolerate its absence on the
+    // current V8).
+    for (let i = 0; i < 12; i++) {
+      const token = makeToken({ sub: "x".repeat(i) });
+      expect(decodeJwtPayload<{ sub: string }>(token)?.sub).toBe("x".repeat(i));
+    }
+  });
 });

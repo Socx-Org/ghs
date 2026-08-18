@@ -11,7 +11,15 @@ export function decodeJwtPayload<T>(token: string): T | null {
     const payloadSegment = token.split(".")[1];
     if (!payloadSegment) return null;
     const base64 = payloadSegment.replace(/-/g, "+").replace(/_/g, "/");
-    const json = atob(base64);
+    // base64url (what a JWT segment actually is) omits the trailing "="
+    // padding real base64 requires -- atob() happens to tolerate that on
+    // the current V8 (confirmed directly: it decodes an unpadded string
+    // without throwing here), but that's implementation leniency, not a
+    // guarantee. Adding the padding back is correct regardless of
+    // whether the current environment needs it (review finding, PR #84).
+    const paddingLength = (4 - (base64.length % 4)) % 4;
+    const padded = base64 + "=".repeat(paddingLength);
+    const json = atob(padded);
     return JSON.parse(json) as T;
   } catch {
     return null;

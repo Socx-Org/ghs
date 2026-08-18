@@ -67,6 +67,15 @@ function deriveUser(tokens: AuthTokens | null): AuthUser | null {
 // of the same state to keep in sync.
 let tokens: AuthTokens | null = readStoredTokens();
 let user: AuthUser | null = deriveUser(tokens);
+// Bumped on every setTokens call. api.ts's login/verifyMfa/refresh all
+// capture this before their request and check it again when the
+// response arrives -- if something else changed session state in the
+// meantime (most concretely: the user logging out while a refresh
+// triggered by a stale 401 is still in flight), the response is stale
+// and must not be applied. Without this, a slow refresh response could
+// resurrect a session the user just explicitly ended (review finding,
+// PR #84).
+let generation = 0;
 const listeners = new Set<() => void>();
 
 export function getTokens(): AuthTokens | null {
@@ -77,7 +86,12 @@ export function getUser(): AuthUser | null {
   return user;
 }
 
+export function getGeneration(): number {
+  return generation;
+}
+
 export function setTokens(next: AuthTokens | null): void {
+  generation += 1;
   tokens = next;
   user = deriveUser(next);
   writeStoredTokens(next);
