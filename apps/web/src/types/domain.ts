@@ -8,3 +8,28 @@
 export type RoundStatus = "draft" | "pending" | "approved" | "rejected" | "amending";
 
 export type UserRole = "player" | "admin" | "super_admin";
+
+// Mirrors apps/api/src/interface/http/routes/players.ts's
+// toPlayerProfileResponse (ghs#60/#89) -- userId deliberately excluded,
+// same reasoning as the backend's own DTO (PR #75: an internal
+// auth-linkage key, not profile data).
+export interface PlayerProfile {
+  id: string;
+  clubId: string | null;
+  firstName: string;
+  lastName: string;
+  country: string;
+  createdAt: string;
+  handicapIndex: number | null;
+  lowHandicapIndex: number | null;
+}
+
+// Mirrors apps/api/src/data/rounds.repository.ts's RoundSummary
+// (toRoundSummary) -- the shape GET /players/:playerId/rounds returns.
+export interface RoundSummary {
+  id: string;
+  playerId: string;
+  teeConfigurationId: string;
+  playedAt: string;
+  status: RoundStatus;
+}

@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { UserRole } from "../types/domain";
+import type { PlayerProfile, RoundSummary, UserRole } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -187,6 +187,19 @@ export interface CreateUserResult {
 // retry), so there's no need to duplicate that wrapping here.
 export async function createUser(input: CreateUserRequest): Promise<CreateUserResult> {
   const { data } = await api.post<CreateUserResult>("/admin/users", input);
+  return data;
+}
+
+// ghs#65. Routed through `api`, same reasoning as createUser above --
+// both are ordinary authenticated feature calls, not part of the auth
+// bootstrap flow.
+export async function getMyPlayerProfile(): Promise<PlayerProfile> {
+  const { data } = await api.get<PlayerProfile>("/players/me");
+  return data;
+}
+
+export async function getPlayerRounds(playerId: string): Promise<RoundSummary[]> {
+  const { data } = await api.get<RoundSummary[]>(`/players/${playerId}/rounds`);
   return data;
 }
 
