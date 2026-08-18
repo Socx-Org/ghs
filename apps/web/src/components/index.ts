@@ -25,3 +25,4 @@ export * from "./ToastProvider";
 export * from "./useToast";
 export * from "./domain/RoundStatusBadge";
 export * from "./domain/RoleBadge";
+export * from "./domain/RequireRole";
