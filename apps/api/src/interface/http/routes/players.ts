@@ -29,6 +29,27 @@ export function playersRouter(players: PlayersRepository, authProvider: AuthProv
   const auth = requireAuth(authProvider);
   const authorizeForPlayer = createPlayerAccessAuthorizer(players);
 
+  // ghs#89 -- registered before /players/:id (Express route ordering:
+  // "me" would otherwise be captured as :id). No ownership check needed,
+  // unlike /players/:id -- there's no URL-supplied target to compare
+  // against, this route is inherently "my own record." A 404 here is a
+  // real, legitimate case (an admin/super_admin account has no player
+  // row unless one was explicitly created for it), not an error to hide
+  // behind a generic 403 the way an unauthorized cross-player lookup is.
+  router.get("/players/me", auth, async (req, res, next) => {
+    try {
+      const identity = req.identity!;
+      const player = await players.findByUserId(identity.sub);
+      if (!player) {
+        res.status(404).json({ error: "no player profile linked to this account" });
+        return;
+      }
+      res.status(200).json(toPlayerProfileResponse(player));
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get("/players/:id", auth, async (req, res, next) => {
     try {
       const playerId = String(req.params.id);
