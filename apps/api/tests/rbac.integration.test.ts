@@ -499,3 +499,65 @@ test("GET /players/:id returns 404 for a genuinely nonexistent player, once auth
     assert.equal(res.status, 404);
   });
 });
+
+// ---------------------------------------------------------------------
+// GET /players/me (ghs#89) -- resolves the caller's own player id, no
+// URL-supplied target to authorize against.
+// ---------------------------------------------------------------------
+
+test("GET /players/me returns the caller's own profile", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const player = await createUserWithRole(ctx, "player");
+    const playerProfile = await ctx.players.create({ userId: player.user.id, firstName: "Own", lastName: "Player" });
+
+    const res = await fetch(`${baseUrl}/api/v1/players/me`, { headers: authHeader(player.token) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.id, playerProfile.id);
+    assert.equal(body.firstName, "Own");
+    assert.equal(body.lastName, "Player");
+    // Same DTO shape as GET /players/:id, not a narrower one (review
+    // finding, PR #90) -- these are real, additive fields (ghs#60), null
+    // until a WHS calculation or admin override ever sets them.
+    assert.equal(body.handicapIndex, null);
+    assert.equal(body.lowHandicapIndex, null);
+    assert.equal("userId" in body, false, "userId must not appear in the response DTO, same as GET /players/:id");
+  });
+});
+
+test("GET /players/me returns 404 for an account with no linked player row (e.g. an admin never given one)", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+    const res = await fetch(`${baseUrl}/api/v1/players/me`, { headers: authHeader(admin.token) });
+    assert.equal(res.status, 404);
+    // The specific error payload the route sets, not just the status
+    // (review finding, PR #90) -- guards the actual wire contract, not
+    // only that *some* 404 comes back.
+    const body = await res.json();
+    assert.equal(body.error, "no player profile linked to this account");
+  });
+});
+
+test("GET /players/me requires authentication", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/v1/players/me`);
+    assert.equal(res.status, 401);
+  });
+});
+
+test("GET /players/me is not shadowed by GET /players/:id -- registering /me first does not break a real player-ID lookup", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+    const player = await createUserWithRole(ctx, "player");
+    const playerProfile = await ctx.players.create({ userId: player.user.id, firstName: "Real", lastName: "Id" });
+
+    const res = await fetch(`${baseUrl}/api/v1/players/${playerProfile.id}`, { headers: authHeader(admin.token) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.id, playerProfile.id);
+  });
+});
