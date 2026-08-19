@@ -4,7 +4,9 @@ import { useAuth } from "./hooks/useAuth";
 import AdminCreateUserPage from "./pages/AdminCreateUserPage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
 import LoginPage from "./pages/LoginPage";
+import NewRoundPage from "./pages/NewRoundPage";
 import PlayerDashboardPage from "./pages/PlayerDashboardPage";
+import RoundEntryPage from "./pages/RoundEntryPage";
 import { RedirectIfAuthenticated } from "./routes/RedirectIfAuthenticated";
 import { RequireAdmin } from "./routes/RequireAdmin";
 import { RequireAuth } from "./routes/RequireAuth";
@@ -30,6 +32,8 @@ export default function AppRoutes() {
       </Route>
       <Route element={<RequireAuth />}>
         <Route path="/" element={<HomeRoute />} />
+        <Route path="/rounds/new" element={<NewRoundPage />} />
+        <Route path="/rounds/:id" element={<RoundEntryPage />} />
         <Route element={<RequireAdmin />}>
           <Route path="/admin/users/new" element={<AdminCreateUserPage />} />
         </Route>
