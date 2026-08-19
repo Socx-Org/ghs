@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import AppShell from "./components/AppShell";
 import ComponentsCatalogue from "./ComponentsCatalogue";
 import { useAuth } from "./hooks/useAuth";
@@ -6,6 +6,7 @@ import AdminCreateUserPage from "./pages/AdminCreateUserPage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
 import LoginPage from "./pages/LoginPage";
 import NewRoundPage from "./pages/NewRoundPage";
+import NotFoundPage from "./pages/NotFoundPage";
 import PlayerDashboardPage from "./pages/PlayerDashboardPage";
 import RoundEntryPage from "./pages/RoundEntryPage";
 import { RedirectIfAuthenticated } from "./routes/RedirectIfAuthenticated";
@@ -20,6 +21,30 @@ import { RequireAuth } from "./routes/RequireAuth";
 function HomeRoute() {
   const { user } = useAuth();
   return user?.role === "player" ? <PlayerDashboardPage /> : <DashboardPlaceholder />;
+}
+
+// ghs#102: the catch-all route can't simply nest under RequireAuth's
+// <AppShell/> branch -- RequireAuth would redirect an unauthenticated
+// visitor to /login before its nested "*" child ever got a chance to
+// render, which is wrong for a URL that's genuinely nonexistent (not
+// merely "needs auth"). So this sits at the top level, dispatching on
+// auth state itself, same pattern as HomeRoute: authenticated gets the
+// real shell (AppShell now takes optional children for exactly this,
+// no router nesting needed), unauthenticated gets the bare page.
+function NotFoundRoute() {
+  const { isAuthenticated } = useAuth();
+  if (isAuthenticated) {
+    return (
+      <AppShell>
+        <NotFoundPage />
+      </AppShell>
+    );
+  }
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-bg-page p-4">
+      <NotFoundPage />
+    </div>
+  );
 }
 
 // Extracted from App.tsx so tests can drive it inside a MemoryRouter
@@ -56,7 +81,7 @@ export default function AppRoutes() {
           rather than have the catalogue "use" the real shell (caught
           in PR review, ghs#97). */}
       {import.meta.env.MODE === "development" && <Route path="/dev/components" element={<ComponentsCatalogue />} />}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFoundRoute />} />
     </Routes>
   );
 }

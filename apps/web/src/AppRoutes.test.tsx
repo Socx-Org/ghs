@@ -85,9 +85,20 @@ describe("AppRoutes", () => {
     expect(screen.getByText("Recent rounds")).toBeInTheDocument();
   });
 
-  it("redirects an unknown route to / (which itself redirects to /login when unauthenticated)", () => {
+  it("shows the 404 page (not a redirect) for an unknown route when unauthenticated (ghs#102)", () => {
     renderAt("/some/unknown/path");
-    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+    expect(screen.getByText("Page not found")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Sign in to your account" })).not.toBeInTheDocument();
+  });
+
+  it("shows the 404 page inside the real shell for an unknown route when authenticated (ghs#102)", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/some/unknown/path");
+    expect(screen.getByText("Page not found")).toBeInTheDocument();
+    // Proof it's rendered inside AppShell, not the bare unauthenticated
+    // wrapper -- the sidebar/account menu are real shell chrome.
+    expect(screen.getByRole("link", { name: /Dashboard/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Account menu" })).toBeInTheDocument();
   });
 
   it("redirects /admin/users/new to /login when unauthenticated (ghs#86)", () => {
