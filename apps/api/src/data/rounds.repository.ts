@@ -301,6 +301,19 @@ const HOLE_SCORE_COLUMNS = `id, round_id, hole_number, strokes, putts, gir, fair
 // still takes its row lock and isEditableStatus check first, on the
 // same transaction, so this only ever fires while the round is
 // genuinely still writable -- unchanged by this fix.
+//
+// Partial-update semantics on correction, not a full replace (review
+// finding, PR #93): an omitted optional field (undefined -- the route
+// already distinguishes this from an explicit false/0) keeps whatever
+// was already recorded; only fields the caller actually provides
+// overwrite it. Passing the raw $n parameter into the UPDATE branch's
+// own COALESCE (against the row's *current* persisted value), not
+// EXCLUDED.*, is what makes this work -- EXCLUDED already has the
+// INSERT-branch's COALESCE-to-default applied, which would have thrown
+// away the "was this actually provided" signal before the UPDATE
+// branch ever saw it. strokes and net_double_bogey_adjusted are always
+// required/server-computed (never omitted in practice), so they always
+// overwrite -- no preserve-on-omission case exists for either.
 async function insertHoleScore(
   client: Pool | PoolClient,
   roundId: string,
@@ -308,14 +321,14 @@ async function insertHoleScore(
 ): Promise<HoleScore> {
   const result = await client.query<HoleScoreRow>(
     `INSERT INTO hole_scores (round_id, hole_number, strokes, putts, gir, fairway_result, in_sand, penalties, net_double_bogey_adjusted)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     VALUES ($1, $2, $3, $4, COALESCE($5, FALSE), $6, COALESCE($7, FALSE), COALESCE($8, 0), COALESCE($9, 0))
      ON CONFLICT (round_id, hole_number) DO UPDATE SET
        strokes = EXCLUDED.strokes,
-       putts = EXCLUDED.putts,
-       gir = EXCLUDED.gir,
-       fairway_result = EXCLUDED.fairway_result,
-       in_sand = EXCLUDED.in_sand,
-       penalties = EXCLUDED.penalties,
+       putts = COALESCE($4, hole_scores.putts),
+       gir = COALESCE($5, hole_scores.gir),
+       fairway_result = COALESCE($6, hole_scores.fairway_result),
+       in_sand = COALESCE($7, hole_scores.in_sand),
+       penalties = COALESCE($8, hole_scores.penalties),
        net_double_bogey_adjusted = EXCLUDED.net_double_bogey_adjusted
      RETURNING ${HOLE_SCORE_COLUMNS}`,
     [
@@ -323,10 +336,10 @@ async function insertHoleScore(
       input.holeNumber,
       input.strokes,
       input.putts ?? null,
-      input.gir ?? false,
+      input.gir ?? null,
       input.fairwayResult ?? null,
-      input.inSand ?? false,
-      input.penalties ?? 0,
+      input.inSand ?? null,
+      input.penalties ?? null,
       input.netDoubleBogeyAdjusted ?? 0,
     ],
   );

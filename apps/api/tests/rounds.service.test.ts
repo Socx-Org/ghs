@@ -260,24 +260,31 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
     async addHoleScore(roundId: string, input: CreateHoleScoreInput) {
       // Upsert-by-holeNumber, matching the real repository's ON CONFLICT
       // DO UPDATE (ghs#92) -- re-recording an already-scored hole
-      // updates it in place rather than appending a duplicate.
+      // updates it in place rather than appending a duplicate. Partial-
+      // update semantics on correction (review finding, PR #93): an
+      // omitted (undefined) optional field preserves the existing row's
+      // value instead of resetting to false/0/null, matching the real
+      // repository's COALESCE(new, existing) behaviour exactly -- not
+      // just "insert defaults," since this fake is what
+      // rounds.service.test.ts's own tests assert against.
       const round = rounds.get(roundId)!;
+      const existingIndex = round.holeScores.findIndex((h) => h.holeNumber === input.holeNumber);
+      const existing = existingIndex === -1 ? undefined : round.holeScores[existingIndex];
       const holeScore: HoleScore = {
-        id: String(nextHoleId++),
+        id: existing?.id ?? String(nextHoleId++),
         holeNumber: input.holeNumber,
         strokes: input.strokes,
-        putts: input.putts ?? null,
-        gir: input.gir ?? false,
-        fairwayResult: input.fairwayResult ?? null,
-        inSand: input.inSand ?? false,
-        penalties: input.penalties ?? 0,
+        putts: input.putts ?? existing?.putts ?? null,
+        gir: input.gir ?? existing?.gir ?? false,
+        fairwayResult: input.fairwayResult ?? existing?.fairwayResult ?? null,
+        inSand: input.inSand ?? existing?.inSand ?? false,
+        penalties: input.penalties ?? existing?.penalties ?? 0,
         netDoubleBogeyAdjusted: input.netDoubleBogeyAdjusted ?? 0,
       };
-      const existingIndex = round.holeScores.findIndex((h) => h.holeNumber === input.holeNumber);
       if (existingIndex === -1) {
         round.holeScores.push(holeScore);
       } else {
-        round.holeScores[existingIndex] = { ...holeScore, id: round.holeScores[existingIndex]!.id };
+        round.holeScores[existingIndex] = holeScore;
       }
       return holeScore;
     },
@@ -530,6 +537,37 @@ test("addHoleScore upserts -- re-recording an already-scored hole updates it in 
   assert.equal(updated!.holeScores.length, 1, "still exactly one row for hole 1, not two");
   assert.equal(updated!.holeScores[0]!.strokes, 4, "the corrected value, not the original");
   assert.equal(updated!.holeScores[0]!.fairwayResult, "hit");
+});
+
+test("addHoleScore's upsert preserves fields the correction omits, rather than resetting them to false/0/null (review finding, PR #93)", async () => {
+  const service = roundsService(fakeRepository());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 6, putts: 3, gir: true, inSand: true, penalties: 1 });
+  // A correction that only touches strokes -- everything else omitted.
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+
+  const updated = await service.getRound(round.id);
+  const hole = updated!.holeScores[0]!;
+  assert.equal(hole.strokes, 4, "the field actually corrected");
+  assert.equal(hole.putts, 3, "preserved, not reset to null");
+  assert.equal(hole.gir, true, "preserved, not reset to false");
+  assert.equal(hole.inSand, true, "preserved, not reset to false");
+  assert.equal(hole.penalties, 1, "preserved, not reset to 0");
+});
+
+test("addHoleScore's upsert still honours an explicit false/0, distinct from omission (PR #93)", async () => {
+  const service = roundsService(fakeRepository());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 6, gir: true, penalties: 2 });
+  // Explicitly clearing gir and penalties this time, not omitting them.
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 6, gir: false, penalties: 0 });
+
+  const updated = await service.getRound(round.id);
+  const hole = updated!.holeScores[0]!;
+  assert.equal(hole.gir, false, "an explicit false must still take effect, not be mistaken for omission");
+  assert.equal(hole.penalties, 0, "an explicit 0 must still take effect, not be mistaken for omission");
 });
 
 // ---------------------------------------------------------------------

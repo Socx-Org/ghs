@@ -362,21 +362,29 @@ test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole u
     // First recording of hole 1 -- 200, not 201 (ghs#92: this is now a
     // real upsert, "record this hole's score," not a strict REST create).
     const firstHole = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/holes`, {
-      method: "POST", headers, body: JSON.stringify({ holeNumber: 1, strokes: 6 }),
+      method: "POST", headers, body: JSON.stringify({ holeNumber: 1, strokes: 6, putts: 3, gir: true }),
     });
     assert.equal(firstHole.status, 200);
 
-    // Re-recording the SAME hole -- updates it in place, still 200, no
-    // unique-violation 500.
+    // Re-recording the SAME hole, correcting only strokes -- updates in
+    // place, still 200, no unique-violation 500, and (review finding,
+    // PR #93) does NOT wipe putts/gir just because this request omits
+    // them -- the route must send undefined for an omitted field, not
+    // coerce it to false, or the real upsert's COALESCE-preserve
+    // behaviour never gets a chance to apply.
     const correctedHole = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/holes`, {
       method: "POST", headers, body: JSON.stringify({ holeNumber: 1, strokes: 4 }),
     });
     assert.equal(correctedHole.status, 200);
 
     const afterCorrection = await fetch(`${baseUrl}/api/v1/rounds/${round.id}`, { headers });
-    const roundAfterCorrection = await afterCorrection.json() as { holeScores: Array<{ holeNumber: number; strokes: number }> };
+    const roundAfterCorrection = await afterCorrection.json() as {
+      holeScores: Array<{ holeNumber: number; strokes: number; putts: number | null; gir: boolean }>;
+    };
     assert.equal(roundAfterCorrection.holeScores.length, 1, "still exactly one row for hole 1, not two");
     assert.equal(roundAfterCorrection.holeScores[0]!.strokes, 4, "the corrected value");
+    assert.equal(roundAfterCorrection.holeScores[0]!.putts, 3, "preserved -- this correction never mentioned putts");
+    assert.equal(roundAfterCorrection.holeScores[0]!.gir, true, "preserved -- this correction never mentioned gir");
 
     // Now complete -- submit succeeds.
     const completeSubmit = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/submit`, { method: "POST", headers });

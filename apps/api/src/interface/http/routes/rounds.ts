@@ -130,13 +130,20 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         return;
       }
 
+      // gir/inSand: omitted must stay undefined, not collapse to false --
+      // this is now an upsert (ghs#92), and an omitted field means
+      // "preserve whatever was already recorded" (rounds.repository.ts's
+      // COALESCE-on-omission), not "the caller is asserting false."
+      // Re-POSTing only {holeNumber, strokes} to correct a stroke count
+      // must not silently wipe a previously-recorded gir: true (review
+      // finding, PR #93).
       const input: CreateHoleScoreInput = {
         holeNumber,
         strokes,
         putts: typeof putts === "number" ? putts : undefined,
-        gir: gir === true,
+        gir: typeof gir === "boolean" ? gir : undefined,
         fairwayResult: fairwayResult ?? undefined,
-        inSand: inSand === true,
+        inSand: typeof inSand === "boolean" ? inSand : undefined,
         penalties: typeof penalties === "number" ? penalties : undefined,
         netDoubleBogeyAdjusted: typeof netDoubleBogeyAdjusted === "number" ? netDoubleBogeyAdjusted : undefined,
       };

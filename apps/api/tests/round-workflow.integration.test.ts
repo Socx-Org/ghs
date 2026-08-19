@@ -213,6 +213,35 @@ test("RoundsRepository.addHoleScore upserts against the real ON CONFLICT DO UPDA
   assert.equal(reloaded!.holeScores[0]!.putts, 1);
 });
 
+test("RoundsRepository.addHoleScore's real ON CONFLICT DO UPDATE preserves omitted fields, real database (review finding, PR #93)", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Preserve", lastName: "Test" });
+  const rounds = createRoundsRepository(pool);
+  const round = await rounds.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+
+  await rounds.addHoleScore(round.id, { holeNumber: 5, strokes: 6, putts: 3, gir: true, inSand: true, penalties: 1 });
+  // A correction that only touches strokes -- everything else omitted,
+  // exactly what a mobile "fix my stroke count" affordance would send.
+  await rounds.addHoleScore(round.id, { holeNumber: 5, strokes: 4 });
+
+  const reloaded = await rounds.get(round.id);
+  const hole = reloaded!.holeScores[0]!;
+  assert.equal(hole.strokes, 4, "the field actually corrected");
+  assert.equal(hole.putts, 3, "preserved by the real COALESCE, not reset to null");
+  assert.equal(hole.gir, true, "preserved, not reset to false");
+  assert.equal(hole.inSand, true, "preserved, not reset to false");
+  assert.equal(hole.penalties, 1, "preserved, not reset to 0");
+
+  // An explicit false/0 is still honoured, distinct from omission.
+  await rounds.addHoleScore(round.id, { holeNumber: 5, strokes: 4, gir: false, penalties: 0 });
+  const afterExplicitClear = await rounds.get(round.id);
+  const clearedHole = afterExplicitClear!.holeScores[0]!;
+  assert.equal(clearedHole.gir, false, "an explicit false must still take effect");
+  assert.equal(clearedHole.penalties, 0, "an explicit 0 must still take effect");
+  assert.equal(clearedHole.putts, 3, "still untouched -- this correction never mentioned putts");
+});
+
 test("deleteRound soft-deletes and recalculates when the round had a differential, real database proof", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   const players = createPlayersRepository(pool);
