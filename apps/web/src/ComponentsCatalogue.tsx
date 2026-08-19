@@ -33,6 +33,7 @@ import {
   Input,
   List,
   ListItem,
+  ListView,
   Logo,
   Modal,
   NavItem,
@@ -660,6 +661,42 @@ export default function ComponentsCatalogue() {
                 </ListItem>
               ))}
             </List>
+          </Example>
+
+          <Example label="ListView -- one data source, table/grid toggle (ghs#103)">
+            <ListView
+              id="catalogue-rounds"
+              items={SAMPLE_ROUNDS}
+              getKey={(r) => r.id}
+              tableHead={
+                <>
+                  <TableHeaderCell>Course</TableHeaderCell>
+                  <TableHeaderCell>Played</TableHeaderCell>
+                  <TableHeaderCell>Status</TableHeaderCell>
+                </>
+              }
+              renderTableRow={(r) => (
+                <>
+                  <TableCell>{r.course}</TableCell>
+                  <TableCell>{r.playedAt}</TableCell>
+                  <TableCell>
+                    <RoundStatusBadge status={r.status} />
+                  </TableCell>
+                </>
+              )}
+              renderCard={(r) => (
+                <Card>
+                  <CardBody className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-text">{r.course}</p>
+                      <p className="text-xs text-text-muted">{r.playedAt}</p>
+                    </div>
+                    <RoundStatusBadge status={r.status} />
+                  </CardBody>
+                </Card>
+              )}
+              emptyState={<EmptyState title="No rounds yet" />}
+            />
           </Example>
 
           <Example label="Avatar">
