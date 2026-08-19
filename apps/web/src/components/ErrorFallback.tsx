@@ -19,7 +19,7 @@ export function ErrorFallback({ onRetry }: ErrorFallbackProps) {
       <EmptyState
         icon={<AlertTriangle aria-hidden="true" className="h-10 w-10" />}
         title="Something went wrong"
-        description="We hit an unexpected problem. Your data is safe -- try again, or head back to a safe place."
+        description="We hit an unexpected problem displaying this page. Try again, or head back to somewhere safe."
         action={
           <div className="flex flex-wrap items-center justify-center gap-2">
             <Button onClick={onRetry}>Retry</Button>
