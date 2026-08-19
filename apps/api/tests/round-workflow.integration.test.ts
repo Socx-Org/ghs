@@ -197,6 +197,22 @@ test("addHoleScore's editable-status check is genuinely atomic with the write --
   assert.equal(holeScore.holeNumber, 1, "proceeds correctly, using a fresh locked read, once the held lock is released");
 });
 
+test("RoundsRepository.addHoleScore upserts against the real ON CONFLICT DO UPDATE, not a second row or a unique-violation (ghs#92)", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Upsert", lastName: "Test" });
+  const rounds = createRoundsRepository(pool);
+  const round = await rounds.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+
+  await rounds.addHoleScore(round.id, { holeNumber: 5, strokes: 6, putts: 2 });
+  await rounds.addHoleScore(round.id, { holeNumber: 5, strokes: 4, putts: 1 });
+
+  const reloaded = await rounds.get(round.id);
+  assert.equal(reloaded!.holeScores.length, 1, "still exactly one row for hole 5 in the real database, not two");
+  assert.equal(reloaded!.holeScores[0]!.strokes, 4);
+  assert.equal(reloaded!.holeScores[0]!.putts, 1);
+});
+
 test("deleteRound soft-deletes and recalculates when the round had a differential, real database proof", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   const players = createPlayersRepository(pool);
@@ -308,7 +324,7 @@ test("approveRound rolls back the status change if recalculation fails -- state 
   assert.equal(afterFailure!.status, "pending", "the status change rolled back together with the failed recalculation, not left half-applied");
 });
 
-test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a missing round is 404", async () => {
+test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a missing round is 404; GET /tee-configurations/:id (ghs#92)", async () => {
   const authConfig: AuthConfig = {
     jwtSecret: "round-workflow-test-secret",
     jwtAccessExpiresInSeconds: 900,
@@ -455,6 +471,18 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
     assert.equal(deleteResponse.status, 200);
     const deleted = await deleteResponse.json() as RoundWorkflowResult;
     assert.equal(deleted.round, null);
+
+    // GET /tee-configurations/:id (ghs#92) -- unauthenticated, same
+    // convention as GET /courses/GET /courses/:id, so no auth header at
+    // all here, unlike every other assertion in this test.
+    const teeConfigResponse = await fetch(`${baseUrl}/api/v1/tee-configurations/${teeConfigurationId}`);
+    assert.equal(teeConfigResponse.status, 200);
+    const teeConfig = await teeConfigResponse.json();
+    assert.equal(teeConfig.id, teeConfigurationId);
+    assert.ok(Array.isArray(teeConfig.holes));
+
+    const missingTeeConfigResponse = await fetch(`${baseUrl}/api/v1/tee-configurations/00000000-0000-0000-0000-000000000000`);
+    assert.equal(missingTeeConfigResponse.status, 404);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

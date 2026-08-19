@@ -1,6 +1,6 @@
 import { Router } from "express";
 import type { RoundsService } from "../../../application/rounds.service.ts";
-import { InvalidRoundTransitionError, RoundNotFoundError } from "../../../application/rounds.service.ts";
+import { IncompleteRoundError, InvalidRoundTransitionError, RoundNotFoundError } from "../../../application/rounds.service.ts";
 import type { PlayersRepository } from "../../../data/players.repository.ts";
 import type { CreateHoleScoreInput, FairwayResult } from "../../../data/rounds.repository.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
@@ -150,7 +150,11 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
       // duplicate that check) -- surfaced here as a 400, not left to
       // fall through to the generic 500 handler.
       const holeScore = await service.addHoleScore(roundId, input, round);
-      res.status(201).json(holeScore);
+      // 200 uniformly, not 201-on-insert/200-on-update -- ghs#92 made
+      // this a real upsert (re-recording an already-scored hole is
+      // idempotent, not an error), so this is "record this hole's
+      // score," not a strict REST create.
+      res.status(200).json(holeScore);
     } catch (err) {
       if (err instanceof HoleMetadataNotFoundError) {
         res.status(400).json({ error: err.message });
@@ -205,6 +209,13 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         return;
       }
       if (err instanceof InvalidRoundTransitionError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
+      // ghs#92: incomplete hole scores -- same 409 treatment as every
+      // other invalid workflow attempt above, not left to fall through
+      // to the generic 500 handler.
+      if (err instanceof IncompleteRoundError) {
         res.status(409).json({ error: err.message });
         return;
       }

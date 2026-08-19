@@ -139,6 +139,12 @@ export interface RoundForUpdate {
   playedAt: string;
   status: RoundStatus;
   scoreDifferential: number | null;
+  // ghs#92: submitForReview's completeness check needs this to know
+  // whether "complete" means every hole in the tee configuration, or
+  // (for a 9-hole round played on an 18-hole tee, which is_9_hole and
+  // tee_configurations.hole_count can't distinguish from each other --
+  // see the completeness rule at its call site) at least 9 scores.
+  is9Hole: boolean;
 }
 
 export interface RoundsRepository {
@@ -185,6 +191,11 @@ export interface RoundsRepository {
   // before deciding anything, so two concurrent transitions on the same
   // round (e.g. an admin double-clicking "approve") can't race.
   getForUpdate(id: string, client: PoolClient): Promise<RoundForUpdate | null>;
+  // ghs#92: the real count of distinct hole scores recorded so far --
+  // submitForReview's completeness check needs a number to compare
+  // against the tee configuration's hole count (or, for is9Hole, 9),
+  // not the full hole_scores rows themselves.
+  countHoleScores(roundId: string, client?: PoolClient): Promise<number>;
   // Bare status transition only -- no recalculation, no notification.
   // Those are real behaviour, orchestrated one layer up (ghs#23/24), not
   // this repository's. client: threaded through so a workflow
@@ -280,6 +291,16 @@ const ROUND_COLUMNS = `id, player_id, tee_configuration_id, played_at, playing_h
 const HOLE_SCORE_COLUMNS = `id, round_id, hole_number, strokes, putts, gir, fairway_result, in_sand,
   penalties, net_double_bogey_adjusted`;
 
+// ghs#92: upsert, not a plain INSERT -- hole_scores has UNIQUE(round_id,
+// hole_number), and a mobile hole-by-hole entry UI needs to let a
+// player correct a hole they already scored (e.g. a fat-fingered
+// stroke count) while the round is still editable. Previously a
+// re-POST of the same hole number threw a raw Postgres unique-violation
+// that fell through to a generic 500 -- this makes the same call
+// idempotent instead. The caller (rounds.service.ts's addHoleScore)
+// still takes its row lock and isEditableStatus check first, on the
+// same transaction, so this only ever fires while the round is
+// genuinely still writable -- unchanged by this fix.
 async function insertHoleScore(
   client: Pool | PoolClient,
   roundId: string,
@@ -288,6 +309,14 @@ async function insertHoleScore(
   const result = await client.query<HoleScoreRow>(
     `INSERT INTO hole_scores (round_id, hole_number, strokes, putts, gir, fairway_result, in_sand, penalties, net_double_bogey_adjusted)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (round_id, hole_number) DO UPDATE SET
+       strokes = EXCLUDED.strokes,
+       putts = EXCLUDED.putts,
+       gir = EXCLUDED.gir,
+       fairway_result = EXCLUDED.fairway_result,
+       in_sand = EXCLUDED.in_sand,
+       penalties = EXCLUDED.penalties,
+       net_double_bogey_adjusted = EXCLUDED.net_double_bogey_adjusted
      RETURNING ${HOLE_SCORE_COLUMNS}`,
     [
       roundId,
@@ -499,8 +528,9 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         played_at: Date;
         status: RoundStatus;
         score_differential: string | null;
+        is_9_hole: boolean;
       }>(
-        `SELECT id, player_id, tee_configuration_id, played_at, status, score_differential
+        `SELECT id, player_id, tee_configuration_id, played_at, status, score_differential, is_9_hole
          FROM rounds
          WHERE id = $1 AND deleted_at IS NULL
          FOR UPDATE`,
@@ -515,7 +545,16 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         playedAt: row.played_at.toISOString(),
         status: row.status,
         scoreDifferential: row.score_differential === null ? null : Number(row.score_differential),
+        is9Hole: row.is_9_hole,
       };
+    },
+
+    async countHoleScores(roundId, client) {
+      const result = await (client ?? pool).query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM hole_scores WHERE round_id = $1",
+        [roundId],
+      );
+      return Number(result.rows[0]!.count);
     },
 
     async setStatus(id, status, rejectionReason, client) {
