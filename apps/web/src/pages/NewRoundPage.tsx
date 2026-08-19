@@ -97,58 +97,56 @@ export default function NewRoundPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col justify-center bg-bg-page px-4 py-12">
-      <div className="mx-auto w-full max-w-lg">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-          ← Back
+    <div className="mx-auto w-full max-w-lg px-4 py-12">
+      <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
+        ← Back
+      </Button>
+      <h1 className="mt-4 text-2xl font-semibold text-text">Start a round</h1>
+      <p className="mt-2 text-sm text-text-muted">Choose the course and tee you're playing, then enter your scores hole by hole.</p>
+
+      <form className="mt-8 flex flex-col gap-6" onSubmit={handleSubmit(onSubmit)} noValidate>
+        {feedback && <Alert variant="error">{feedback}</Alert>}
+
+        <FormField label="Course" error={errors.courseId?.message}>
+          <Select {...register("courseId")} disabled={coursesQuery.isPending}>
+            <option value="">{coursesQuery.isPending ? "Loading courses…" : "Select a course"}</option>
+            {coursesQuery.data?.map((course) => (
+              <option key={course.id} value={course.id}>
+                {course.name}
+              </option>
+            ))}
+          </Select>
+        </FormField>
+
+        <FormField label="Tee" error={errors.teeConfigurationId?.message}>
+          <Select {...register("teeConfigurationId")} disabled={!courseId || courseQuery.isPending}>
+            <option value="">{!courseId ? "Choose a course first" : courseQuery.isPending ? "Loading tees…" : "Select a tee"}</option>
+            {courseQuery.data?.teeConfigurations.map((tee) => (
+              <option key={tee.id} value={tee.id}>
+                {tee.name} ({tee.holeCount} holes)
+              </option>
+            ))}
+          </Select>
+        </FormField>
+
+        <FormField label="Date played" error={errors.playedAt?.message}>
+          <Input type="date" {...register("playedAt")} />
+        </FormField>
+
+        <label className="flex items-center gap-2 text-sm text-text">
+          <Checkbox {...register("isTournament")} />
+          Tournament round
+        </label>
+
+        <label className="flex items-center gap-2 text-sm text-text">
+          <Checkbox {...register("is9Hole")} />
+          9-hole round
+        </label>
+
+        <Button type="submit" isLoading={isSubmitting} className="w-full">
+          Start round
         </Button>
-        <h1 className="mt-4 text-2xl font-semibold text-text">Start a round</h1>
-        <p className="mt-2 text-sm text-text-muted">Choose the course and tee you're playing, then enter your scores hole by hole.</p>
-
-        <form className="mt-8 flex flex-col gap-6" onSubmit={handleSubmit(onSubmit)} noValidate>
-          {feedback && <Alert variant="error">{feedback}</Alert>}
-
-          <FormField label="Course" error={errors.courseId?.message}>
-            <Select {...register("courseId")} disabled={coursesQuery.isPending}>
-              <option value="">{coursesQuery.isPending ? "Loading courses…" : "Select a course"}</option>
-              {coursesQuery.data?.map((course) => (
-                <option key={course.id} value={course.id}>
-                  {course.name}
-                </option>
-              ))}
-            </Select>
-          </FormField>
-
-          <FormField label="Tee" error={errors.teeConfigurationId?.message}>
-            <Select {...register("teeConfigurationId")} disabled={!courseId || courseQuery.isPending}>
-              <option value="">{!courseId ? "Choose a course first" : courseQuery.isPending ? "Loading tees…" : "Select a tee"}</option>
-              {courseQuery.data?.teeConfigurations.map((tee) => (
-                <option key={tee.id} value={tee.id}>
-                  {tee.name} ({tee.holeCount} holes)
-                </option>
-              ))}
-            </Select>
-          </FormField>
-
-          <FormField label="Date played" error={errors.playedAt?.message}>
-            <Input type="date" {...register("playedAt")} />
-          </FormField>
-
-          <label className="flex items-center gap-2 text-sm text-text">
-            <Checkbox {...register("isTournament")} />
-            Tournament round
-          </label>
-
-          <label className="flex items-center gap-2 text-sm text-text">
-            <Checkbox {...register("is9Hole")} />
-            9-hole round
-          </label>
-
-          <Button type="submit" isLoading={isSubmitting} className="w-full">
-            Start round
-          </Button>
-        </form>
-      </div>
+      </form>
     </div>
   );
 }

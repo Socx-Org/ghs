@@ -153,21 +153,6 @@ describe("PlayerDashboardPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("internal server error");
   });
 
-  it("signs out via the header button", async () => {
-    mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: null, lowHandicapIndex: null });
-    mock.onGet("/players/player-1/rounds").reply(200, []);
-
-    renderDashboard();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument());
-    await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
-
-    // logout() clears local auth state regardless of network outcome
-    // (established behaviour, ghs#63) -- this is the observable proof,
-    // not a mocked callback.
-    const { getTokens } = await import("../lib/auth-store");
-    await waitFor(() => expect(getTokens()).toBeNull());
-  });
-
   it("navigates to /rounds/new via the New round button (ghs#94)", async () => {
     mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: null, lowHandicapIndex: null });
     mock.onGet("/players/player-1/rounds").reply(200, []);

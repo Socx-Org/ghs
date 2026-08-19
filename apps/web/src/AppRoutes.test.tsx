@@ -72,7 +72,10 @@ describe("AppRoutes", () => {
     setTokens(ADMIN_TOKENS);
     renderAt("/");
     expect(screen.getByText(/Signed in as/)).toBeInTheDocument();
-    expect(screen.getByText("admin@example.com", { exact: false })).toBeInTheDocument();
+    // ghs#96: AccountMenu's own trigger also shows the email now (a
+    // second real element, not a bug) -- getAllByText, not getByText,
+    // since more than one match is expected and correct here.
+    expect(screen.getAllByText("admin@example.com", { exact: false }).length).toBeGreaterThan(0);
   });
 
   it("redirects /login to / when already authenticated", () => {
