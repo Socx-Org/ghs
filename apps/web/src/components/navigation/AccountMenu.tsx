@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, LogOut, UserCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { ThemeToggle } from "../ThemeToggle";
 import { useAuth } from "../../hooks/useAuth";
 
 function roleLabel(role: string): string {
@@ -10,18 +9,24 @@ function roleLabel(role: string): string {
   return "Player";
 }
 
-// ghs#96: a real accessible dropdown (design doc section 7's own
-// requirement, "do not use hover-only menus") -- not a headless-UI
-// dependency, since a click-outside + Escape listener plus role="menu"
-// is the entire mechanism needed here and this is the only dropdown
-// menu the app has today (design principle 9: no generic Menu
-// abstraction for a single real consumer).
+// ghs#96: a real accessible disclosure popover (design doc section 7's
+// own requirement, "do not use hover-only menus") -- not a headless-UI
+// dependency, since a click-outside + Escape listener is the entire
+// mechanism needed here and this is the only dropdown the app has today
+// (design principle 9: no generic Menu abstraction for a single real
+// consumer). Deliberately NOT role="menu"/role="menuitem": the panel
+// mixes static text (email/role) with a single action, which is an ARIA
+// menu-pattern mismatch (menus expect every child to be a menuitem with
+// roving-tabindex arrow-key navigation) -- a plain disclosure with
+// aria-expanded/aria-controls and normal tab order is the correct,
+// simpler pattern for this content (caught in PR review, ghs#97).
 export function AccountMenu() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -57,12 +62,12 @@ export function AccountMenu() {
       <button
         ref={buttonRef}
         type="button"
-        aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={panelId}
         // A stable accessible name independent of the signed-in user's
         // email -- "open the account menu" is this button's actual
         // purpose; the email is supplementary visual/contextual info,
-        // still reachable once the menu itself is open.
+        // still reachable once the panel itself is open.
         aria-label="Account menu"
         onClick={() => setOpen((current) => !current)}
         className="flex min-h-11 items-center gap-2 rounded-md px-2 text-sm font-medium text-text hover:bg-text/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
@@ -73,19 +78,13 @@ export function AccountMenu() {
       </button>
 
       {open && (
-        <div role="menu" aria-label="Account" className="absolute right-0 z-20 mt-2 w-64 rounded-md border border-border bg-surface p-2 shadow-lg">
+        <div id={panelId} className="absolute right-0 z-20 mt-2 w-64 rounded-md border border-border bg-surface p-2 shadow-lg">
           <div className="px-2 py-2">
             <p className="truncate text-sm font-medium text-text">{user.email}</p>
             <p className="text-xs text-text-muted">{roleLabel(user.role)}</p>
           </div>
           <div className="my-1 border-t border-border" />
-          <div className="flex items-center justify-between gap-2 px-2 py-2">
-            <span className="text-sm text-text">Theme</span>
-            <ThemeToggle />
-          </div>
-          <div className="my-1 border-t border-border" />
           <button
-            role="menuitem"
             type="button"
             onClick={handleLogout}
             className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-sm text-text hover:bg-text/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"

@@ -49,16 +49,13 @@ export default function AppRoutes() {
           /components route." This is that moment -- MODE, not
           import.meta.env.DEV (also true under Vitest's test mode,
           verified directly in App.tsx's original scaffold version).
-          Nested under AppShell too, not RequireAuth -- ghs#96's design
-          doc (section 27) asks the catalogue to dogfood the real
-          shell, and AppShell itself degrades gracefully with no
-          authenticated user (Sidebar/AccountMenu both handle a null
-          user already), so this doesn't need a real login. */}
-      {import.meta.env.MODE === "development" && (
-        <Route element={<AppShell />}>
-          <Route path="/dev/components" element={<ComponentsCatalogue />} />
-        </Route>
-      )}
+          Deliberately NOT nested under AppShell: ComponentsCatalogue
+          already renders its own live AppHeader as one of its demo
+          sections (a real, functional demo of that exact component),
+          so wrapping it in AppShell too would stack two header bars
+          rather than have the catalogue "use" the real shell (caught
+          in PR review, ghs#97). */}
+      {import.meta.env.MODE === "development" && <Route path="/dev/components" element={<ComponentsCatalogue />} />}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

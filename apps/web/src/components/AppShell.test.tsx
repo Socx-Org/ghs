@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import AppShell from "./AppShell";
@@ -41,6 +41,17 @@ describe("AppShell", () => {
     expect(screen.getByRole("button", { name: "Account menu" })).toBeInTheDocument();
     expect(screen.getByText("Real page content")).toBeInTheDocument();
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
+  });
+
+  it("places ThemeToggle in the header, immediately before AccountMenu, not inside its dropdown", () => {
+    renderShell();
+    const header = screen.getByRole("button", { name: "Account menu" }).closest("header");
+    expect(header).not.toBeNull();
+    const headerButtons = within(header as HTMLElement).getAllByRole("button");
+    const themeIndex = headerButtons.findIndex((btn) => /Switch to (dark|light) theme/.test(btn.getAttribute("aria-label") ?? ""));
+    const accountIndex = headerButtons.findIndex((btn) => btn.getAttribute("aria-label") === "Account menu");
+    expect(themeIndex).toBeGreaterThanOrEqual(0);
+    expect(themeIndex).toBeLessThan(accountIndex);
   });
 
   it("opens the mobile navigation drawer via the header's hamburger trigger", async () => {

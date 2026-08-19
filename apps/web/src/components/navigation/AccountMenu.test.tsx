@@ -38,60 +38,53 @@ function renderMenu(role = "player") {
 }
 
 describe("AccountMenu", () => {
-  it("renders a trigger with a stable accessible name, menu closed by default", () => {
+  it("renders a trigger with a stable accessible name, panel closed by default", () => {
     renderMenu();
     const trigger = screen.getByRole("button", { name: "Account menu" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Sign out/ })).not.toBeInTheDocument();
   });
 
   it("opens on click, showing the user's email/role and Sign out -- not a hover-only menu", async () => {
     renderMenu("admin");
     await userEvent.click(screen.getByRole("button", { name: "Account menu" }));
 
-    expect(screen.getByRole("menu", { name: "Account" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Account menu" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getAllByText("player@example.com").length).toBeGreaterThan(0);
     expect(screen.getByText("Admin")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Sign out/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sign out/ })).toBeInTheDocument();
   });
 
   it("closes on Escape and returns focus to the trigger", async () => {
     renderMenu();
     const trigger = screen.getByRole("button", { name: "Account menu" });
     await userEvent.click(trigger);
-    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sign out/ })).toBeInTheDocument();
 
     await userEvent.keyboard("{Escape}");
 
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Sign out/ })).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
   });
 
   it("closes on an outside click", async () => {
     renderMenu();
     await userEvent.click(screen.getByRole("button", { name: "Account menu" }));
-    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sign out/ })).toBeInTheDocument();
 
     await userEvent.click(document.body);
 
-    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Sign out/ })).not.toBeInTheDocument();
   });
 
   it("signs out via the real logout flow, clearing local auth state", async () => {
     renderMenu();
     await userEvent.click(screen.getByRole("button", { name: "Account menu" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: /Sign out/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Sign out/ }));
 
     // logout() clears local auth state regardless of network outcome
     // (established behaviour, ghs#63) -- the observable proof, not a
     // mocked callback.
     await waitFor(() => expect(getTokens()).toBeNull());
-  });
-
-  it("includes the real ThemeToggle, not a separate reimplementation", async () => {
-    renderMenu();
-    await userEvent.click(screen.getByRole("button", { name: "Account menu" }));
-    expect(screen.getByRole("button", { name: /Switch to (dark|light) theme/ })).toBeInTheDocument();
   });
 });

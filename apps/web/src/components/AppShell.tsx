@@ -4,6 +4,7 @@ import { Outlet } from "react-router-dom";
 import { Button } from "./Button";
 import { Footer } from "./Footer";
 import { Logo } from "./Logo";
+import { ThemeToggle } from "./ThemeToggle";
 import { AccountMenu } from "./navigation/AccountMenu";
 import { MobileNav } from "./navigation/MobileNav";
 import { Sidebar } from "./navigation/Sidebar";
@@ -34,7 +35,10 @@ export default function AppShell() {
             <Logo variant="mark" label="GHS" />
           </div>
           <div className="hidden lg:block" />
-          <AccountMenu />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <AccountMenu />
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto bg-bg-page">
