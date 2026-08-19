@@ -197,6 +197,51 @@ test("addHoleScore's editable-status check is genuinely atomic with the write --
   assert.equal(holeScore.holeNumber, 1, "proceeds correctly, using a fresh locked read, once the held lock is released");
 });
 
+test("RoundsRepository.addHoleScore upserts against the real ON CONFLICT DO UPDATE, not a second row or a unique-violation (ghs#92)", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Upsert", lastName: "Test" });
+  const rounds = createRoundsRepository(pool);
+  const round = await rounds.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+
+  await rounds.addHoleScore(round.id, { holeNumber: 5, strokes: 6, putts: 2 });
+  await rounds.addHoleScore(round.id, { holeNumber: 5, strokes: 4, putts: 1 });
+
+  const reloaded = await rounds.get(round.id);
+  assert.equal(reloaded!.holeScores.length, 1, "still exactly one row for hole 5 in the real database, not two");
+  assert.equal(reloaded!.holeScores[0]!.strokes, 4);
+  assert.equal(reloaded!.holeScores[0]!.putts, 1);
+});
+
+test("RoundsRepository.addHoleScore's real ON CONFLICT DO UPDATE preserves omitted fields, real database (review finding, PR #93)", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Preserve", lastName: "Test" });
+  const rounds = createRoundsRepository(pool);
+  const round = await rounds.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+
+  await rounds.addHoleScore(round.id, { holeNumber: 5, strokes: 6, putts: 3, gir: true, inSand: true, penalties: 1 });
+  // A correction that only touches strokes -- everything else omitted,
+  // exactly what a mobile "fix my stroke count" affordance would send.
+  await rounds.addHoleScore(round.id, { holeNumber: 5, strokes: 4 });
+
+  const reloaded = await rounds.get(round.id);
+  const hole = reloaded!.holeScores[0]!;
+  assert.equal(hole.strokes, 4, "the field actually corrected");
+  assert.equal(hole.putts, 3, "preserved by the real COALESCE, not reset to null");
+  assert.equal(hole.gir, true, "preserved, not reset to false");
+  assert.equal(hole.inSand, true, "preserved, not reset to false");
+  assert.equal(hole.penalties, 1, "preserved, not reset to 0");
+
+  // An explicit false/0 is still honoured, distinct from omission.
+  await rounds.addHoleScore(round.id, { holeNumber: 5, strokes: 4, gir: false, penalties: 0 });
+  const afterExplicitClear = await rounds.get(round.id);
+  const clearedHole = afterExplicitClear!.holeScores[0]!;
+  assert.equal(clearedHole.gir, false, "an explicit false must still take effect");
+  assert.equal(clearedHole.penalties, 0, "an explicit 0 must still take effect");
+  assert.equal(clearedHole.putts, 3, "still untouched -- this correction never mentioned putts");
+});
+
 test("deleteRound soft-deletes and recalculates when the round had a differential, real database proof", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   const players = createPlayersRepository(pool);
@@ -308,7 +353,7 @@ test("approveRound rolls back the status change if recalculation fails -- state 
   assert.equal(afterFailure!.status, "pending", "the status change rolled back together with the failed recalculation, not left half-applied");
 });
 
-test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a missing round is 404", async () => {
+test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a missing round is 404; GET /tee-configurations/:id (ghs#92)", async () => {
   const authConfig: AuthConfig = {
     jwtSecret: "round-workflow-test-secret",
     jwtAccessExpiresInSeconds: 900,
@@ -455,6 +500,18 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
     assert.equal(deleteResponse.status, 200);
     const deleted = await deleteResponse.json() as RoundWorkflowResult;
     assert.equal(deleted.round, null);
+
+    // GET /tee-configurations/:id (ghs#92) -- unauthenticated, same
+    // convention as GET /courses/GET /courses/:id, so no auth header at
+    // all here, unlike every other assertion in this test.
+    const teeConfigResponse = await fetch(`${baseUrl}/api/v1/tee-configurations/${teeConfigurationId}`);
+    assert.equal(teeConfigResponse.status, 200);
+    const teeConfig = await teeConfigResponse.json();
+    assert.equal(teeConfig.id, teeConfigurationId);
+    assert.ok(Array.isArray(teeConfig.holes));
+
+    const missingTeeConfigResponse = await fetch(`${baseUrl}/api/v1/tee-configurations/00000000-0000-0000-0000-000000000000`);
+    assert.equal(missingTeeConfigResponse.status, 404);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

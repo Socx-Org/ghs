@@ -139,6 +139,12 @@ export interface RoundForUpdate {
   playedAt: string;
   status: RoundStatus;
   scoreDifferential: number | null;
+  // ghs#92: submitForReview's completeness check needs this to know
+  // whether "complete" means every hole in the tee configuration, or
+  // (for a 9-hole round played on an 18-hole tee, which is_9_hole and
+  // tee_configurations.hole_count can't distinguish from each other --
+  // see the completeness rule at its call site) at least 9 scores.
+  is9Hole: boolean;
 }
 
 export interface RoundsRepository {
@@ -185,6 +191,11 @@ export interface RoundsRepository {
   // before deciding anything, so two concurrent transitions on the same
   // round (e.g. an admin double-clicking "approve") can't race.
   getForUpdate(id: string, client: PoolClient): Promise<RoundForUpdate | null>;
+  // ghs#92: the real count of distinct hole scores recorded so far --
+  // submitForReview's completeness check needs a number to compare
+  // against the tee configuration's hole count (or, for is9Hole, 9),
+  // not the full hole_scores rows themselves.
+  countHoleScores(roundId: string, client?: PoolClient): Promise<number>;
   // Bare status transition only -- no recalculation, no notification.
   // Those are real behaviour, orchestrated one layer up (ghs#23/24), not
   // this repository's. client: threaded through so a workflow
@@ -280,6 +291,29 @@ const ROUND_COLUMNS = `id, player_id, tee_configuration_id, played_at, playing_h
 const HOLE_SCORE_COLUMNS = `id, round_id, hole_number, strokes, putts, gir, fairway_result, in_sand,
   penalties, net_double_bogey_adjusted`;
 
+// ghs#92: upsert, not a plain INSERT -- hole_scores has UNIQUE(round_id,
+// hole_number), and a mobile hole-by-hole entry UI needs to let a
+// player correct a hole they already scored (e.g. a fat-fingered
+// stroke count) while the round is still editable. Previously a
+// re-POST of the same hole number threw a raw Postgres unique-violation
+// that fell through to a generic 500 -- this makes the same call
+// idempotent instead. The caller (rounds.service.ts's addHoleScore)
+// still takes its row lock and isEditableStatus check first, on the
+// same transaction, so this only ever fires while the round is
+// genuinely still writable -- unchanged by this fix.
+//
+// Partial-update semantics on correction, not a full replace (review
+// finding, PR #93): an omitted optional field (undefined -- the route
+// already distinguishes this from an explicit false/0) keeps whatever
+// was already recorded; only fields the caller actually provides
+// overwrite it. Passing the raw $n parameter into the UPDATE branch's
+// own COALESCE (against the row's *current* persisted value), not
+// EXCLUDED.*, is what makes this work -- EXCLUDED already has the
+// INSERT-branch's COALESCE-to-default applied, which would have thrown
+// away the "was this actually provided" signal before the UPDATE
+// branch ever saw it. strokes and net_double_bogey_adjusted are always
+// required/server-computed (never omitted in practice), so they always
+// overwrite -- no preserve-on-omission case exists for either.
 async function insertHoleScore(
   client: Pool | PoolClient,
   roundId: string,
@@ -287,17 +321,25 @@ async function insertHoleScore(
 ): Promise<HoleScore> {
   const result = await client.query<HoleScoreRow>(
     `INSERT INTO hole_scores (round_id, hole_number, strokes, putts, gir, fairway_result, in_sand, penalties, net_double_bogey_adjusted)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     VALUES ($1, $2, $3, $4, COALESCE($5, FALSE), $6, COALESCE($7, FALSE), COALESCE($8, 0), COALESCE($9, 0))
+     ON CONFLICT (round_id, hole_number) DO UPDATE SET
+       strokes = EXCLUDED.strokes,
+       putts = COALESCE($4, hole_scores.putts),
+       gir = COALESCE($5, hole_scores.gir),
+       fairway_result = COALESCE($6, hole_scores.fairway_result),
+       in_sand = COALESCE($7, hole_scores.in_sand),
+       penalties = COALESCE($8, hole_scores.penalties),
+       net_double_bogey_adjusted = EXCLUDED.net_double_bogey_adjusted
      RETURNING ${HOLE_SCORE_COLUMNS}`,
     [
       roundId,
       input.holeNumber,
       input.strokes,
       input.putts ?? null,
-      input.gir ?? false,
+      input.gir ?? null,
       input.fairwayResult ?? null,
-      input.inSand ?? false,
-      input.penalties ?? 0,
+      input.inSand ?? null,
+      input.penalties ?? null,
       input.netDoubleBogeyAdjusted ?? 0,
     ],
   );
@@ -499,8 +541,9 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         played_at: Date;
         status: RoundStatus;
         score_differential: string | null;
+        is_9_hole: boolean;
       }>(
-        `SELECT id, player_id, tee_configuration_id, played_at, status, score_differential
+        `SELECT id, player_id, tee_configuration_id, played_at, status, score_differential, is_9_hole
          FROM rounds
          WHERE id = $1 AND deleted_at IS NULL
          FOR UPDATE`,
@@ -515,7 +558,16 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         playedAt: row.played_at.toISOString(),
         status: row.status,
         scoreDifferential: row.score_differential === null ? null : Number(row.score_differential),
+        is9Hole: row.is_9_hole,
       };
+    },
+
+    async countHoleScores(roundId, client) {
+      const result = await (client ?? pool).query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM hole_scores WHERE round_id = $1",
+        [roundId],
+      );
+      return Number(result.rows[0]!.count);
     },
 
     async setStatus(id, status, rejectionReason, client) {

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Pool, PoolClient } from "pg";
-import { createRoundsService, InvalidRoundTransitionError, RoundNotFoundError } from "../src/application/rounds.service.ts";
+import { createRoundsService, IncompleteRoundError, InvalidRoundTransitionError, RoundNotFoundError } from "../src/application/rounds.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
 import { createLogger } from "../src/logger.ts";
 import type {
@@ -26,7 +26,10 @@ import type { NotificationSettings, SystemSettingsService } from "../src/applica
 // A single 18-hole tee configuration, reused by every test below --
 // enough hole metadata (hole 1, par 4, stroke index 7) for the
 // net-double-bogey computation rounds.service.ts now performs at
-// hole-insertion time.
+// hole-insertion time. Its `holes` array deliberately only lists hole 1
+// (ghs#92's completeness check requires every hole in `holes`, so this
+// fixture's own completeness requirement is exactly 1 -- every existing
+// submitForReview test below scores hole 1 before submitting).
 const FAKE_TEE_CONFIGURATION: TeeConfiguration = {
   id: "tee-1",
   name: "White",
@@ -34,6 +37,26 @@ const FAKE_TEE_CONFIGURATION: TeeConfiguration = {
   courseRating: 72.0,
   slopeRating: 113,
   holes: [{ id: "hole-1", holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 7 }],
+};
+
+// ghs#92: a real 18-hole tee configuration (every hole actually
+// present, unlike FAKE_TEE_CONFIGURATION above) -- needed for the
+// completeness-check tests, both the "every hole in a full round" case
+// and the is9Hole "at least 9" case (which needs real metadata for
+// holes 1-9 to record scores against without HoleMetadataNotFoundError).
+const FULL_TEE_CONFIGURATION: TeeConfiguration = {
+  id: "tee-full-18",
+  name: "Championship",
+  holeCount: 18,
+  courseRating: 72.0,
+  slopeRating: 113,
+  holes: Array.from({ length: 18 }, (_, i) => ({
+    id: `full-hole-${i + 1}`,
+    holeNumber: i + 1,
+    distanceYards: 380,
+    par: 4,
+    strokeIndex: ((i * 7) % 18) + 1,
+  })),
 };
 
 function fakeCoursesRepository(): CoursesRepository {
@@ -48,7 +71,9 @@ function fakeCoursesRepository(): CoursesRepository {
       return null;
     },
     async getTeeConfiguration(id) {
-      return id === FAKE_TEE_CONFIGURATION.id ? FAKE_TEE_CONFIGURATION : null;
+      if (id === FAKE_TEE_CONFIGURATION.id) return FAKE_TEE_CONFIGURATION;
+      if (id === FULL_TEE_CONFIGURATION.id) return FULL_TEE_CONFIGURATION;
+      return null;
     },
   };
 }
@@ -233,20 +258,38 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
       return round;
     },
     async addHoleScore(roundId: string, input: CreateHoleScoreInput) {
+      // Upsert-by-holeNumber, matching the real repository's ON CONFLICT
+      // DO UPDATE (ghs#92) -- re-recording an already-scored hole
+      // updates it in place rather than appending a duplicate. Partial-
+      // update semantics on correction (review finding, PR #93): an
+      // omitted (undefined) optional field preserves the existing row's
+      // value instead of resetting to false/0/null, matching the real
+      // repository's COALESCE(new, existing) behaviour exactly -- not
+      // just "insert defaults," since this fake is what
+      // rounds.service.test.ts's own tests assert against.
       const round = rounds.get(roundId)!;
+      const existingIndex = round.holeScores.findIndex((h) => h.holeNumber === input.holeNumber);
+      const existing = existingIndex === -1 ? undefined : round.holeScores[existingIndex];
       const holeScore: HoleScore = {
-        id: String(nextHoleId++),
+        id: existing?.id ?? String(nextHoleId++),
         holeNumber: input.holeNumber,
         strokes: input.strokes,
-        putts: input.putts ?? null,
-        gir: input.gir ?? false,
-        fairwayResult: input.fairwayResult ?? null,
-        inSand: input.inSand ?? false,
-        penalties: input.penalties ?? 0,
+        putts: input.putts ?? existing?.putts ?? null,
+        gir: input.gir ?? existing?.gir ?? false,
+        fairwayResult: input.fairwayResult ?? existing?.fairwayResult ?? null,
+        inSand: input.inSand ?? existing?.inSand ?? false,
+        penalties: input.penalties ?? existing?.penalties ?? 0,
         netDoubleBogeyAdjusted: input.netDoubleBogeyAdjusted ?? 0,
       };
-      round.holeScores.push(holeScore);
+      if (existingIndex === -1) {
+        round.holeScores.push(holeScore);
+      } else {
+        round.holeScores[existingIndex] = holeScore;
+      }
       return holeScore;
+    },
+    async countHoleScores(roundId: string) {
+      return rounds.get(roundId)?.holeScores.length ?? 0;
     },
     async updateScores(id: string, update: RoundScoreUpdate) {
       const round = rounds.get(id)!;
@@ -285,6 +328,7 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
         playedAt: round.playedAt,
         status: round.status,
         scoreDifferential: round.scoreDifferential,
+        is9Hole: round.is9Hole,
       };
     },
     async softDelete(id: string) {
@@ -324,6 +368,7 @@ test("submitForReview writes a round_submitted notification (ghs#58, moved from 
   const service = roundsService(fakeRepository(), fakeRecalculationOrchestrator(), unusedPccService(), notifications);
 
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
   await service.submitForReview(round.id);
 
   assert.equal(notifications.recordedCalls.length, 1);
@@ -339,6 +384,7 @@ test("submitForReview accepts draft, rejected, and amending -- always landing on
 
   for (const sourceStatus of ["draft", "rejected", "amending"] as const) {
     const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+    await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
     if (sourceStatus !== "draft") await repo.setStatus(round.id, sourceStatus, sourceStatus === "rejected" ? "some reason" : undefined);
 
     const result = await service.submitForReview(round.id);
@@ -362,6 +408,7 @@ test("submitForReview clears a stale rejection reason when resubmitting a reject
   const repo = fakeRepository();
   const service = roundsService(repo);
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
   await repo.setStatus(round.id, "rejected", "Missing hole 4");
 
   const result = await service.submitForReview(round.id);
@@ -405,6 +452,7 @@ test("approveRound writes a round_approved notification, and rejectRound writes 
   await service.approveRound(approvedRound.id);
 
   const rejectedRound = await service.createRound({ playerId: "player-2", teeConfigurationId: "tee-1", playedAt: "2026-05-02T09:00:00.000Z" });
+  await service.addHoleScore(rejectedRound.id, { holeNumber: 1, strokes: 4 });
   await service.submitForReview(rejectedRound.id);
   await service.rejectRound(rejectedRound.id, "Incomplete scorecard");
 
@@ -421,6 +469,7 @@ test("submitForReview: notify_round_submitted=false still writes notification_hi
   const service = roundsService(fakeRepository(), fakeRecalculationOrchestrator(), unusedPccService(), notifications, fakePlayersRepository(), systemSettings);
 
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
   await service.submitForReview(round.id);
 
   assert.equal(notifications.recordedCalls.length, 1, "the business event genuinely happened -- notification_history still gets a row");
@@ -475,6 +524,100 @@ test("addHoleScore appends to an existing round -- the real incremental-entry wo
   const updated = await service.getRound(round.id);
   assert.equal(updated!.holeScores.length, 1);
   assert.equal(updated!.holeScores[0]!.fairwayResult, "missed_left");
+});
+
+test("addHoleScore upserts -- re-recording an already-scored hole updates it in place, not a second row (ghs#92)", async () => {
+  const service = roundsService(fakeRepository());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 5, fairwayResult: "missed_left" });
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4, fairwayResult: "hit" });
+
+  const updated = await service.getRound(round.id);
+  assert.equal(updated!.holeScores.length, 1, "still exactly one row for hole 1, not two");
+  assert.equal(updated!.holeScores[0]!.strokes, 4, "the corrected value, not the original");
+  assert.equal(updated!.holeScores[0]!.fairwayResult, "hit");
+});
+
+test("addHoleScore's upsert preserves fields the correction omits, rather than resetting them to false/0/null (review finding, PR #93)", async () => {
+  const service = roundsService(fakeRepository());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 6, putts: 3, gir: true, inSand: true, penalties: 1 });
+  // A correction that only touches strokes -- everything else omitted.
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+
+  const updated = await service.getRound(round.id);
+  const hole = updated!.holeScores[0]!;
+  assert.equal(hole.strokes, 4, "the field actually corrected");
+  assert.equal(hole.putts, 3, "preserved, not reset to null");
+  assert.equal(hole.gir, true, "preserved, not reset to false");
+  assert.equal(hole.inSand, true, "preserved, not reset to false");
+  assert.equal(hole.penalties, 1, "preserved, not reset to 0");
+});
+
+test("addHoleScore's upsert still honours an explicit false/0, distinct from omission (PR #93)", async () => {
+  const service = roundsService(fakeRepository());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 6, gir: true, penalties: 2 });
+  // Explicitly clearing gir and penalties this time, not omitting them.
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 6, gir: false, penalties: 0 });
+
+  const updated = await service.getRound(round.id);
+  const hole = updated!.holeScores[0]!;
+  assert.equal(hole.gir, false, "an explicit false must still take effect, not be mistaken for omission");
+  assert.equal(hole.penalties, 0, "an explicit 0 must still take effect, not be mistaken for omission");
+});
+
+// ---------------------------------------------------------------------
+// submitForReview completeness check (ghs#92) -- 004_rounds_and_
+// scoring.sql's own file header deferred this exact rule to Phase 2.
+// FAKE_TEE_CONFIGURATION's deliberately-sparse `holes` array (only hole
+// 1) is what every submitForReview test above relies on to stay green
+// while only ever scoring hole 1 -- these tests use FULL_TEE_CONFIGURATION
+// (all 18 real holes) specifically to exercise the rule against more
+// than a single required hole.
+// ---------------------------------------------------------------------
+
+test("submitForReview rejects a round missing hole scores (ghs#92)", async () => {
+  const service = roundsService(fakeRepository());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: FULL_TEE_CONFIGURATION.id, playedAt: "2026-05-01T09:00:00.000Z" });
+
+  await assert.rejects(() => service.submitForReview(round.id), IncompleteRoundError);
+
+  // Scoring 17 of 18 required holes still isn't enough.
+  for (let holeNumber = 1; holeNumber <= 17; holeNumber++) {
+    await service.addHoleScore(round.id, { holeNumber, strokes: 4 });
+  }
+  await assert.rejects(() => service.submitForReview(round.id), IncompleteRoundError);
+});
+
+test("submitForReview succeeds once every hole in the tee configuration has a recorded score (ghs#92)", async () => {
+  const service = roundsService(fakeRepository());
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: FULL_TEE_CONFIGURATION.id, playedAt: "2026-05-01T09:00:00.000Z" });
+  for (let holeNumber = 1; holeNumber <= 18; holeNumber++) {
+    await service.addHoleScore(round.id, { holeNumber, strokes: 4 });
+  }
+
+  const result = await service.submitForReview(round.id);
+  assert.equal(result.round!.status, "pending");
+});
+
+test("submitForReview: an is9Hole round only requires 9 recorded scores, not all 18 in its (18-hole) tee configuration (ghs#92)", async () => {
+  const service = roundsService(fakeRepository());
+  const round = await service.createRound({
+    playerId: "player-1", teeConfigurationId: FULL_TEE_CONFIGURATION.id, playedAt: "2026-05-01T09:00:00.000Z", is9Hole: true,
+  });
+
+  for (let holeNumber = 1; holeNumber <= 8; holeNumber++) {
+    await service.addHoleScore(round.id, { holeNumber, strokes: 4 });
+  }
+  await assert.rejects(() => service.submitForReview(round.id), IncompleteRoundError, "8 recorded scores is still short of the 9 required");
+
+  await service.addHoleScore(round.id, { holeNumber: 9, strokes: 4 });
+  const result = await service.submitForReview(round.id);
+  assert.equal(result.round!.status, "pending", "9 recorded scores is enough for an is9Hole round, even against an 18-hole tee configuration");
 });
 
 test("approveRound rescoring then approves and recalculates via the ghs#24 orchestrator, in caller-managed (client-threaded) mode", async () => {
@@ -558,6 +701,7 @@ test("rejectRound skips recalculation when the round never had a differential --
   const recalculation = fakeRecalculationOrchestrator();
   const service = roundsService(repo, recalculation);
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
   await service.submitForReview(round.id);
 
   const result = await service.rejectRound(round.id, "Incomplete scorecard");

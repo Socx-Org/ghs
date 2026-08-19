@@ -275,3 +275,121 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole updates it (200) rather than erroring (ghs#92)", async () => {
+  const authConfig: AuthConfig = {
+    jwtSecret: "rounds-test-secret-92",
+    jwtAccessExpiresInSeconds: 900,
+    jwtRefreshExpiresInSeconds: 2_592_000,
+    mfaPendingExpiresInSeconds: 300,
+    mfaEncryptionKey: randomBytes(32),
+  };
+
+  const users = createUsersRepository(pool);
+  const players = createPlayersRepository(pool);
+  const activationTokens = createActivationTokenRepository(pool);
+  const passwordResetTokens = createPasswordResetTokenRepository(pool);
+  const refreshTokens = createRefreshTokensRepository(pool);
+  const mfaRepo = createMfaRepository(pool);
+  const clubsRepo = createClubsRepository(pool);
+  const coursesRepo = createCoursesRepository(pool);
+  const settingsRepo = createSystemSettingsRepository(pool);
+  const roundsRepo = createRoundsRepository(pool);
+  const notificationsRepository = createNotificationsRepository(pool);
+
+  const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
+  const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
+  const systemSettingsService = createSystemSettingsService(settingsRepo);
+  const authService = createAuthService({
+    pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+  });
+  const clubsService = createClubsService(clubsRepo, logger);
+  const coursesService = createCoursesService(coursesRepo, logger);
+  const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
+  const pccService = createPccService(createPccRepository(pool));
+  const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
+  const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
+  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
+  const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
+
+  const app = createApp({
+    logger, clubsService, coursesService, authService, mfaService,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, playersRepository: players, authProvider,
+  });
+
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once("listening", resolve));
+  const { port } = server.address() as { port: number };
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    // Real hole metadata, unlike this file's shared createTeeConfiguration()
+    // helper -- needed for both the completeness check and to add a real
+    // hole score at all (computeHoleAdjustment needs real hole metadata).
+    const course = await coursesRepo.create({
+      name: "Completeness Test Course",
+      country: "ES",
+      teeConfigurations: [{
+        name: "White", holeCount: 18, courseRating: 68.0, slopeRating: 113,
+        holes: [{ holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 1 }],
+      }],
+    });
+    const teeConfigurationId = course.teeConfigurations[0]!.id;
+
+    const playerUser = await adminUsersService.adminCreateUser({
+      email: "completeness-player@example.com", password: "player-pw-1", role: "player",
+      firstName: "Completeness", lastName: "Player", autoActivate: true,
+    });
+    const playerRecord = await players.findByUserId(playerUser.userId);
+    const login = await authService.login("completeness-player@example.com", "player-pw-1");
+    if (login.status !== "authenticated") throw new Error("unreachable");
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${login.tokens.accessToken}` };
+
+    const createResponse = await fetch(`${baseUrl}/api/v1/rounds`, {
+      method: "POST", headers,
+      body: JSON.stringify({ playerId: playerRecord!.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" }),
+    });
+    const round = await createResponse.json() as { id: string };
+
+    // Missing its one required hole score -- 409, not a raw 500.
+    const incompleteSubmit = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/submit`, { method: "POST", headers });
+    assert.equal(incompleteSubmit.status, 409);
+    const incompleteBody = await incompleteSubmit.json() as { error: string };
+    assert.match(incompleteBody.error, /0 of 1 required hole scores/);
+
+    // First recording of hole 1 -- 200, not 201 (ghs#92: this is now a
+    // real upsert, "record this hole's score," not a strict REST create).
+    const firstHole = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/holes`, {
+      method: "POST", headers, body: JSON.stringify({ holeNumber: 1, strokes: 6, putts: 3, gir: true }),
+    });
+    assert.equal(firstHole.status, 200);
+
+    // Re-recording the SAME hole, correcting only strokes -- updates in
+    // place, still 200, no unique-violation 500, and (review finding,
+    // PR #93) does NOT wipe putts/gir just because this request omits
+    // them -- the route must send undefined for an omitted field, not
+    // coerce it to false, or the real upsert's COALESCE-preserve
+    // behaviour never gets a chance to apply.
+    const correctedHole = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/holes`, {
+      method: "POST", headers, body: JSON.stringify({ holeNumber: 1, strokes: 4 }),
+    });
+    assert.equal(correctedHole.status, 200);
+
+    const afterCorrection = await fetch(`${baseUrl}/api/v1/rounds/${round.id}`, { headers });
+    const roundAfterCorrection = await afterCorrection.json() as {
+      holeScores: Array<{ holeNumber: number; strokes: number; putts: number | null; gir: boolean }>;
+    };
+    assert.equal(roundAfterCorrection.holeScores.length, 1, "still exactly one row for hole 1, not two");
+    assert.equal(roundAfterCorrection.holeScores[0]!.strokes, 4, "the corrected value");
+    assert.equal(roundAfterCorrection.holeScores[0]!.putts, 3, "preserved -- this correction never mentioned putts");
+    assert.equal(roundAfterCorrection.holeScores[0]!.gir, true, "preserved -- this correction never mentioned gir");
+
+    // Now complete -- submit succeeds.
+    const completeSubmit = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/submit`, { method: "POST", headers });
+    assert.equal(completeSubmit.status, 200);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

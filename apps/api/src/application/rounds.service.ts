@@ -21,6 +21,11 @@ import type { Logger } from "../logger.ts";
 
 export class RoundNotFoundError extends Error {}
 export class InvalidRoundTransitionError extends Error {}
+// ghs#92: submitForReview's completeness check -- 004_rounds_and_
+// scoring.sql's own file header explicitly deferred this ("Completeness-
+// before-submission belongs to Phase 2's workflow, not this schema"),
+// this is that moment.
+export class IncompleteRoundError extends Error {}
 
 export interface RoundWorkflowResult {
   // null only after deleteRound: a soft-deleted round is, by the same
@@ -331,6 +336,27 @@ export function createRoundsService(
           }
         },
         async (client, existing) => {
+          // ghs#92: completeness check, run inside the same locked
+          // transaction as the status change itself -- a round is
+          // "complete" when every hole its tee configuration actually
+          // defines has a recorded score, except for an is9Hole round,
+          // where the schema has no way to record which specific 9 hole
+          // numbers were intended (no front-9/back-9 field anywhere,
+          // and is_9_hole/tee_configurations.hole_count are independent,
+          // unconstrained columns -- confirmed against every real test
+          // fixture, none pairs is9Hole with a 9-hole tee configuration)
+          // -- so "at least 9 distinct scores" is the most precise rule
+          // the current schema can express for that case.
+          const teeConfiguration = await courses.getTeeConfiguration(existing.teeConfigurationId);
+          if (!teeConfiguration) throw new Error("tee configuration not found");
+          const recordedCount = await repository.countHoleScores(id, client);
+          const requiredCount = existing.is9Hole ? 9 : teeConfiguration.holes.length;
+          if (recordedCount < requiredCount) {
+            throw new IncompleteRoundError(
+              `round has ${recordedCount} of ${requiredCount} required hole scores recorded`,
+            );
+          }
+
           // setStatus's rejectionReason param defaults to null when
           // omitted (same as approveRound/reopenForAmendment below) --
           // clears a stale rejection reason from a round that's now

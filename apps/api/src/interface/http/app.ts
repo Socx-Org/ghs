@@ -22,6 +22,7 @@ import type { RateLimitTierOverride } from "./middleware/rate-limit.ts";
 import { healthRouter } from "./routes/health.ts";
 import { clubsRouter } from "./routes/clubs.ts";
 import { coursesRouter } from "./routes/courses.ts";
+import { teeConfigurationsRouter } from "./routes/tee-configurations.ts";
 import { authRouter } from "./routes/auth.ts";
 import { mfaRouter } from "./routes/mfa.ts";
 import { adminUsersRouter } from "./routes/admin-users.ts";
@@ -124,6 +125,7 @@ export function createApp(deps: AppDeps): Express {
   v1Router.use(adminPccRouter(deps.pccService, deps.authProvider));
   v1Router.use(clubsRouter(deps.clubsService, deps.authProvider));
   v1Router.use(coursesRouter(deps.coursesService, deps.authProvider));
+  v1Router.use(teeConfigurationsRouter(deps.coursesService));
   v1Router.use(roundsRouter(deps.roundsService, deps.playersRepository, deps.authProvider));
   v1Router.use(handicapOverridesRouter(deps.handicapOverridesService, deps.playersRepository, deps.authProvider));
   v1Router.use(playersRouter(deps.playersRepository, deps.authProvider));
