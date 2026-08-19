@@ -80,69 +80,67 @@ export default function AdminCreateUserPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col justify-center bg-bg-page px-4 py-12">
-      <div className="mx-auto w-full max-w-lg">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-          ← Back
+    <div className="mx-auto w-full max-w-lg px-4 py-12">
+      <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
+        ← Back
+      </Button>
+      <h1 className="mt-4 text-2xl font-semibold text-text">Create account</h1>
+      <p className="mt-2 text-sm text-text-muted">
+        New accounts default to pending activation. Check "Activate immediately" to skip the
+        activation email and make the account active right away.
+      </p>
+
+      <form className="mt-8 flex flex-col gap-6" onSubmit={handleSubmit(onSubmit)} noValidate>
+        {feedback && <Alert variant={feedback.variant}>{feedback.message}</Alert>}
+
+        {/* autoComplete="off" throughout this form, deliberately unlike
+            LoginPage's autoComplete="email" -- every field here
+            describes the *new* account holder, not the signed-in
+            admin filling out the form. Semantic tokens like "email"/
+            "given-name"/"family-name" invite the browser to autofill
+            the admin's own saved identity into someone else's record,
+            which would be a real, silent data-entry bug, not just a
+            missed convenience (review finding, PR #87). */}
+        <FormField label="Email address" error={errors.email?.message}>
+          <Input type="email" autoComplete="off" {...register("email")} />
+        </FormField>
+
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="First name" error={errors.firstName?.message}>
+            <Input type="text" autoComplete="off" {...register("firstName")} />
+          </FormField>
+          <FormField label="Last name" error={errors.lastName?.message}>
+            <Input type="text" autoComplete="off" {...register("lastName")} />
+          </FormField>
+        </div>
+
+        {canElevate && (
+          <FormField label="Role" error={errors.role?.message}>
+            <Select {...register("role")}>
+              <option value="player">Player</option>
+              <option value="admin">Admin</option>
+              <option value="super_admin">Super admin</option>
+            </Select>
+          </FormField>
+        )}
+
+        <FormField
+          label="Initial password"
+          helpText="At least 8 characters. This is the account's real password until the holder resets it themselves."
+          error={errors.password?.message}
+        >
+          <Input type="password" autoComplete="new-password" {...register("password")} />
+        </FormField>
+
+        <label className="flex items-center gap-2 text-sm text-text">
+          <Checkbox {...register("autoActivate")} />
+          Activate immediately (skip the activation email)
+        </label>
+
+        <Button type="submit" isLoading={isSubmitting} className="w-full">
+          Create account
         </Button>
-        <h1 className="mt-4 text-2xl font-semibold text-text">Create account</h1>
-        <p className="mt-2 text-sm text-text-muted">
-          New accounts default to pending activation. Check "Activate immediately" to skip the
-          activation email and make the account active right away.
-        </p>
-
-        <form className="mt-8 flex flex-col gap-6" onSubmit={handleSubmit(onSubmit)} noValidate>
-          {feedback && <Alert variant={feedback.variant}>{feedback.message}</Alert>}
-
-          {/* autoComplete="off" throughout this form, deliberately unlike
-              LoginPage's autoComplete="email" -- every field here
-              describes the *new* account holder, not the signed-in
-              admin filling out the form. Semantic tokens like "email"/
-              "given-name"/"family-name" invite the browser to autofill
-              the admin's own saved identity into someone else's record,
-              which would be a real, silent data-entry bug, not just a
-              missed convenience (review finding, PR #87). */}
-          <FormField label="Email address" error={errors.email?.message}>
-            <Input type="email" autoComplete="off" {...register("email")} />
-          </FormField>
-
-          <div className="grid grid-cols-2 gap-4">
-            <FormField label="First name" error={errors.firstName?.message}>
-              <Input type="text" autoComplete="off" {...register("firstName")} />
-            </FormField>
-            <FormField label="Last name" error={errors.lastName?.message}>
-              <Input type="text" autoComplete="off" {...register("lastName")} />
-            </FormField>
-          </div>
-
-          {canElevate && (
-            <FormField label="Role" error={errors.role?.message}>
-              <Select {...register("role")}>
-                <option value="player">Player</option>
-                <option value="admin">Admin</option>
-                <option value="super_admin">Super admin</option>
-              </Select>
-            </FormField>
-          )}
-
-          <FormField
-            label="Initial password"
-            helpText="At least 8 characters. This is the account's real password until the holder resets it themselves."
-            error={errors.password?.message}
-          >
-            <Input type="password" autoComplete="new-password" {...register("password")} />
-          </FormField>
-
-          <label className="flex items-center gap-2 text-sm text-text">
-            <Checkbox {...register("autoActivate")} />
-            Activate immediately (skip the activation email)
-          </label>
-
-          <Button type="submit" isLoading={isSubmitting} className="w-full">
-            Create account
-          </Button>
-        </form>
-      </div>
+      </form>
     </div>
   );
 }

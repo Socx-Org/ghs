@@ -72,12 +72,15 @@ describe("LoginPage", () => {
     await userEvent.type(screen.getByLabelText("Password"), "correct-password");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-    // Sign out is present on every authenticated-area screen regardless
-    // of which one a given role lands on (ghs#65: this is now
-    // PlayerDashboardPage for a player) -- proves real navigation past
-    // login without coupling this login-flow test to a specific
-    // dashboard's content.
-    await waitFor(() => expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument());
+    // AppShell's AccountMenu trigger is present on every authenticated-
+    // area screen regardless of which one a given role lands on (ghs#65:
+    // this is now PlayerDashboardPage for a player) -- proves real
+    // navigation past login without coupling this login-flow test to a
+    // specific dashboard's content. (ghs#96: was "Sign out" -- that's
+    // now inside the account menu's own closed-by-default dropdown, not
+    // findable without opening it first; the trigger itself is a
+    // simpler, equally role-agnostic marker.)
+    await waitFor(() => expect(screen.getByRole("button", { name: "Account menu" })).toBeInTheDocument());
   });
 
   it("shows the MFA step when the backend requires it, then verifies and navigates (including an MFA-enrolled user, acceptance criterion)", async () => {
@@ -100,7 +103,9 @@ describe("LoginPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 
     await waitFor(() => expect(screen.getByText(/Signed in as/)).toBeInTheDocument());
-    expect(screen.getByText("mfa@example.com", { exact: false })).toBeInTheDocument();
+    // ghs#96: AccountMenu's own trigger also shows the email now
+    // (a second real element, not a bug) -- getAllByText, not getByText.
+    expect(screen.getAllByText("mfa@example.com", { exact: false }).length).toBeGreaterThan(0);
   });
 
   it("lets the user go back from the MFA step to re-enter credentials", async () => {
@@ -222,6 +227,8 @@ describe("LoginPage", () => {
     // normally and navigates through -- the fix closes the race without
     // leaving the form stuck or the request orphaned.
     await waitFor(() => expect(screen.getByText(/Signed in as/)).toBeInTheDocument());
-    expect(screen.getByText("mfa@example.com", { exact: false })).toBeInTheDocument();
+    // ghs#96: AccountMenu's own trigger also shows the email now
+    // (a second real element, not a bug) -- getAllByText, not getByText.
+    expect(screen.getAllByText("mfa@example.com", { exact: false }).length).toBeGreaterThan(0);
   });
 });

@@ -71,6 +71,26 @@ Login was verified against the real running API with real test users seeded dire
 
 **`DashboardPlaceholder` gained a real `AppHeader`**, with an "Admin" nav item that's a genuine destination now (`navigate("/admin/users/new")`) rather than the non-functional stub the catalogue demo shows -- rendered only for `admin`/`super_admin` users, mirroring the same role check `RequireAdmin` enforces at the route level.
 
+## Application shell (`ghs#96`)
+
+**One `AppShell` applied once at the route tree, not per-page chrome.** `AppRoutes.tsx` nests every authenticated route (`/`, `/rounds/new`, `/rounds/:id`, `/admin/users/new`) inside a single `<Route element={<AppShell />}>` layout. `PlayerDashboardPage`, `DashboardPlaceholder`, `AdminCreateUserPage`, `NewRoundPage`, and `RoundEntryPage` each lost their own duplicated header/logo/sign-out code as a direct result -- that chrome now exists exactly once. `LoginPage` deliberately stays outside the shell; it has its own unauthenticated split-panel layout with nothing in common with the authenticated shell. The dev-only `/dev/components` catalogue also stays outside the shell -- it already renders its own live `AppHeader` as one of its demo sections, so wrapping it in `AppShell` too would stack two header bars rather than have it meaningfully "use" the real shell (an initial attempt to nest it was caught and reverted in PR review, `ghs#97`).
+
+**Outer wrapper is `h-screen overflow-hidden`; only `<main className="flex-1 overflow-y-auto">` scrolls.** Proved with real computed styles via the browser-automation skill, not just visual inspection: `document.body.scrollHeight === document.documentElement.clientHeight` (the body itself never scrolls) while `main`'s `overflow-y` computes to `"auto"` and the footer's `getBoundingClientRect()` stays pinned to the viewport bottom regardless of content length -- an exact match to the design doc's (`GHS-frontend-design-system-and-layout-Claude-prompt.md` §7) literal CSS sketch.
+
+**`MobileNav` is its own native-`<dialog>` implementation, not a reuse of `Modal.tsx`.** It mirrors `Modal`'s open/close mechanics (`showModal()`/`close()`, a `closingProgrammaticallyRef` guard so a parent-driven close and a user-driven close -- Escape, backdrop click, selecting a nav link -- don't both fire `onClose`) but ships its own left-edge-drawer CSS (`fixed inset-y-0 left-0 ... w-72`) rather than overriding `Modal`'s hardcoded bottom-sheet/centered-dialog classNames. A left-edge drawer and a centered/bottom-sheet modal are a genuinely different visual shape, not a className away from each other -- forcing reuse would have meant fighting Tailwind specificity for no real sharing.
+
+**`AccountMenu` is hand-rolled, not a headless-UI/Radix dependency, and is a disclosure popover, not an ARIA `menu`.** `aria-expanded` + `aria-controls` on the trigger, click-outside via a `mousedown` listener checking `containerRef.current.contains()`, Escape both closes the panel and returns focus to the trigger. It carries a stable `aria-label="Account menu"` independent of the dynamic email text it also displays -- added specifically after the shell migration broke several existing tests that had used the visible "Sign out" button (now hidden inside the closed-by-default panel) as their post-login proof of navigation; those tests now assert on the always-present, role-agnostic trigger instead. One dropdown consumer isn't enough to justify a generic reusable `Menu` primitive. Originally shipped as `role="menu"`/`role="menuitem"` (PR #97's first revision); caught in review as a real ARIA pattern mismatch -- the panel mixes static text (email/role) with a single action button, and a true `menu` role requires every child to be a `menuitem` with roving-tabindex arrow-key navigation, neither of which this panel had. Fixed by dropping both roles and relying on normal tab order instead of building out the full ARIA menu keyboard model for a panel that doesn't need menu semantics.
+
+**`ThemeToggle` lives in the header, immediately to the left of `AccountMenu`, not inside its dropdown.** It's a single always-visible action (one click, one binary state), unlike Sign out or the email/role display, which belong behind a disclosure because they're either destructive or secondary information -- putting it in the trigger row keeps the most-used action reachable without opening anything.
+
+**Nav items are existence-only, not speculative.** `useNavEntries()` (`components/navigation/nav-entries.ts`) lists exactly the routes that exist today -- Dashboard for everyone, New Round for `player`, Create Account for `admin`/`super_admin` -- per the design doc's own instruction (§9) against building navigation for screens that haven't been approved yet. Active-state styling reuses the existing "soft accent, not filled background" pattern (`bg-primary-soft text-primary`) already established by `AppHeader`'s own `NavItem`, per the design doc's explicit guidance not to overuse emerald backgrounds.
+
+**Two deliberate non-decisions, to avoid building ahead of real need:** the footer shows `© {year} Socx Organisation · {import.meta.env.MODE}` with no version string -- there's no release/build-version value populated anywhere in this app yet, and a fabricated one would be worse than none. `ThemeToggle` stays the existing 2-way light/dark switch rather than gaining a 3-way Light/Dark/System option the design doc's §8 mentions only as a possibility, not a requirement.
+
+**`useNavEntries`/`navItemClasses` live in their own `nav-entries.ts` file, not inside `Sidebar.tsx`.** Same `react-refresh/only-export-components` constraint already hit once in `#95` (`lib/dates.ts`) -- a file can't export both a component and a plain function without breaking Vite Fast Refresh, so the two entries meant to be shared between `Sidebar` and `MobileNav` were extracted rather than duplicated.
+
+**Verified end-to-end against the real running API and dev server**, both viewports and both themes: resized to real mobile and desktop widths (`page.setViewportSize`) confirming the sidebar/hamburger swap at the intended breakpoint, opened and closed the mobile drawer for real, opened `AccountMenu` and drove a real sign-out (`/auth/logout` call, tokens cleared, redirected to `/login`), toggled dark mode and re-checked contrast on the new chrome, and loaded as both a seeded `player` and a seeded `admin` to confirm role-scoped nav items render correctly.
+
 ## API client & auth foundation (`ghs#63`)
 
 **One API client, one auth/session layer** -- `apps/web/src/lib/api.ts` (the Axios client + `login`/`verifyMfa`/`logout`), `apps/web/src/lib/auth-store.ts` (token/user state), `apps/web/src/lib/jwt.ts` (payload decode), `apps/web/src/hooks/useAuth.ts`, `apps/web/src/components/domain/RequireRole.tsx`. No component calls Axios or `fetch` directly against `/api/v1/*` -- everything goes through this layer, so every subsequent feature issue (starting with Login/MFA, `#64`) builds on it rather than reinventing it.
@@ -239,9 +259,11 @@ Default 5s auto-dismiss (`duration` overridable per call, `0` disables it), paus
 
 For mutually exclusive choices (e.g. a list/table view switch) where a segmented-button visual reads better than stacked radio dots. See "Accessibility expectations" above for why it's built on real radio inputs rather than custom keyboard handling.
 
-## Deferred: Sidebar, Breadcrumb, Tabs
+## Deferred: Breadcrumb, Tabs
 
-Not built yet. The admin/player information architecture (how many sections, what nests under what) still hasn't been decided -- building nav structure ahead of real screens would be designing for a hypothetical. `AppHeader` + `NavItem` cover what's needed until a real multi-section screen requires more.
+Still not built. The admin/player information architecture (how many sections, what nests under what) still hasn't been decided beyond what `ghs#96`'s shell now covers -- building deeper nav structure ahead of real screens needing it would be designing for a hypothetical.
+
+**Sidebar is no longer deferred** -- see "Application shell (`ghs#96`)" above.
 
 ## Deferred: Tooltip
 

@@ -129,45 +129,43 @@ export default function RoundEntryPage() {
   const teeConfiguration = teeQuery.data;
 
   return (
-    <div className="flex min-h-screen flex-col bg-bg-page">
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-4 sm:p-6">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/")} className="self-start">
-          ← Back
-        </Button>
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4 sm:p-6">
+      <Button variant="ghost" size="sm" onClick={() => navigate("/")} className="self-start">
+        ← Back
+      </Button>
 
-        {roundQuery.isPending || teeQuery.isPending ? (
-          <div className="flex flex-col gap-3">
-            <Skeleton height={80} />
-            <Skeleton height={200} />
-          </div>
-        ) : roundQuery.isError ? (
-          <Alert variant="error">
-            {roundQuery.error instanceof ApiError ? roundQuery.error.message : "Couldn't load this round. Try refreshing the page."}
-          </Alert>
-        ) : teeQuery.isError ? (
-          <Alert variant="error">
-            {teeQuery.error instanceof ApiError ? teeQuery.error.message : "Couldn't load this round's tee configuration. Try refreshing the page."}
-          </Alert>
-        ) : !round || !teeConfiguration ? (
-          // Unreachable in practice -- isPending/isError above already
-          // cover every real state -- but TS can't correlate a query's
-          // isPending/isError with a separately-destructured `data`
-          // binding, so this guard is what actually narrows `round`/
-          // `teeConfiguration` to defined below (caught by `tsc -b`,
-          // stricter than this app's --noEmit typecheck).
-          null
-        ) : !EDITABLE_STATUSES.has(round.status) ? (
-          <AlreadySubmitted round={round} onBack={() => navigate("/")} />
-        ) : (
-          <HoleEntryForm
-            round={round}
-            teeConfiguration={teeConfiguration}
-            onSubmit={handleSubmit}
-            isSubmitting={submitMutation.isPending}
-            submitFeedback={submitFeedback}
-          />
-        )}
-      </div>
+      {roundQuery.isPending || teeQuery.isPending ? (
+        <div className="flex flex-col gap-3">
+          <Skeleton height={80} />
+          <Skeleton height={200} />
+        </div>
+      ) : roundQuery.isError ? (
+        <Alert variant="error">
+          {roundQuery.error instanceof ApiError ? roundQuery.error.message : "Couldn't load this round. Try refreshing the page."}
+        </Alert>
+      ) : teeQuery.isError ? (
+        <Alert variant="error">
+          {teeQuery.error instanceof ApiError ? teeQuery.error.message : "Couldn't load this round's tee configuration. Try refreshing the page."}
+        </Alert>
+      ) : !round || !teeConfiguration ? (
+        // Unreachable in practice -- isPending/isError above already
+        // cover every real state -- but TS can't correlate a query's
+        // isPending/isError with a separately-destructured `data`
+        // binding, so this guard is what actually narrows `round`/
+        // `teeConfiguration` to defined below (caught by `tsc -b`,
+        // stricter than this app's --noEmit typecheck).
+        null
+      ) : !EDITABLE_STATUSES.has(round.status) ? (
+        <AlreadySubmitted round={round} onBack={() => navigate("/")} />
+      ) : (
+        <HoleEntryForm
+          round={round}
+          teeConfiguration={teeConfiguration}
+          onSubmit={handleSubmit}
+          isSubmitting={submitMutation.isPending}
+          submitFeedback={submitFeedback}
+        />
+      )}
     </div>
   );
 }
