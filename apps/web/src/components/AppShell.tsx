@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Menu } from "lucide-react";
+import type { ReactNode } from "react";
 import { Outlet } from "react-router-dom";
 import { Button } from "./Button";
 import { Footer } from "./Footer";
@@ -8,6 +9,14 @@ import { ThemeToggle } from "./ThemeToggle";
 import { AccountMenu } from "./navigation/AccountMenu";
 import { MobileNav } from "./navigation/MobileNav";
 import { Sidebar } from "./navigation/Sidebar";
+
+export interface AppShellProps {
+  // ghs#102: optional so a non-route consumer (the authenticated branch
+  // of NotFoundRoute, AppRoutes.tsx) can wrap a specific page directly
+  // without a router <Outlet/> -- every route-driven usage still omits
+  // this and gets the default Outlet behaviour unchanged.
+  children?: ReactNode;
+}
 
 // ghs#96: the real application shell (design doc section 7) -- applied
 // once, at the route level (AppRoutes.tsx wraps every authenticated
@@ -18,7 +27,7 @@ import { Sidebar } from "./navigation/Sidebar";
 // `flex-1 overflow-y-auto` -- header and footer stay `shrink-0` and
 // visually stable; the page scrolls independently between them,
 // per the design doc's own literal CSS sketch.
-export default function AppShell() {
+export default function AppShell({ children }: AppShellProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
@@ -42,7 +51,7 @@ export default function AppShell() {
         </header>
 
         <main className="flex-1 overflow-y-auto bg-bg-page">
-          <Outlet />
+          {children ?? <Outlet />}
         </main>
 
         <Footer />

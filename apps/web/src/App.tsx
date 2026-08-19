@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import AppRoutes from "./AppRoutes";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/ToastProvider";
 
 // ghs#62/#78/#82 kept this as a placeholder (dev catalogue vs. a
@@ -25,7 +26,13 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <BrowserRouter>
-          <AppRoutes />
+          {/* ghs#102: inside BrowserRouter, not outside -- the fallback's
+              Back/Go to Dashboard actions need real router navigation,
+              and this still catches a render error anywhere in
+              AppRoutes, including inside AppShell itself. */}
+          <ErrorBoundary>
+            <AppRoutes />
+          </ErrorBoundary>
         </BrowserRouter>
       </ToastProvider>
     </QueryClientProvider>
