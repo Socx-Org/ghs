@@ -115,6 +115,15 @@ describe("NewRoundPage", () => {
     await waitFor(() => expect(mock.history.post?.some((r) => r.url === "/rounds")).toBe(true));
     const body = JSON.parse(mock.history.post!.find((r) => r.url === "/rounds")!.data);
     expect(body).toMatchObject({ playerId: "player-1", teeConfigurationId: "tee-1", isTournament: false, is9Hole: false });
+    // The date field defaults to today, unedited -- the sent playedAt
+    // must still represent today's real local calendar day once
+    // re-read locally, not a day shifted by the timezone bug this PR
+    // fixed (review finding, PR #95).
+    const sentPlayedAt = new Date(body.playedAt);
+    const now = new Date();
+    expect(sentPlayedAt.getFullYear()).toBe(now.getFullYear());
+    expect(sentPlayedAt.getMonth()).toBe(now.getMonth());
+    expect(sentPlayedAt.getDate()).toBe(now.getDate());
 
     // Navigated to the entry screen for the new round.
     expect(await screen.findByText("Holes recorded")).toBeInTheDocument();
@@ -132,5 +141,20 @@ describe("NewRoundPage", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("playedAt must be a valid date");
     expect(screen.getByRole("heading", { name: "Start a round" })).toBeInTheDocument();
+  });
+
+  it("shows real feedback, not a silent no-op, when submitted before the player profile has loaded (review finding, PR #95)", async () => {
+    // Never resolves -- simulates "still pending" at submit time.
+    mock.onGet("/players/me").reply(() => new Promise(() => {}));
+
+    renderNewRound();
+    await screen.findByRole("option", { name: "Test Links" });
+    await userEvent.selectOptions(screen.getByLabelText("Course"), "course-1");
+    await waitFor(() => expect(screen.getByLabelText("Tee")).not.toBeDisabled());
+    await userEvent.selectOptions(screen.getByLabelText("Tee"), "tee-1");
+    await userEvent.click(screen.getByRole("button", { name: "Start round" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Still loading your profile/);
+    expect(mock.history.post?.filter((r) => r.url === "/rounds")).toHaveLength(0);
   });
 });

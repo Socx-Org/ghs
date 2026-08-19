@@ -117,4 +117,35 @@ describe("HoleEntryCard", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("cannot add a hole score to a round in status 'pending'");
   });
+
+  it("switches from Saved to Unsaved changes while an already-saved hole is being edited (review finding, PR #95)", async () => {
+    renderCard({
+      existingScore: { id: "hs-1", holeNumber: 1, strokes: 5, putts: 2, gir: true, fairwayResult: "hit", inSand: false, penalties: 0, netDoubleBogeyAdjusted: 5 },
+    });
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+
+    const strokesInput = screen.getByLabelText("Strokes");
+    await userEvent.clear(strokesInput);
+    await userEvent.type(strokesInput, "7");
+
+    expect(screen.queryByText("Saved")).not.toBeInTheDocument();
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+  });
+
+  it("shows Saved again, not Unsaved changes, once the edit is actually saved (review finding, PR #95)", async () => {
+    mock.onPost("/rounds/round-1/holes").reply(200, {});
+
+    renderCard({
+      existingScore: { id: "hs-1", holeNumber: 1, strokes: 5, putts: null, gir: false, fairwayResult: null, inSand: false, penalties: 0, netDoubleBogeyAdjusted: 5 },
+    });
+    const strokesInput = screen.getByLabelText("Strokes");
+    await userEvent.clear(strokesInput);
+    await userEvent.type(strokesInput, "7");
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Save hole" }));
+
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+    expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
+  });
 });

@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Alert, Button, Checkbox, FormField, Input, Select } from "../components";
 import { ApiError, createRound, getCourse, getMyPlayerProfile, listCourses } from "../lib/api";
+import { playedAtToIsoString } from "../lib/dates";
 
 // ghs#94: the start of the round-entry flow -- course, then tee
 // configuration (its own query, only once a course is chosen, since
@@ -59,19 +60,34 @@ export default function NewRoundPage() {
   const createRoundMutation = useMutation({
     mutationFn: createRound,
     onSuccess: (round) => {
-      queryClient.invalidateQueries({ queryKey: ["players", profileQuery.data?.id, "rounds"] });
+      // The round's own playerId, not profileQuery.data?.id -- always
+      // defined by the time a round actually exists, and doesn't depend
+      // on profileQuery's state still being what it was when the
+      // mutation was kicked off (review finding, PR #95).
+      queryClient.invalidateQueries({ queryKey: ["players", round.playerId, "rounds"] });
       navigate(`/rounds/${round.id}`, { replace: true });
     },
   });
 
   async function onSubmit(values: FormValues) {
     setFeedback(null);
-    if (!profileQuery.data) return;
+    if (!profileQuery.data) {
+      // Real feedback, not a silent no-op (review finding, PR #95) --
+      // reachable if the profile query is still pending or has failed
+      // by the time the (already-populated, since courses/tees loaded
+      // independently) form is submitted.
+      setFeedback(
+        profileQuery.error instanceof ApiError
+          ? profileQuery.error.message
+          : "Still loading your profile -- try again in a moment.",
+      );
+      return;
+    }
     try {
       await createRoundMutation.mutateAsync({
         playerId: profileQuery.data.id,
         teeConfigurationId: values.teeConfigurationId,
-        playedAt: new Date(values.playedAt).toISOString(),
+        playedAt: playedAtToIsoString(values.playedAt),
         isTournament: values.isTournament,
         is9Hole: values.is9Hole,
       });

@@ -79,7 +79,8 @@ export function HoleEntryCard({ roundId, holeNumber, par, strokeIndex, existingS
     handleSubmit,
     control,
     setValue,
-    formState: { errors, isSubmitting },
+    reset,
+    formState: { errors, isSubmitting, isDirty },
   } = useForm<z.input<typeof holeFormSchema>, unknown, HoleFormValues>({
     resolver: zodResolver(holeFormSchema),
     defaultValues: {
@@ -113,6 +114,13 @@ export function HoleEntryCard({ roundId, holeNumber, par, strokeIndex, existingS
     setFeedback(null);
     try {
       await saveMutation.mutateAsync(values);
+      // Marks these just-submitted values as the new clean baseline --
+      // without this, isDirty (used below to decide whether "Saved"
+      // still accurately describes the form) would stay true forever
+      // after the very first edit, since RHF only compares against the
+      // defaultValues captured at mount, not the round query's refetched
+      // data (review finding, PR #95).
+      reset(values);
     } catch (error) {
       setFeedback(error instanceof ApiError ? error.message : "Couldn't save this hole. Try again.");
     }
@@ -131,7 +139,12 @@ export function HoleEntryCard({ roundId, holeNumber, par, strokeIndex, existingS
             Par {par} · Stroke index {strokeIndex}
           </div>
         </div>
-        {existingScore && <Badge variant="success">Saved</Badge>}
+        {/* Reflects whether the *current* form state matches what's
+            persisted, not just "was this hole ever saved" (review
+            finding, PR #95) -- editing an already-saved hole must not
+            keep claiming "Saved" once the visible values have diverged
+            from the server's copy. */}
+        {existingScore && (isDirty ? <Badge variant="warning">Unsaved changes</Badge> : <Badge variant="success">Saved</Badge>)}
       </div>
 
       <form className="mt-3 flex flex-col gap-3" onSubmit={handleSubmit(onSubmit)} noValidate>
