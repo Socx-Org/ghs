@@ -48,18 +48,25 @@ export function ListView<T>({
 
   return (
     <div className={className}>
-      <div className="mb-3 flex items-center justify-end gap-2">
-        <span className="text-sm text-text-muted">View</span>
+      <fieldset className="m-0 mb-3 flex items-center justify-end gap-2 border-0 p-0">
+        <legend className="text-sm text-text-muted">View</legend>
         <ToggleGroup
           name={`list-view-${id}`}
           value={view}
-          onChange={(next) => setView(next as ListViewMode)}
+          onChange={(next) => {
+            // Narrowed, not cast -- an options change that ever adds a
+            // third value can't silently persist something outside
+            // ListViewMode (review finding, PR #120).
+            if (next === "table" || next === "grid") {
+              setView(next);
+            }
+          }}
           options={[
             { value: "table", label: "Table" },
             { value: "grid", label: "Grid" },
           ]}
         />
-      </div>
+      </fieldset>
 
       {items.length === 0 ? (
         emptyState

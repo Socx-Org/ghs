@@ -66,6 +66,11 @@ describe("ListView", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
+  it("gives the table/grid control a real programmatic group name (fieldset/legend, review finding PR #120)", () => {
+    renderList();
+    expect(screen.getByRole("group", { name: "View" })).toBeInTheDocument();
+  });
+
   it("keeps two different ids' persisted views independent", async () => {
     renderList(ITEMS, "screen-a");
     await userEvent.click(screen.getByRole("radio", { name: "Grid" }));
