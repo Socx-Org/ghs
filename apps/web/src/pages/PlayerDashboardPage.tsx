@@ -21,6 +21,7 @@ import {
 } from "../components";
 import { useAuth } from "../hooks/useAuth";
 import { ApiError, getMyPlayerProfile, getPlayerRounds } from "../lib/api";
+import type { RoundStatus } from "../types/domain";
 
 // ghs#65: the player's real landing screen after login -- current
 // handicap index and recent rounds. No chart/trend view (issue's own
@@ -36,6 +37,14 @@ function formatPlayedAt(iso: string): string {
 function describeQueryError(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
+
+// ghs#94: draft/rejected/amending are exactly the statuses
+// RoundEntryPage's own EDITABLE_STATUSES accepts -- a pending/approved
+// round has no edit screen to send the player to yet (that's the
+// later "player round result" epic item), so those rows stay
+// non-interactive here rather than linking somewhere that would just
+// bounce them back.
+const RESUMABLE_STATUSES = new Set<RoundStatus>(["draft", "rejected", "amending"]);
 
 export default function PlayerDashboardPage() {
   const { logout } = useAuth();
@@ -86,8 +95,11 @@ export default function PlayerDashboardPage() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-text">Recent rounds</h2>
+            <Button size="sm" onClick={() => navigate("/rounds/new")}>
+              New round
+            </Button>
           </CardHeader>
           <CardBody>
             {profileQuery.isError ? (
@@ -115,6 +127,9 @@ export default function PlayerDashboardPage() {
                   <TableRow>
                     <TableHeaderCell>Date</TableHeaderCell>
                     <TableHeaderCell>Status</TableHeaderCell>
+                    <TableHeaderCell>
+                      <span className="sr-only">Action</span>
+                    </TableHeaderCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -123,6 +138,13 @@ export default function PlayerDashboardPage() {
                       <TableCell>{formatPlayedAt(round.playedAt)}</TableCell>
                       <TableCell>
                         <RoundStatusBadge status={round.status} />
+                      </TableCell>
+                      <TableCell>
+                        {RESUMABLE_STATUSES.has(round.status) && (
+                          <Button variant="ghost" size="sm" onClick={() => navigate(`/rounds/${round.id}`)}>
+                            Continue
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

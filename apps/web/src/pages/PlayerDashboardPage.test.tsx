@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import MockAdapter from "axios-mock-adapter";
+import AppRoutes from "../AppRoutes";
 import PlayerDashboardPage from "./PlayerDashboardPage";
 import { api } from "../lib/api";
 import { setTokens } from "../lib/auth-store";
@@ -41,6 +42,21 @@ function renderDashboard() {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <PlayerDashboardPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+// ghs#94: through the real AppRoutes, not PlayerDashboardPage in
+// isolation, specifically for the two navigation tests below -- real
+// end-to-end proof that clicking through actually lands on the right
+// screen, not just that the button exists.
+function renderDashboardViaRoutes() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/"]}>
+        <AppRoutes />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -150,5 +166,37 @@ describe("PlayerDashboardPage", () => {
     // not a mocked callback.
     const { getTokens } = await import("../lib/auth-store");
     await waitFor(() => expect(getTokens()).toBeNull());
+  });
+
+  it("navigates to /rounds/new via the New round button (ghs#94)", async () => {
+    mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: null, lowHandicapIndex: null });
+    mock.onGet("/players/player-1/rounds").reply(200, []);
+
+    renderDashboardViaRoutes();
+    await waitFor(() => expect(screen.getByRole("button", { name: "New round" })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "New round" }));
+
+    expect(await screen.findByRole("heading", { name: "Start a round" })).toBeInTheDocument();
+  });
+
+  it("only offers Continue for draft/rejected/amending rounds, navigating to the entry screen (ghs#94)", async () => {
+    mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: null, lowHandicapIndex: null });
+    mock.onGet("/players/player-1/rounds").reply(200, [
+      { id: "r-draft", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-01T09:00:00.000Z", status: "draft" },
+      { id: "r-approved", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-02T09:00:00.000Z", status: "approved" },
+    ]);
+
+    renderDashboardViaRoutes();
+    await screen.findByText("Draft");
+    expect(screen.getByText("Approved")).toBeInTheDocument();
+
+    // Only the draft row gets a Continue action, not the approved one.
+    const continueButtons = screen.getAllByRole("button", { name: "Continue" });
+    expect(continueButtons).toHaveLength(1);
+
+    await userEvent.click(continueButtons[0]!);
+    // Real navigation into RoundEntryPage -- "← Back" is its own
+    // deterministic, query-independent marker (same as AppRoutes.test.tsx).
+    expect(await screen.findByRole("button", { name: "← Back" })).toBeInTheDocument();
   });
 });

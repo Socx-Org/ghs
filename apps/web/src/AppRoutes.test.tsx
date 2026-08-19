@@ -104,4 +104,29 @@ describe("AppRoutes", () => {
     renderAt("/admin/users/new");
     expect(screen.getByRole("heading", { name: "Create account" })).toBeInTheDocument();
   });
+
+  it("redirects /rounds/new to /login when unauthenticated (ghs#94)", () => {
+    renderAt("/rounds/new");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("renders the new-round form at /rounds/new for an authenticated player (ghs#94)", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/rounds/new");
+    expect(screen.getByRole("heading", { name: "Start a round" })).toBeInTheDocument();
+  });
+
+  it("redirects /rounds/:id to /login when unauthenticated (ghs#94)", () => {
+    renderAt("/rounds/some-round-id");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("renders the round entry screen at /rounds/:id for an authenticated player (ghs#94)", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/rounds/some-round-id");
+    // "← Back" is static JSX, rendered regardless of how the (unmocked,
+    // in this routing-focused file) round/tee-configuration queries
+    // resolve -- a deterministic marker that RoundEntryPage rendered.
+    expect(screen.getByRole("button", { name: "← Back" })).toBeInTheDocument();
+  });
 });

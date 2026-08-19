@@ -33,3 +33,82 @@ export interface RoundSummary {
   playedAt: string;
   status: RoundStatus;
 }
+
+// Mirrors apps/api/src/data/rounds.repository.ts's HoleScore.
+export type FairwayResult = "hit" | "missed_left" | "missed_right";
+
+export interface HoleScore {
+  id: string;
+  holeNumber: number;
+  strokes: number;
+  putts: number | null;
+  gir: boolean;
+  fairwayResult: FairwayResult | null;
+  inSand: boolean;
+  penalties: number;
+  netDoubleBogeyAdjusted: number;
+}
+
+// Mirrors apps/api/src/data/rounds.repository.ts's Round -- the full
+// shape GET /rounds/:id and POST /rounds return, including holeScores
+// (unlike RoundSummary above). grossScore/adjustedGrossScore/
+// scoreDifferential/pcc/total* all stay null until admin approval
+// (ScoringService.recomputeRoundAggregates only runs then) -- the
+// frontend must never treat a null grossScore during entry as "zero,"
+// and must compute any running total itself from holeScores.
+export interface Round {
+  id: string;
+  playerId: string;
+  teeConfigurationId: string;
+  playedAt: string;
+  playingHandicap: number | null;
+  grossScore: number | null;
+  adjustedGrossScore: number | null;
+  scoreDifferential: number | null;
+  pcc: number | null;
+  totalPutts: number | null;
+  totalGir: number | null;
+  totalFairwaysHit: number | null;
+  totalPenalties: number | null;
+  isTournament: boolean;
+  is9Hole: boolean;
+  status: RoundStatus;
+  rejectionReason: string | null;
+  holeScores: HoleScore[];
+}
+
+// Mirrors apps/api/src/data/courses.repository.ts's Hole/TeeConfiguration/
+// Course/CourseSummary exactly.
+export interface Hole {
+  id: string;
+  holeNumber: number;
+  distanceYards: number;
+  par: number;
+  strokeIndex: number;
+}
+
+export interface TeeConfiguration {
+  id: string;
+  name: string;
+  holeCount: number;
+  courseRating: number;
+  slopeRating: number;
+  holes: Hole[];
+}
+
+export interface CourseSummary {
+  id: string;
+  clubId: string | null;
+  name: string;
+  city: string | null;
+  country: string | null;
+}
+
+export interface Course {
+  id: string;
+  clubId: string | null;
+  name: string;
+  city: string | null;
+  country: string | null;
+  teeConfigurations: TeeConfiguration[];
+}

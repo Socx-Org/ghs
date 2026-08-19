@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { PlayerProfile, RoundSummary, UserRole } from "../types/domain";
+import type { Course, CourseSummary, FairwayResult, HoleScore, PlayerProfile, Round, RoundSummary, TeeConfiguration, UserRole } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -201,6 +201,68 @@ export async function getMyPlayerProfile(): Promise<PlayerProfile> {
 export async function getPlayerRounds(playerId: string): Promise<RoundSummary[]> {
   const { data } = await api.get<RoundSummary[]>(`/players/${playerId}/rounds`);
   return data;
+}
+
+// ghs#94. GET /courses and GET /courses/:id are unauthenticated on the
+// backend (public reference data), but routed through `api` anyway for
+// a single consistent client -- the request interceptor attaching a
+// bearer token when one exists is harmless, the backend simply ignores
+// it on these routes.
+export async function listCourses(): Promise<CourseSummary[]> {
+  const { data } = await api.get<CourseSummary[]>("/courses");
+  return data;
+}
+
+export async function getCourse(id: string): Promise<Course> {
+  const { data } = await api.get<Course>(`/courses/${id}`);
+  return data;
+}
+
+export interface CreateRoundInput {
+  playerId: string;
+  teeConfigurationId: string;
+  playedAt: string;
+  isTournament?: boolean;
+  is9Hole?: boolean;
+}
+
+export async function createRound(input: CreateRoundInput): Promise<Round> {
+  const { data } = await api.post<Round>("/rounds", input);
+  return data;
+}
+
+export async function getRound(id: string): Promise<Round> {
+  const { data } = await api.get<Round>(`/rounds/${id}`);
+  return data;
+}
+
+export async function getTeeConfiguration(id: string): Promise<TeeConfiguration> {
+  const { data } = await api.get<TeeConfiguration>(`/tee-configurations/${id}`);
+  return data;
+}
+
+export interface AddHoleScoreInput {
+  holeNumber: number;
+  strokes: number;
+  putts?: number;
+  gir?: boolean;
+  fairwayResult?: FairwayResult;
+  inSand?: boolean;
+  penalties?: number;
+}
+
+// ghs#92's real upsert -- an omitted optional field preserves whatever
+// was already recorded for that hole, it does not reset it. Only the
+// fields the caller actually includes here are sent at all (see
+// HoleEntryCard, which only spreads in fields the player touched).
+export async function addHoleScore(roundId: string, input: AddHoleScoreInput): Promise<HoleScore> {
+  const { data } = await api.post<HoleScore>(`/rounds/${roundId}/holes`, input);
+  return data;
+}
+
+export async function submitRound(roundId: string): Promise<Round> {
+  const { data } = await api.post<{ round: Round }>(`/rounds/${roundId}/submit`);
+  return data.round;
 }
 
 // Always clears local state, regardless of whether the network call
