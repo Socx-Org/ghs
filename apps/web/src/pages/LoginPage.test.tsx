@@ -40,13 +40,14 @@ afterEach(() => {
 // instead of retrying with backoff.
 function renderLogin() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const utils = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/login"]}>
         <AppRoutes />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...utils, queryClient };
 }
 
 describe("LoginPage", () => {
@@ -65,6 +66,17 @@ describe("LoginPage", () => {
     await userEvent.click(link);
 
     expect(await screen.findByRole("heading", { name: "Create an account" })).toBeInTheDocument();
+  });
+
+  it("keeps the Create an account link visible through a background refetch failure (review finding, PR #123)", async () => {
+    mock.onGet("/auth/self-registration-enabled").reply(200, { enabled: true });
+    const { queryClient } = renderLogin();
+    await screen.findByRole("link", { name: "Create an account" });
+
+    mock.onGet("/auth/self-registration-enabled").reply(500, { error: "internal server error" });
+    await queryClient.refetchQueries({ queryKey: ["auth", "self-registration-enabled"] });
+
+    expect(screen.getByRole("link", { name: "Create an account" })).toBeInTheDocument();
   });
 
   it("shows client-side validation errors without calling the API", async () => {

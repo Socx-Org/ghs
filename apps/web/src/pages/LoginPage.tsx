@@ -165,8 +165,16 @@ export default function LoginPage() {
   const [step, setStep] = useState<LoginStep>({ kind: "credentials" });
   const navigate = useNavigate();
   const location = useLocation();
-  // ghs#105. Hidden while pending/erroring, not just while disabled --
-  // fails closed, same reasoning as RegisterPage's own gate.
+  // ghs#105. Gated on `.data === true` below, deliberately not on
+  // isError -- fails closed on the initial fetch (data stays undefined
+  // until a real success), but a later *background* refetch failure
+  // (e.g. window refocus) leaves isError true while TanStack Query
+  // still retains the last-known-good `data` (confirmed in @tanstack/
+  // query-core's reducer). Reacting to that would flicker this link
+  // away on a transient network blip after it was already correctly
+  // showing -- same reasoning as RegisterPage's own gate, applied
+  // consistently here (review finding, PR #123, prompted fixing this
+  // comment to actually describe what the code below does).
   const selfRegistrationQuery = useQuery({ queryKey: ["auth", "self-registration-enabled"], queryFn: getSelfRegistrationEnabled });
 
   function handleSuccess() {

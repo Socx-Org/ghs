@@ -22,8 +22,20 @@ const registerSchema = z.object({
 });
 type RegisterFormValues = z.infer<typeof registerSchema>;
 
+const REGISTRATION_UNAVAILABLE_MESSAGE = "Self-registration is currently disabled. Contact your club administrator for an account.";
+
+// ghs#105 review fix: POST /auth/register's only 403 is
+// self_registration_disabled (the setting was toggled off between this
+// page loading and the user submitting -- a real, if narrow, race). The
+// raw error code isn't user-facing copy; map it to the same friendly
+// message the disabled-gate state already shows, rather than surfacing
+// error.message verbatim.
 function describeError(error: unknown): string {
-  return error instanceof ApiError ? error.message : "Something went wrong. Please try again.";
+  if (error instanceof ApiError) {
+    if (error.status === 403) return REGISTRATION_UNAVAILABLE_MESSAGE;
+    return error.message;
+  }
+  return "Something went wrong. Please try again.";
 }
 
 function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
@@ -101,14 +113,22 @@ export default function RegisterPage() {
               <Skeleton height={44} />
               <Skeleton height={44} />
             </div>
-          ) : enabledQuery.isError || !enabledQuery.data ? (
-            // Fails closed -- a query error is treated the same as
-            // "disabled", not assumed to mean "enabled."
+          ) : enabledQuery.data !== true ? (
+            // Fails closed on the *initial* fetch (data stays undefined
+            // if it never succeeds) -- but deliberately does NOT key off
+            // isError once real data has been obtained. A background
+            // refetch (e.g. window refocus) that fails leaves isError
+            // true while TanStack Query still retains the last-known
+            // successful `data` (confirmed directly in @tanstack/query-
+            // core's reducer -- the "error" case spreads ...state,
+            // preserving data, only status flips). Gating on isError too
+            // would flicker this page (or a mid-fill form) into "not
+            // available" on a transient network blip, which is worse
+            // than briefly trusting stale-but-correct data (review
+            // finding, PR #123).
             <>
               <h1 className="mt-8 text-2xl font-semibold text-text">Registration isn't available</h1>
-              <p className="mt-2 text-sm text-text-muted">
-                Self-registration is currently disabled. Contact your club administrator for an account.
-              </p>
+              <p className="mt-2 text-sm text-text-muted">{REGISTRATION_UNAVAILABLE_MESSAGE}</p>
               <BackToSignIn />
             </>
           ) : registered ? (

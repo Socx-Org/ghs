@@ -23,13 +23,14 @@ afterEach(() => {
 
 function renderRegister() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const utils = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/register"]}>
         <AppRoutes />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...utils, queryClient };
 }
 
 async function fillForm() {
@@ -111,6 +112,36 @@ describe("RegisterPage", () => {
 
     expect(await screen.findByText("internal server error")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Check your email" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the form visible through a background refetch failure, not just the initial fetch (review finding, PR #123)", async () => {
+    mock.onGet("/auth/self-registration-enabled").reply(200, { enabled: true });
+    const { queryClient } = renderRegister();
+    await screen.findByRole("button", { name: "Create account" });
+
+    // Simulate a transient background refetch failure (e.g. a window
+    // refocus) -- real TanStack Query behaviour, confirmed directly in
+    // @tanstack/query-core's reducer: status flips to "error" but the
+    // last-known-good `data` is retained, not cleared. The form must
+    // not flicker away because of this.
+    mock.onGet("/auth/self-registration-enabled").reply(500, { error: "internal server error" });
+    await queryClient.refetchQueries({ queryKey: ["auth", "self-registration-enabled"] });
+
+    expect(screen.getByRole("button", { name: "Create account" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Registration isn't available" })).not.toBeInTheDocument();
+  });
+
+  it("maps a mid-session self_registration_disabled (setting toggled off after this page loaded) to friendly copy, not the raw error code (review finding, PR #123)", async () => {
+    mock.onGet("/auth/self-registration-enabled").reply(200, { enabled: true });
+    mock.onPost("/auth/register").reply(403, { error: "self_registration_disabled" });
+    renderRegister();
+    await screen.findByRole("button", { name: "Create account" });
+
+    await fillForm();
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(await screen.findByText("Self-registration is currently disabled. Contact your club administrator for an account.")).toBeInTheDocument();
+    expect(screen.queryByText("self_registration_disabled")).not.toBeInTheDocument();
   });
 
   it("Back to sign in navigates to the real login page", async () => {
