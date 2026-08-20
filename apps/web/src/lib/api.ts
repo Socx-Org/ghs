@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { Course, CourseSummary, FairwayResult, HoleScore, PlayerProfile, Round, RoundSummary, TeeConfiguration, UserRole } from "../types/domain";
+import type { AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PlayerProfile, Round, RoundSummary, TeeConfiguration, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -188,6 +188,28 @@ export interface CreateUserResult {
 export async function createUser(input: CreateUserRequest): Promise<CreateUserResult> {
   const { data } = await api.post<CreateUserResult>("/admin/users", input);
   return data;
+}
+
+export interface ListUsersResult {
+  items: AdminUserListItem[];
+  total: number;
+}
+
+// ghs#104. No filter/pagination params sent -- the backend's own
+// defaults (limit 50, no filter) are the entire scope this issue's own
+// list screen needs; a UI for filtering/pagination is explicit
+// non-scope (see the issue), not merely unimplemented.
+export async function listUsers(): Promise<ListUsersResult> {
+  const { data } = await api.get<ListUsersResult>("/admin/users");
+  return data;
+}
+
+export async function setUserStatus(userId: string, status: Extract<UserStatus, "active" | "disabled">): Promise<void> {
+  await api.patch(`/admin/users/${userId}/status`, { status });
+}
+
+export async function deleteUser(userId: string): Promise<void> {
+  await api.delete(`/admin/users/${userId}`);
 }
 
 // ghs#65. Routed through `api`, same reasoning as createUser above --
