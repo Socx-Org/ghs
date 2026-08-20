@@ -554,6 +554,90 @@ test("POST /auth/change-password requires authentication", async () => {
 });
 
 // ---------------------------------------------------------------------
+// ghs#106: POST /auth/activate's three distinguishable failure codes,
+// over real HTTP -- the frontend's activation-landing screen renders
+// different UI per code, so the wire contract itself (not just the
+// service-layer error class) needs proving.
+// ---------------------------------------------------------------------
+
+async function activationToken(baseUrl: string, adminToken: string, email: string): Promise<{ token: string; userId: string }> {
+  const created = await fetch(`${baseUrl}/api/v1/admin/users`, {
+    method: "POST",
+    headers: authHeader(adminToken),
+    body: JSON.stringify({ email, password: "activation-test-pw", role: "player", firstName: "Activation", lastName: "Test", autoActivate: false }),
+  });
+  const { userId } = await created.json();
+  const outbox = await pool.query<{ payload: { token: string } }>(
+    `SELECT o.payload FROM notification_outbox o
+     JOIN notification_history h ON h.id = o.notification_history_id
+     WHERE h.user_id = $1 AND h.event_type = 'account_activation_admin_invite'
+     ORDER BY o.created_at DESC LIMIT 1`,
+    [userId],
+  );
+  return { token: outbox.rows[0]!.payload.token, userId };
+}
+
+test("POST /auth/activate: 200 on a real valid token, then a real unknown token is invalid_token", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const { token } = await activationToken(baseUrl, superAdmin.token, "http-activate-ok@example.com");
+
+    const okRes = await fetch(`${baseUrl}/api/v1/auth/activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    assert.equal(okRes.status, 200);
+
+    const unknownRes = await fetch(`${baseUrl}/api/v1/auth/activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "this-token-was-never-issued" }),
+    });
+    assert.equal(unknownRes.status, 400);
+    assert.deepEqual(await unknownRes.json(), { error: "invalid_token" });
+  });
+});
+
+test("POST /auth/activate: already_used_token on a real token's second use", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const { token } = await activationToken(baseUrl, superAdmin.token, "http-activate-reused@example.com");
+
+    await fetch(`${baseUrl}/api/v1/auth/activate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) });
+    const secondRes = await fetch(`${baseUrl}/api/v1/auth/activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    assert.equal(secondRes.status, 400);
+    assert.deepEqual(await secondRes.json(), { error: "already_used_token" });
+  });
+});
+
+test("POST /auth/activate: expired_token for a real token whose real row is backdated in Postgres", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const { token, userId } = await activationToken(baseUrl, superAdmin.token, "http-activate-expired@example.com");
+
+    // Real token state manipulated directly in Postgres -- the 24h TTL
+    // can't be waited out in a test.
+    await pool.query("UPDATE account_activation_tokens SET expires_at = now() - interval '1 hour' WHERE user_id = $1", [userId]);
+
+    const res = await fetch(`${baseUrl}/api/v1/auth/activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "expired_token" });
+  });
+});
+
+// ---------------------------------------------------------------------
 // Authentication boundary: JWT signature verification is what makes
 // role-based authorization trustworthy at all. Retained as verification
 // of the EXISTING boundary (jwt.verify, already in place since Phase 1),

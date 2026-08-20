@@ -198,6 +198,31 @@ export async function getSelfRegistrationEnabled(): Promise<boolean> {
   }
 }
 
+// ghs#106. Unauthenticated, same bootstrapClient reasoning as above.
+// error.message is one of the backend's own stable codes on failure
+// (expired_token | already_used_token | invalid_token) -- ActivationPage
+// maps these itself, this function doesn't turn them into copy.
+export async function activateAccount(token: string): Promise<{ message: string }> {
+  try {
+    const { data } = await bootstrapClient.post<{ message: string }>("/auth/activate", { token });
+    return data;
+  } catch (error) {
+    throw new ApiError(errorMessage(error), axios.isAxiosError(error) ? error.response?.status : undefined);
+  }
+}
+
+// ghs#106. Always the same response regardless of whether the email
+// exists or the account already needs activation -- the backend's own
+// enumeration protection; the UI must not contradict it.
+export async function resendActivation(email: string): Promise<{ message: string }> {
+  try {
+    const { data } = await bootstrapClient.post<{ message: string }>("/auth/resend-activation", { email });
+    return data;
+  } catch (error) {
+    throw new ApiError(errorMessage(error), axios.isAxiosError(error) ? error.response?.status : undefined);
+  }
+}
+
 export interface CreateUserRequest {
   email: string;
   password: string;
