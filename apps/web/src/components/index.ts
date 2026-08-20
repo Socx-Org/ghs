@@ -31,5 +31,6 @@ export * from "./navigation/AccountMenu";
 export * from "./navigation/nav-entries";
 export * from "./domain/RoundStatusBadge";
 export * from "./domain/RoleBadge";
+export * from "./domain/AccountStatusBadge";
 export * from "./domain/RequireRole";
 export * from "./domain/HoleEntryCard";

@@ -53,6 +53,17 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("link", { name: /New Round/ })).not.toBeInTheDocument();
   });
 
+  it("shows Accounts only for admin/super_admin (ghs#104)", () => {
+    setTokens(tokensFor("player"));
+    renderSidebar();
+    expect(screen.queryByRole("link", { name: /^Accounts$/ })).not.toBeInTheDocument();
+
+    cleanup();
+    setTokens(tokensFor("admin"));
+    renderSidebar();
+    expect(screen.getByRole("link", { name: /^Accounts$/ })).toBeInTheDocument();
+  });
+
   it("marks the current route's link as active", () => {
     setTokens(tokensFor("player"));
     renderSidebar("/rounds/new");

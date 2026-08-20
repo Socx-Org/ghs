@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import AppShell from "./components/AppShell";
 import ComponentsCatalogue from "./ComponentsCatalogue";
 import { useAuth } from "./hooks/useAuth";
+import AdminAccountsPage from "./pages/AdminAccountsPage";
 import AdminCreateUserPage from "./pages/AdminCreateUserPage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
 import LoginPage from "./pages/LoginPage";
@@ -65,6 +66,7 @@ export default function AppRoutes() {
           <Route path="/rounds/new" element={<NewRoundPage />} />
           <Route path="/rounds/:id" element={<RoundEntryPage />} />
           <Route element={<RequireAdmin />}>
+            <Route path="/admin/users" element={<AdminAccountsPage />} />
             <Route path="/admin/users/new" element={<AdminCreateUserPage />} />
           </Route>
         </Route>

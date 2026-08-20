@@ -9,6 +9,23 @@ export type RoundStatus = "draft" | "pending" | "approved" | "rejected" | "amend
 
 export type UserRole = "player" | "admin" | "super_admin";
 
+export type UserStatus = "pending_verification" | "active" | "disabled" | "deleted";
+
+// Mirrors apps/api/src/application/admin-users.service.ts's
+// AdminUserListItem exactly (ghs#98) -- firstName/lastName are null for
+// admin/super_admin accounts, which have no linked players row at all
+// (IAM-020's strict separation; adminCreateUser only ever links one for
+// role === "player"). Not a data gap to paper over on this side either.
+export interface AdminUserListItem {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  createdAt: string;
+  firstName: string | null;
+  lastName: string | null;
+}
+
 // Mirrors apps/api/src/interface/http/routes/players.ts's
 // toPlayerProfileResponse (ghs#60/#89) -- userId deliberately excluded,
 // same reasoning as the backend's own DTO (PR #75: an internal
