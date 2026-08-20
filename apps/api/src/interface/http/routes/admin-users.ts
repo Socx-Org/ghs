@@ -73,8 +73,11 @@ export function adminUsersRouter(service: AdminUsersService, mfaService: MfaServ
   // route, not a "/me"-vs-":id" ordering concern like players.ts has).
   //
   // Query parameters (all optional):
-  //   role    -- one of VALID_ROLES above; 400 if present and invalid.
-  //   status  -- one of VALID_STATUSES above; 400 if present and invalid.
+  //   role    -- one of VALID_ROLES above; 400 if present and invalid,
+  //              including a non-string value (e.g. a repeated
+  //              ?role=a&role=b, which Express parses as a string[]).
+  //   status  -- one of VALID_STATUSES above; same 400-on-anything-else
+  //              rule as role, including a repeated/array value.
   //              No default exclusion of 'deleted' -- unlike players'/
   //              courses' deleted_at soft-delete convention, status is
   //              a first-class value here, and an admin listing accounts
@@ -88,9 +91,14 @@ export function adminUsersRouter(service: AdminUsersService, mfaService: MfaServ
     try {
       const { role, status, limit, offset } = req.query;
 
+      // ghs#98 review fix: a repeated query param (?role=admin&role=player)
+      // parses to a string[], not a string -- explicitly rejected here,
+      // not silently treated as "no filter" by falling through a
+      // typeof === "string" check the way the first version of this
+      // route did (review finding, PR #121).
       let resolvedRole: (typeof VALID_ROLES)[number] | undefined;
-      if (typeof role === "string" && role.length > 0) {
-        if (!VALID_ROLES.includes(role as (typeof VALID_ROLES)[number])) {
+      if (role !== undefined) {
+        if (typeof role !== "string" || !VALID_ROLES.includes(role as (typeof VALID_ROLES)[number])) {
           res.status(400).json({ error: "role must be one of: player, admin, super_admin" });
           return;
         }
@@ -98,8 +106,8 @@ export function adminUsersRouter(service: AdminUsersService, mfaService: MfaServ
       }
 
       let resolvedStatus: (typeof VALID_STATUSES)[number] | undefined;
-      if (typeof status === "string" && status.length > 0) {
-        if (!VALID_STATUSES.includes(status as (typeof VALID_STATUSES)[number])) {
+      if (status !== undefined) {
+        if (typeof status !== "string" || !VALID_STATUSES.includes(status as (typeof VALID_STATUSES)[number])) {
           res.status(400).json({ error: "status must be one of: pending_verification, active, disabled, deleted" });
           return;
         }

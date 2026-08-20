@@ -400,6 +400,19 @@ test("GET /admin/users?role=invalid is rejected at input validation, not silentl
   });
 });
 
+test("GET /admin/users rejects a repeated role/status query param (parsed as an array) instead of silently dropping the filter (review finding, PR #121)", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+
+    const roleRes = await fetch(`${baseUrl}/api/v1/admin/users?role=admin&role=player`, { headers: authHeader(superAdmin.token) });
+    assert.equal(roleRes.status, 400, "an array-valued role must be rejected, not treated as no filter");
+
+    const statusRes = await fetch(`${baseUrl}/api/v1/admin/users?status=active&status=disabled`, { headers: authHeader(superAdmin.token) });
+    assert.equal(statusRes.status, 400, "an array-valued status must be rejected, not treated as no filter");
+  });
+});
+
 test("DELETE /admin/users/:id soft-deletes a different user", async () => {
   const ctx = buildApp();
   await withServer(ctx.app, async (baseUrl) => {
