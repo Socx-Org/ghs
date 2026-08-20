@@ -270,6 +270,14 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     async changePassword(userId, currentPassword, newPassword) {
       const user = await users.findById(userId);
       if (!user) throw new Error("account not found");
+      // Same status gate as login/refresh/completeMfaLogin -- an access
+      // token stays valid until its own TTL regardless of a status
+      // change that happens after it was issued (no ordinary resource
+      // route re-checks status per request), so without this a
+      // disabled/deleted/pending account could still set new credentials
+      // for as long as its existing token remains valid (review finding,
+      // PR #121).
+      if (user.status !== "active") throw new Error("account not active");
 
       const currentOk = await verifyPassword(user.passwordHash, currentPassword);
       if (!currentOk) throw new Error("current password is incorrect");

@@ -505,3 +505,21 @@ test("changePassword: rejects an incorrect current password, leaving the real pa
   const loginResult = await s.authService.login("change-pw-wrong@example.com", "original-password");
   assert.equal(loginResult.status, "authenticated", "the original password must still work -- the rejected attempt made no change");
 });
+
+test("changePassword: rejects a disabled account, even with the correct current password (review finding, PR #121)", async () => {
+  const s = buildServices();
+  const created = await s.adminUsersService.adminCreateUser({
+    email: "change-pw-disabled@example.com", password: "original-password", role: "player",
+    firstName: "Change", lastName: "Disabled", autoActivate: true,
+  });
+  await s.adminUsersService.setUserStatus(created.userId, "disabled");
+
+  // An access token issued before the disable stays valid until its own
+  // TTL -- this proves changePassword itself re-checks status rather
+  // than trusting the caller merely holding a still-valid token.
+  await assert.rejects(() => s.authService.changePassword(created.userId, "original-password", "brand-new-password"));
+
+  await s.adminUsersService.setUserStatus(created.userId, "active");
+  const loginResult = await s.authService.login("change-pw-disabled@example.com", "original-password");
+  assert.equal(loginResult.status, "authenticated", "the original password must still be the real one -- the rejected attempt made no change");
+});

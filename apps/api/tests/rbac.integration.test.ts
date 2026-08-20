@@ -496,6 +496,33 @@ test("POST /auth/change-password rejects an incorrect current password", async (
   });
 });
 
+test("POST /auth/change-password rejects a disabled account even with the correct current password, and its still-valid access token (review finding, PR #121)", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const created = await fetch(`${baseUrl}/api/v1/admin/users`, {
+      method: "POST",
+      headers: authHeader(superAdmin.token),
+      body: JSON.stringify({ email: "http-change-pw-disabled@example.com", password: "http-original-pw", role: "player", firstName: "Http", lastName: "Disabled", autoActivate: true }),
+    });
+    const { userId } = await created.json();
+    const tokens = await ctx.authProvider.issueTokens((await ctx.users.findById(userId))!, ["pwd"]);
+
+    await fetch(`${baseUrl}/api/v1/admin/users/${userId}/status`, {
+      method: "PATCH",
+      headers: authHeader(superAdmin.token),
+      body: JSON.stringify({ status: "disabled" }),
+    });
+
+    const res = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+      method: "POST",
+      headers: authHeader(tokens.accessToken),
+      body: JSON.stringify({ currentPassword: "http-original-pw", newPassword: "http-brand-new-pw" }),
+    });
+    assert.equal(res.status, 400, "the disabled account's still-valid access token must not be enough to change its password");
+  });
+});
+
 test("POST /auth/change-password requires authentication", async () => {
   const ctx = buildApp();
   await withServer(ctx.app, async (baseUrl) => {
