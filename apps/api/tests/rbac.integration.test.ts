@@ -167,6 +167,12 @@ const ADMIN_GATED_ROUTES: RouteCase[] = [
   { name: "PUT /admin/settings/notifications/:type", method: "PUT", path: "/admin/settings/notifications/round-submitted", body: { value: true } },
   { name: "PATCH /admin/users/:id/status", method: "PATCH", path: "/admin/users/00000000-0000-0000-0000-000000000000/status", body: { status: "active" } },
   { name: "DELETE /admin/users/:id/mfa", method: "DELETE", path: "/admin/users/00000000-0000-0000-0000-000000000000/mfa" },
+  // ghs#98. The dummy UUID never matches the caller's own real id (a
+  // fresh Postgres-generated UUID per createUserWithRole call below), so
+  // this never trips the self-deletion guard -- that's covered by its
+  // own dedicated test further down.
+  { name: "GET /admin/users", method: "GET", path: "/admin/users" },
+  { name: "DELETE /admin/users/:id", method: "DELETE", path: "/admin/users/00000000-0000-0000-0000-000000000000" },
   // requireAdmin runs before the route body -- a dummy UUID still proves
   // the authorization gate (player 401/403; admin/super_admin clear it
   // and reach RoundNotFoundError -> 404, never 401/403), same pattern
@@ -356,6 +362,150 @@ test("'viewer' cannot be introduced through the database model either -- rejecte
     () => pool.query("INSERT INTO users (email, password_hash, role, status) VALUES ('viewer-bypass@example.com', 'x', 'viewer', 'active')"),
     (err: unknown) => (err as { code?: string }).code === "23514",
   );
+});
+
+// ---------------------------------------------------------------------
+// ghs#98: GET /admin/users, DELETE /admin/users/:id, GET /auth/me,
+// POST /auth/change-password.
+// ---------------------------------------------------------------------
+
+test("GET /admin/users returns real accounts with the expected shape, never a password hash", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    await fetch(`${baseUrl}/api/v1/admin/users`, {
+      method: "POST",
+      headers: authHeader(superAdmin.token),
+      body: JSON.stringify({ email: "http-list@example.com", password: "http-list-pw-1", role: "player", firstName: "Http", lastName: "List", autoActivate: true }),
+    });
+
+    const res = await fetch(`${baseUrl}/api/v1/admin/users`, { headers: authHeader(superAdmin.token) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(body.total >= 2, "at least the seeded super_admin and the just-created player");
+    const created = body.items.find((i: { email: string }) => i.email === "http-list@example.com");
+    assert.ok(created);
+    assert.equal(created.firstName, "Http");
+    assert.equal("passwordHash" in created, false);
+    assert.equal("password_hash" in created, false);
+  });
+});
+
+test("GET /admin/users?role=invalid is rejected at input validation, not silently ignored", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const res = await fetch(`${baseUrl}/api/v1/admin/users?role=viewer`, { headers: authHeader(superAdmin.token) });
+    assert.equal(res.status, 400);
+  });
+});
+
+test("DELETE /admin/users/:id soft-deletes a different user", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const target = await createUserWithRole(ctx, "player");
+
+    const res = await fetch(`${baseUrl}/api/v1/admin/users/${target.user.id}`, { method: "DELETE", headers: authHeader(superAdmin.token) });
+    assert.equal(res.status, 200);
+
+    const reloaded = await ctx.users.findById(target.user.id);
+    assert.equal(reloaded!.status, "deleted");
+  });
+});
+
+test("DELETE /admin/users/:id rejects an admin attempting to delete their own account", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+
+    const res = await fetch(`${baseUrl}/api/v1/admin/users/${admin.user.id}`, { method: "DELETE", headers: authHeader(admin.token) });
+    assert.equal(res.status, 400);
+
+    const reloaded = await ctx.users.findById(admin.user.id);
+    assert.equal(reloaded!.status, "active", "the rejected self-deletion attempt made no change at all");
+  });
+});
+
+test("GET /auth/me returns the caller's own account info, including for an admin with no players row", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+    const res = await fetch(`${baseUrl}/api/v1/auth/me`, { headers: authHeader(admin.token) });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.email, admin.user.email);
+    assert.equal(body.role, "admin");
+    assert.equal(body.firstName, null);
+  });
+});
+
+test("GET /auth/me requires authentication", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/v1/auth/me`);
+    assert.equal(res.status, 401);
+  });
+});
+
+test("POST /auth/change-password: real flow, then the old password is rejected and the new one works", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const created = await fetch(`${baseUrl}/api/v1/admin/users`, {
+      method: "POST",
+      headers: authHeader(superAdmin.token),
+      body: JSON.stringify({ email: "http-change-pw@example.com", password: "http-original-pw", role: "player", firstName: "Http", lastName: "ChangePw", autoActivate: true }),
+    });
+    const { userId } = await created.json();
+    const tokens = await ctx.authProvider.issueTokens((await ctx.users.findById(userId))!, ["pwd"]);
+
+    const changeRes = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+      method: "POST",
+      headers: authHeader(tokens.accessToken),
+      body: JSON.stringify({ currentPassword: "http-original-pw", newPassword: "http-brand-new-pw" }),
+    });
+    assert.equal(changeRes.status, 200);
+
+    const loginOld = await fetch(`${baseUrl}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "http-change-pw@example.com", password: "http-original-pw" }),
+    });
+    assert.equal(loginOld.status, 401);
+
+    const loginNew = await fetch(`${baseUrl}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "http-change-pw@example.com", password: "http-brand-new-pw" }),
+    });
+    assert.equal(loginNew.status, 200);
+  });
+});
+
+test("POST /auth/change-password rejects an incorrect current password", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const player = await createUserWithRole(ctx, "player");
+    const res = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+      method: "POST",
+      headers: authHeader(player.token),
+      body: JSON.stringify({ currentPassword: "totally-wrong", newPassword: "new-password-123" }),
+    });
+    assert.equal(res.status, 400);
+  });
+});
+
+test("POST /auth/change-password requires authentication", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/v1/auth/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword: "a", newPassword: "brand-new-password" }),
+    });
+    assert.equal(res.status, 401);
+  });
 });
 
 // ---------------------------------------------------------------------

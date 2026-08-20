@@ -19,9 +19,44 @@ export interface AdminCreateUserInput {
   autoActivate: boolean;
 }
 
+export interface AdminUserListItem {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  createdAt: string;
+  // ghs#98: null for admin/super_admin accounts -- users/players are
+  // strictly separated (IAM-020), and adminCreateUser only ever links a
+  // players row for role === "player". Not a data gap to paper over: an
+  // admin/super_admin account genuinely has no name captured anywhere
+  // today (AccountMenu itself only ever displays email for the same
+  // reason). The list screen consuming this shows "--" for these rows,
+  // not a fabricated name.
+  firstName: string | null;
+  lastName: string | null;
+}
+
+export interface ListUsersInput {
+  role?: UserRole;
+  status?: UserStatus;
+  limit: number;
+  offset: number;
+}
+
+export interface ListUsersResult {
+  items: AdminUserListItem[];
+  total: number;
+}
+
 export interface AdminUsersService {
   adminCreateUser(input: AdminCreateUserInput): Promise<{ userId: string }>;
   setUserStatus(userId: string, status: Extract<UserStatus, "active" | "disabled">): Promise<void>;
+  listUsers(input: ListUsersInput): Promise<ListUsersResult>;
+  // ghs#98: soft-delete only (status='deleted', already a reserved value
+  // in the schema's own CHECK constraint) -- the players row, if any,
+  // deliberately survives untouched, since rounds/handicap history must
+  // remain queryable regardless of account deletion.
+  deleteUser(userId: string): Promise<void>;
 }
 
 export function createAdminUsersService(
@@ -87,6 +122,42 @@ export function createAdminUsersService(
 
     async setUserStatus(userId, status) {
       await users.setStatus(userId, status);
+    },
+
+    async listUsers(input) {
+      const { users: userRows, total } = await users.list({
+        role: input.role,
+        status: input.status,
+        limit: input.limit,
+        offset: input.offset,
+      });
+
+      const playerRows = await players.findByUserIds(userRows.map((u) => u.id));
+      const playersByUserId = new Map(playerRows.filter((p) => p.userId !== null).map((p) => [p.userId as string, p]));
+
+      // Built field-by-field, not a spread of the raw User row -- that
+      // row still carries passwordHash, and this is the one place a
+      // silent future field addition to User could otherwise leak
+      // straight into an admin-listing response (same discipline as
+      // players.ts's toPlayerProfileResponse for userId).
+      const items: AdminUserListItem[] = userRows.map((u) => {
+        const player = playersByUserId.get(u.id);
+        return {
+          id: u.id,
+          email: u.email,
+          role: u.role,
+          status: u.status,
+          createdAt: u.createdAt,
+          firstName: player?.firstName ?? null,
+          lastName: player?.lastName ?? null,
+        };
+      });
+
+      return { items, total };
+    },
+
+    async deleteUser(userId) {
+      await users.setStatus(userId, "deleted");
     },
   };
 }

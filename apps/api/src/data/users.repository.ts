@@ -13,6 +13,18 @@ export interface User {
   createdAt: string;
 }
 
+export interface ListUsersFilter {
+  role?: UserRole;
+  status?: UserStatus;
+  limit: number;
+  offset: number;
+}
+
+export interface ListUsersPage {
+  users: User[];
+  total: number;
+}
+
 export interface UsersRepository {
   create(input: { email: string; passwordHash: string; role: UserRole; status: UserStatus }): Promise<User>;
   findByEmail(email: string): Promise<User | null>;
@@ -20,6 +32,11 @@ export interface UsersRepository {
   markEmailVerified(id: string): Promise<void>;
   setStatus(id: string, status: UserStatus): Promise<void>;
   setPasswordHash(id: string, passwordHash: string): Promise<void>;
+  // ghs#98: no default status filter (unlike players'/courses' deleted_at
+  // IS NULL convention) -- status here is a first-class enum value, not a
+  // separate soft-delete gate, and an admin listing accounts needs
+  // disabled/deleted visibility by default, not just active ones.
+  list(filter: ListUsersFilter): Promise<ListUsersPage>;
 }
 
 interface UserRow {
@@ -93,6 +110,32 @@ export function createUsersRepository(pool: Pool): UsersRepository {
         "UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1",
         [id, passwordHash],
       );
+    },
+
+    async list(filter) {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      if (filter.role) {
+        params.push(filter.role);
+        conditions.push(`role = $${params.length}`);
+      }
+      if (filter.status) {
+        params.push(filter.status);
+        conditions.push(`status = $${params.length}`);
+      }
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      const countResult = await pool.query<{ count: string }>(`SELECT COUNT(*) FROM users ${where}`, params);
+      const total = Number(countResult.rows[0]!.count);
+
+      const listParams = [...params, filter.limit, filter.offset];
+      const result = await pool.query<UserRow>(
+        `SELECT ${SELECT_COLUMNS} FROM users ${where}
+         ORDER BY created_at DESC
+         LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+        listParams,
+      );
+      return { users: result.rows.map(toUser), total };
     },
   };
 }

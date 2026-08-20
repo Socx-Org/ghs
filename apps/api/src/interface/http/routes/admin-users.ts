@@ -5,6 +5,13 @@ import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth, requireRole } from "../middleware/require-auth.ts";
 
 const VALID_ROLES = ["player", "admin", "super_admin"] as const;
+const VALID_STATUSES = ["pending_verification", "active", "disabled", "deleted"] as const;
+
+// ghs#98: no default page size cap this large -- 50 is a real starting
+// point for a small club's account list, 200 is generous headroom
+// without letting a single request pull the entire table.
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 200;
 
 export function adminUsersRouter(service: AdminUsersService, mfaService: MfaService, authProvider: AuthProvider): Router {
   const router = Router();
@@ -61,6 +68,44 @@ export function adminUsersRouter(service: AdminUsersService, mfaService: MfaServ
     }
   });
 
+  // ghs#98: registered before /admin/users/:id-shaped routes below --
+  // no path-param collision risk here (this is the bare collection
+  // route, not a "/me"-vs-":id" ordering concern like players.ts has).
+  router.get("/admin/users", ...requireAdmin, async (req, res, next) => {
+    try {
+      const { role, status, limit, offset } = req.query;
+
+      let resolvedRole: (typeof VALID_ROLES)[number] | undefined;
+      if (typeof role === "string" && role.length > 0) {
+        if (!VALID_ROLES.includes(role as (typeof VALID_ROLES)[number])) {
+          res.status(400).json({ error: "role must be one of: player, admin, super_admin" });
+          return;
+        }
+        resolvedRole = role as (typeof VALID_ROLES)[number];
+      }
+
+      let resolvedStatus: (typeof VALID_STATUSES)[number] | undefined;
+      if (typeof status === "string" && status.length > 0) {
+        if (!VALID_STATUSES.includes(status as (typeof VALID_STATUSES)[number])) {
+          res.status(400).json({ error: "status must be one of: pending_verification, active, disabled, deleted" });
+          return;
+        }
+        resolvedStatus = status as (typeof VALID_STATUSES)[number];
+      }
+
+      const parsedLimit = typeof limit === "string" ? Number.parseInt(limit, 10) : NaN;
+      const resolvedLimit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, MAX_LIMIT) : DEFAULT_LIMIT;
+
+      const parsedOffset = typeof offset === "string" ? Number.parseInt(offset, 10) : NaN;
+      const resolvedOffset = Number.isInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
+
+      const result = await service.listUsers({ role: resolvedRole, status: resolvedStatus, limit: resolvedLimit, offset: resolvedOffset });
+      res.status(200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.patch("/admin/users/:id/status", ...requireAdmin, async (req, res, next) => {
     try {
       const { status } = req.body as Record<string, unknown>;
@@ -70,6 +115,25 @@ export function adminUsersRouter(service: AdminUsersService, mfaService: MfaServ
       }
       await service.setUserStatus(String(req.params.id), status);
       res.status(200).json({ message: `User status set to ${status}.` });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ghs#98: self-deletion explicitly rejected here at the route layer --
+  // same placement reasoning as the role-elevation check above (the
+  // service has no concept of "who is calling", by design). An admin
+  // locking themselves out of their own account is never a legitimate
+  // outcome of this endpoint.
+  router.delete("/admin/users/:id", ...requireAdmin, async (req, res, next) => {
+    try {
+      const targetId = String(req.params.id);
+      if (targetId === req.identity!.sub) {
+        res.status(400).json({ error: "cannot delete your own account" });
+        return;
+      }
+      await service.deleteUser(targetId);
+      res.status(200).json({ message: "User deleted." });
     } catch (err) {
       next(err);
     }

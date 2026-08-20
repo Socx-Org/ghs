@@ -118,7 +118,7 @@ export function createApp(deps: AppDeps): Express {
   v1Router.use("/auth/resend-activation", sensitiveActionIpLimiter, sensitiveActionEmailLimiter);
   v1Router.use("/auth/password-reset/request", sensitiveActionIpLimiter, sensitiveActionEmailLimiter);
 
-  v1Router.use(authRouter(deps.authService, deps.systemSettingsService));
+  v1Router.use(authRouter(deps.authService, deps.systemSettingsService, deps.authProvider));
   v1Router.use(mfaRouter(deps.mfaService, deps.authProvider));
   v1Router.use(adminUsersRouter(deps.adminUsersService, deps.mfaService, deps.authProvider));
   v1Router.use(adminSettingsRouter(deps.systemSettingsService, deps.authProvider));

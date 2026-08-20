@@ -361,3 +361,147 @@ test("admin can disable and re-enable a user account", async () => {
   const loginResult = await s.authService.login("toggle@example.com", "toggle-pw-1");
   assert.equal(loginResult.status, "authenticated");
 });
+
+// ---------------------------------------------------------------------
+// ghs#98: listUsers, deleteUser, getMe, changePassword
+// ---------------------------------------------------------------------
+
+test("listUsers: composes firstName/lastName from the linked player row for a player account, and leaves them null for an admin account (no players row exists at all)", async () => {
+  const s = buildServices();
+  await s.adminUsersService.adminCreateUser({
+    email: "list-player@example.com", password: "list-pw-1", role: "player",
+    firstName: "List", lastName: "Player", autoActivate: true,
+  });
+  await s.adminUsersService.adminCreateUser({
+    email: "list-admin@example.com", password: "list-pw-2", role: "admin",
+    firstName: "Ignored", lastName: "AtCreation", autoActivate: true,
+  });
+
+  const { items, total } = await s.adminUsersService.listUsers({ limit: 50, offset: 0 });
+  assert.equal(total, 2);
+
+  const playerItem = items.find((i) => i.email === "list-player@example.com");
+  assert.ok(playerItem);
+  assert.equal(playerItem!.firstName, "List");
+  assert.equal(playerItem!.lastName, "Player");
+
+  const adminItem = items.find((i) => i.email === "list-admin@example.com");
+  assert.ok(adminItem);
+  assert.equal(adminItem!.firstName, null, "an admin account has no players row -- firstName must be null, not a leftover/fabricated value");
+  assert.equal(adminItem!.lastName, null);
+
+  // The response DTO must never carry a password hash, under any field name.
+  assert.equal("passwordHash" in playerItem!, false);
+});
+
+test("listUsers: filters by role and status, and paginates via limit/offset", async () => {
+  const s = buildServices();
+  for (let i = 0; i < 3; i += 1) {
+    await s.adminUsersService.adminCreateUser({
+      email: `page-player-${i}@example.com`, password: "page-pw-1", role: "player",
+      firstName: "Page", lastName: `Player${i}`, autoActivate: true,
+    });
+  }
+  await s.adminUsersService.adminCreateUser({
+    email: "page-admin@example.com", password: "page-pw-2", role: "admin",
+    firstName: "Page", lastName: "Admin", autoActivate: false,
+  });
+
+  const onlyAdmins = await s.adminUsersService.listUsers({ role: "admin", limit: 50, offset: 0 });
+  assert.equal(onlyAdmins.total, 1);
+  assert.equal(onlyAdmins.items[0]!.email, "page-admin@example.com");
+
+  const onlyPending = await s.adminUsersService.listUsers({ status: "pending_verification", limit: 50, offset: 0 });
+  assert.equal(onlyPending.total, 1);
+  assert.equal(onlyPending.items[0]!.email, "page-admin@example.com");
+
+  const firstPage = await s.adminUsersService.listUsers({ role: "player", limit: 2, offset: 0 });
+  assert.equal(firstPage.total, 3, "total reflects the full filtered count, not just this page's size");
+  assert.equal(firstPage.items.length, 2);
+
+  const secondPage = await s.adminUsersService.listUsers({ role: "player", limit: 2, offset: 2 });
+  assert.equal(secondPage.items.length, 1);
+  assert.notEqual(secondPage.items[0]!.email, firstPage.items[0]!.email);
+});
+
+test("deleteUser soft-deletes to status='deleted' -- the account can no longer log in, and its players row survives untouched", async () => {
+  const s = buildServices();
+  const created = await s.adminUsersService.adminCreateUser({
+    email: "delete-me@example.com", password: "delete-pw-1", role: "player",
+    firstName: "Delete", lastName: "Me", autoActivate: true,
+  });
+
+  await s.adminUsersService.deleteUser(created.userId);
+
+  const user = await s.users.findById(created.userId);
+  assert.equal(user!.status, "deleted");
+  await assert.rejects(() => s.authService.login("delete-me@example.com", "delete-pw-1"));
+
+  // Round/handicap history integrity: the players row is untouched by an
+  // account deletion, per this issue's own explicit decision.
+  const player = await s.players.findByUserId(created.userId);
+  assert.ok(player, "the linked players row must survive a user deletion");
+  assert.equal(player!.firstName, "Delete");
+});
+
+test("getMe: returns email/role/status plus the linked player's name for a player account", async () => {
+  const s = buildServices();
+  const created = await s.adminUsersService.adminCreateUser({
+    email: "me-player@example.com", password: "me-pw-1", role: "player",
+    firstName: "Me", lastName: "Player", autoActivate: true,
+  });
+
+  const profile = await s.authService.getMe(created.userId);
+  assert.ok(profile);
+  assert.equal(profile!.email, "me-player@example.com");
+  assert.equal(profile!.role, "player");
+  assert.equal(profile!.status, "active");
+  assert.equal(profile!.firstName, "Me");
+  assert.equal(profile!.lastName, "Player");
+});
+
+test("getMe: firstName/lastName are null for an admin account (no players row), unlike GET /players/me which 404s entirely", async () => {
+  const s = buildServices();
+  const created = await s.adminUsersService.adminCreateUser({
+    email: "me-admin@example.com", password: "me-pw-2", role: "admin",
+    firstName: "Ignored", lastName: "AtCreation", autoActivate: true,
+  });
+
+  const profile = await s.authService.getMe(created.userId);
+  assert.ok(profile, "getMe must succeed for an admin account, unlike GET /players/me");
+  assert.equal(profile!.role, "admin");
+  assert.equal(profile!.firstName, null);
+});
+
+test("getMe returns null (not a thrown error) for a userId with no matching account", async () => {
+  const s = buildServices();
+  const profile = await s.authService.getMe("00000000-0000-0000-0000-000000000000");
+  assert.equal(profile, null);
+});
+
+test("changePassword: verifies the current password, then the new password works and the old one no longer does", async () => {
+  const s = buildServices();
+  const created = await s.adminUsersService.adminCreateUser({
+    email: "change-pw@example.com", password: "original-password", role: "player",
+    firstName: "Change", lastName: "Pw", autoActivate: true,
+  });
+
+  await s.authService.changePassword(created.userId, "original-password", "brand-new-password");
+
+  await assert.rejects(() => s.authService.login("change-pw@example.com", "original-password"));
+  const loginResult = await s.authService.login("change-pw@example.com", "brand-new-password");
+  assert.equal(loginResult.status, "authenticated");
+});
+
+test("changePassword: rejects an incorrect current password, leaving the real password unchanged", async () => {
+  const s = buildServices();
+  const created = await s.adminUsersService.adminCreateUser({
+    email: "change-pw-wrong@example.com", password: "original-password", role: "player",
+    firstName: "Change", lastName: "Wrong", autoActivate: true,
+  });
+
+  await assert.rejects(() => s.authService.changePassword(created.userId, "totally-wrong-password", "brand-new-password"));
+
+  const loginResult = await s.authService.login("change-pw-wrong@example.com", "original-password");
+  assert.equal(loginResult.status, "authenticated", "the original password must still work -- the rejected attempt made no change");
+});

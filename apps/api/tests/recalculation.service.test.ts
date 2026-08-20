@@ -114,6 +114,7 @@ function fakePlayersRepository(): PlayersRepository {
   return {
     async create() { throw new Error("not used by these tests"); },
     async findByUserId() { throw new Error("not used by these tests"); },
+    async findByUserIds() { throw new Error("not used by these tests"); },
     async get(id) {
       const player: Player = { id, userId: `${id}-user`, clubId: null, firstName: "Test", lastName: "Player", country: "ES", createdAt: new Date().toISOString(), handicapIndex: null, lowHandicapIndex: null };
       return player;
@@ -214,6 +215,7 @@ test("recalculatePlayerHandicap: skips the notification (does not error) for a p
   const noLoginPlayers: PlayersRepository = {
     async create() { throw new Error("not used by this test"); },
     async findByUserId() { throw new Error("not used by this test"); },
+    async findByUserIds() { throw new Error("not used by this test"); },
     async get(id) {
       const player: Player = { id, userId: null, clubId: null, firstName: "No", lastName: "Login", country: "ES", createdAt: new Date().toISOString(), handicapIndex: null, lowHandicapIndex: null };
       return player;
