@@ -11,7 +11,7 @@ import { createPasswordResetTokenRepository } from "../src/data/password-reset-t
 import { createRefreshTokensRepository } from "../src/data/refresh-tokens.repository.ts";
 import { createMfaRepository } from "../src/data/mfa.repository.ts";
 import { createLocalAuthProvider } from "../src/application/auth-provider.ts";
-import { createAuthService } from "../src/application/auth.service.ts";
+import { AccountNotActiveError, createAuthService } from "../src/application/auth.service.ts";
 import { createMfaService } from "../src/application/mfa.service.ts";
 import { createAdminUsersService } from "../src/application/admin-users.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
@@ -516,8 +516,14 @@ test("changePassword: rejects a disabled account, even with the correct current 
 
   // An access token issued before the disable stays valid until its own
   // TTL -- this proves changePassword itself re-checks status rather
-  // than trusting the caller merely holding a still-valid token.
-  await assert.rejects(() => s.authService.changePassword(created.userId, "original-password", "brand-new-password"));
+  // than trusting the caller merely holding a still-valid token. Real
+  // AccountNotActiveError, not just any rejection -- proves this is
+  // reported accurately, not misreported as a wrong-password failure
+  // (review finding, PR #121).
+  await assert.rejects(
+    () => s.authService.changePassword(created.userId, "original-password", "brand-new-password"),
+    AccountNotActiveError,
+  );
 
   await s.adminUsersService.setUserStatus(created.userId, "active");
   const loginResult = await s.authService.login("change-pw-disabled@example.com", "original-password");

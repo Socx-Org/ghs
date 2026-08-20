@@ -520,6 +520,11 @@ test("POST /auth/change-password rejects a disabled account even with the correc
       body: JSON.stringify({ currentPassword: "http-original-pw", newPassword: "http-brand-new-pw" }),
     });
     assert.equal(res.status, 400, "the disabled account's still-valid access token must not be enough to change its password");
+    const body = await res.json();
+    // The specific, accurate error -- not the generic "current password
+    // is incorrect" message this used to be misreported as before the
+    // fix (review finding, PR #121).
+    assert.equal(body.error, "account not active");
   });
 });
 

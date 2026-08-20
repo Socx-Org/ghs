@@ -71,6 +71,19 @@ export function adminUsersRouter(service: AdminUsersService, mfaService: MfaServ
   // ghs#98: registered before /admin/users/:id-shaped routes below --
   // no path-param collision risk here (this is the bare collection
   // route, not a "/me"-vs-":id" ordering concern like players.ts has).
+  //
+  // Query parameters (all optional):
+  //   role    -- one of VALID_ROLES above; 400 if present and invalid.
+  //   status  -- one of VALID_STATUSES above; 400 if present and invalid.
+  //              No default exclusion of 'deleted' -- unlike players'/
+  //              courses' deleted_at soft-delete convention, status is
+  //              a first-class value here, and an admin listing accounts
+  //              needs full visibility by default (see users.repository.ts).
+  //   limit   -- page size, default 50, capped at 200. Non-positive or
+  //              non-integer values fall back to the default rather
+  //              than erroring.
+  //   offset  -- row offset, default 0. Negative or non-integer values
+  //              fall back to 0.
   router.get("/admin/users", ...requireAdmin, async (req, res, next) => {
     try {
       const { role, status, limit, offset } = req.query;

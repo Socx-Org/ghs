@@ -13,6 +13,16 @@ import { generateToken, hashToken } from "../lib/tokens.ts";
 const ACTIVATION_TOKEN_TTL_HOURS = 24;
 const PASSWORD_RESET_TOKEN_TTL_MINUTES = 30;
 
+// ghs#98: distinct classes (same convention as rounds.service.ts's
+// RoundNotFoundError etc.) so the route can tell these two *expected*
+// change-password failures apart from anything unexpected -- a blanket
+// catch that always reported "current password is incorrect" would
+// have masked a real DB outage as a bad-password error, and also
+// misreported a disabled/deleted/pending account's rejection as the
+// same thing (review finding, PR #121).
+export class IncorrectPasswordError extends Error {}
+export class AccountNotActiveError extends Error {}
+
 export type LoginResult =
   | { status: "authenticated"; tokens: TokenPair }
   | { status: "mfa_required"; mfaPendingToken: string };
@@ -277,10 +287,10 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       // disabled/deleted/pending account could still set new credentials
       // for as long as its existing token remains valid (review finding,
       // PR #121).
-      if (user.status !== "active") throw new Error("account not active");
+      if (user.status !== "active") throw new AccountNotActiveError("account not active");
 
       const currentOk = await verifyPassword(user.passwordHash, currentPassword);
-      if (!currentOk) throw new Error("current password is incorrect");
+      if (!currentOk) throw new IncorrectPasswordError("current password is incorrect");
 
       const passwordHash = await hashPassword(newPassword);
       await users.setPasswordHash(userId, passwordHash);

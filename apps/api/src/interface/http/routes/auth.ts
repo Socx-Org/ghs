@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { AuthService } from "../../../application/auth.service.ts";
+import { AccountNotActiveError, IncorrectPasswordError } from "../../../application/auth.service.ts";
 import type { SystemSettingsService } from "../../../application/system-settings.service.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth } from "../middleware/require-auth.ts";
@@ -220,11 +221,20 @@ export function authRouter(service: AuthService, settings: SystemSettingsService
       }
       await service.changePassword(req.identity!.sub, currentPassword, newPassword);
       res.status(200).json({ message: "Password changed." });
-    } catch {
-      // Collapses "current password is incorrect" and the (near-
-      // unreachable) "account not found" case into one message,
-      // matching login's own deliberate minimal-detail-leakage pattern.
-      res.status(400).json({ error: "current password is incorrect" });
+    } catch (err) {
+      // Only these two are real, expected outcomes of a change-password
+      // attempt -- anything else (e.g. a DB outage, the near-unreachable
+      // "account not found" case) falls through to next(err) instead of
+      // being misreported as a bad password (review finding, PR #121).
+      if (err instanceof IncorrectPasswordError) {
+        res.status(400).json({ error: "current password is incorrect" });
+        return;
+      }
+      if (err instanceof AccountNotActiveError) {
+        res.status(400).json({ error: "account not active" });
+        return;
+      }
+      next(err);
     }
   });
 
