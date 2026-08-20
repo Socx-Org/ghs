@@ -65,6 +65,22 @@ describe("ActivationPage", () => {
     expect(JSON.parse(resendCall!.data)).toEqual({ email: "expired@example.com" });
   });
 
+  it("shows a real error and stays on the resend form (not silently stuck) when resend itself fails (review finding, PR #124)", async () => {
+    mock.onPost("/auth/activate").reply(400, { error: "expired_token" });
+    mock.onPost("/auth/resend-activation").reply(500, { error: "internal server error" });
+    renderActivation();
+
+    expect(await screen.findByRole("heading", { name: "This activation link has expired" })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Email address"), "expired@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "Resend activation link" }));
+
+    expect(await screen.findByText("internal server error")).toBeInTheDocument();
+    // Not advanced to the "sent" confirmation -- the failure is real,
+    // not silently treated as success.
+    expect(screen.queryByText("If that account needs activation, a new link has been sent.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Resend activation link" })).toBeInTheDocument();
+  });
+
   it("shows an already-activated state (no resend offered) for already_used_token", async () => {
     mock.onPost("/auth/activate").reply(400, { error: "already_used_token" });
     renderActivation();

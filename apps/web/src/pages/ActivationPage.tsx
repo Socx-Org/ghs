@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Button, FormField, Input, Logo, Spinner } from "../components";
+import { Alert, Button, FormField, Input, Logo, Spinner } from "../components";
 import { ApiError, activateAccount, resendActivation } from "../lib/api";
 
 // ghs#106. Same split-panel visual pattern as LoginPage/RegisterPage.
@@ -33,6 +33,7 @@ type ResendFormValues = z.infer<typeof resendSchema>;
 
 function ResendActivationForm() {
   const [sent, setSent] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -40,12 +41,21 @@ function ResendActivationForm() {
   } = useForm<ResendFormValues>({ resolver: zodResolver(resendSchema) });
 
   async function onSubmit(values: ResendFormValues) {
-    // Always the same outcome regardless of what resendActivation()
-    // resolves with -- the backend's own enumeration protection means
-    // there's nothing to branch on (review discipline already applied
-    // to RegisterPage, ghs#105).
-    await resendActivation(values.email);
-    setSent(true);
+    setFeedback(null);
+    try {
+      // Always the same *success* outcome regardless of what
+      // resendActivation() resolves with -- the backend's own
+      // enumeration protection means there's nothing to branch on for
+      // a 2xx (review discipline already applied to RegisterPage,
+      // ghs#105). A genuine failure (network/server error) is a
+      // different case entirely and still needs real feedback, unlike
+      // "email not found" -- caught here rather than left to bubble out
+      // of onSubmit with no visible result (review finding, PR #124).
+      await resendActivation(values.email);
+      setSent(true);
+    } catch (error) {
+      setFeedback(error instanceof ApiError ? error.message : "Something went wrong. Please try again.");
+    }
   }
 
   if (sent) {
@@ -54,6 +64,8 @@ function ResendActivationForm() {
 
   return (
     <form className="mt-4 flex flex-col gap-3" onSubmit={handleSubmit(onSubmit)} noValidate>
+      {feedback && <Alert variant="error">{feedback}</Alert>}
+
       <FormField label="Email address" error={errors.email?.message}>
         <Input type="email" autoComplete="email" {...register("email")} />
       </FormField>
