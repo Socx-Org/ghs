@@ -61,6 +61,22 @@ export function authRouter(service: AuthService, settings: SystemSettingsService
     }
   });
 
+  // ghs#105: unauthenticated -- an anonymous visitor on LoginPage needs
+  // to know whether to show a "Create an account" entry point at all,
+  // before they have any session. Deliberately narrow (this one flag
+  // only, not a general settings-exposure endpoint) -- confirmed no
+  // existing public route already carries this (checked /healthz, which
+  // is explicitly a bare liveness probe by its own design, and
+  // /admin/settings, which is admin-gated).
+  router.get("/auth/self-registration-enabled", async (_req, res, next) => {
+    try {
+      const enabled = await settings.getSelfRegistrationEnabled();
+      res.status(200).json({ enabled });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.post("/auth/login", async (req, res, next) => {
     try {
       const { email, password } = req.body as Record<string, unknown>;

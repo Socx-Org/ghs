@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Alert, Button, FormField, Input, Logo } from "../components";
-import { ApiError, login, verifyMfa } from "../lib/api";
+import { ApiError, getSelfRegistrationEnabled, login, verifyMfa } from "../lib/api";
 import type { LoginRequest } from "../lib/api";
 
 // ghs#64: split-screen layout, structurally adapted from Tailwind UI's
@@ -164,6 +165,9 @@ export default function LoginPage() {
   const [step, setStep] = useState<LoginStep>({ kind: "credentials" });
   const navigate = useNavigate();
   const location = useLocation();
+  // ghs#105. Hidden while pending/erroring, not just while disabled --
+  // fails closed, same reasoning as RegisterPage's own gate.
+  const selfRegistrationQuery = useQuery({ queryKey: ["auth", "self-registration-enabled"], queryFn: getSelfRegistrationEnabled });
 
   function handleSuccess() {
     const state = location.state as LoginLocationState | null;
@@ -191,6 +195,15 @@ export default function LoginPage() {
               <MfaCodeForm mfaPendingToken={step.mfaPendingToken} onBack={() => setStep({ kind: "credentials" })} onSuccess={handleSuccess} />
             )}
           </div>
+
+          {step.kind === "credentials" && selfRegistrationQuery.data && (
+            <p className="mt-6 text-sm text-text-muted">
+              Don't have an account?{" "}
+              <Link to="/register" className="font-medium text-primary hover:underline">
+                Create an account
+              </Link>
+            </p>
+          )}
         </div>
       </div>
 

@@ -83,7 +83,7 @@ test("pcc_override no longer exists as a system_settings key -- confirmed absent
   assert.equal(row, null);
 });
 
-test("self-registration gate: POST /auth/register is 403 when off, 201 when on -- real HTTP, real app.ts wiring", async () => {
+test("self-registration gate: POST /auth/register is 403 when off, 201 when on; GET /auth/self-registration-enabled reflects the same live state -- real HTTP, real app.ts wiring", async () => {
   const users = createUsersRepository(pool);
   const players = createPlayersRepository(pool);
   const activationTokens = createActivationTokenRepository(pool);
@@ -140,6 +140,13 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on -
     });
     assert.equal(blockedResponse.status, 403);
 
+    // ghs#105: unauthenticated -- no Authorization header sent at all,
+    // and the flag reflects the same off-by-default state POST
+    // /auth/register just enforced above.
+    const flagBefore = await fetch(`${baseUrl}/api/v1/auth/self-registration-enabled`);
+    assert.equal(flagBefore.status, 200);
+    assert.deepEqual(await flagBefore.json(), { enabled: false });
+
     await systemSettingsService.setSelfRegistrationEnabled(true, null);
 
     const allowedResponse = await fetch(`${baseUrl}/api/v1/auth/register`, {
@@ -148,6 +155,9 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on -
       body: JSON.stringify({ email: "gated@example.com", password: "gated-test-pw", firstName: "Gated", lastName: "User" }),
     });
     assert.equal(allowedResponse.status, 201);
+
+    const flagAfter = await fetch(`${baseUrl}/api/v1/auth/self-registration-enabled`);
+    assert.deepEqual(await flagAfter.json(), { enabled: true });
 
     const registeredUser = await users.findByEmail("gated@example.com");
     assert.ok(registeredUser);
