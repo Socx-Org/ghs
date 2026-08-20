@@ -1,13 +1,17 @@
 import { Router } from "express";
 import type { AuthService } from "../../../application/auth.service.ts";
+import { AccountNotActiveError, IncorrectPasswordError } from "../../../application/auth.service.ts";
 import type { SystemSettingsService } from "../../../application/system-settings.service.ts";
+import type { AuthProvider } from "../../../application/auth-provider.ts";
+import { requireAuth } from "../middleware/require-auth.ts";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-export function authRouter(service: AuthService, settings: SystemSettingsService): Router {
+export function authRouter(service: AuthService, settings: SystemSettingsService, authProvider: AuthProvider): Router {
   const router = Router();
+  const auth = requireAuth(authProvider);
 
   router.post("/auth/register", async (req, res, next) => {
     try {
@@ -185,6 +189,52 @@ export function authRouter(service: AuthService, settings: SystemSettingsService
       res.status(200).json({ message: "Password reset." });
     } catch {
       res.status(400).json({ error: "invalid or expired reset token" });
+    }
+  });
+
+  // ghs#98: the account-level counterpart to GET /players/me -- works
+  // for every role, unlike that route (which 404s for admin/super_admin,
+  // who have no players row at all).
+  router.get("/auth/me", auth, async (req, res, next) => {
+    try {
+      const profile = await service.getMe(req.identity!.sub);
+      if (!profile) {
+        res.status(401).json({ error: "account not found" });
+        return;
+      }
+      res.status(200).json(profile);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post("/auth/change-password", auth, async (req, res, next) => {
+    try {
+      const { currentPassword, newPassword } = req.body as Record<string, unknown>;
+      if (!isNonEmptyString(currentPassword) || !isNonEmptyString(newPassword)) {
+        res.status(400).json({ error: "currentPassword and newPassword are required" });
+        return;
+      }
+      if (newPassword.length < 8) {
+        res.status(400).json({ error: "newPassword must be at least 8 characters" });
+        return;
+      }
+      await service.changePassword(req.identity!.sub, currentPassword, newPassword);
+      res.status(200).json({ message: "Password changed." });
+    } catch (err) {
+      // Only these two are real, expected outcomes of a change-password
+      // attempt -- anything else (e.g. a DB outage, the near-unreachable
+      // "account not found" case) falls through to next(err) instead of
+      // being misreported as a bad password (review finding, PR #121).
+      if (err instanceof IncorrectPasswordError) {
+        res.status(400).json({ error: "current password is incorrect" });
+        return;
+      }
+      if (err instanceof AccountNotActiveError) {
+        res.status(400).json({ error: "account not active" });
+        return;
+      }
+      next(err);
     }
   });
 

@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
 import type { Logger } from "../logger.ts";
 import type { AuthProvider, TokenPair } from "./auth-provider.ts";
-import type { UsersRepository } from "../data/users.repository.ts";
+import type { UserRole, UserStatus, UsersRepository } from "../data/users.repository.ts";
 import type { PlayersRepository } from "../data/players.repository.ts";
 import type { ActivationTokenRepository } from "../data/activation-tokens.repository.ts";
 import type { PasswordResetTokenRepository } from "../data/password-reset-tokens.repository.ts";
@@ -13,6 +13,16 @@ import { generateToken, hashToken } from "../lib/tokens.ts";
 const ACTIVATION_TOKEN_TTL_HOURS = 24;
 const PASSWORD_RESET_TOKEN_TTL_MINUTES = 30;
 
+// ghs#98: distinct classes (same convention as rounds.service.ts's
+// RoundNotFoundError etc.) so the route can tell these two *expected*
+// change-password failures apart from anything unexpected -- a blanket
+// catch that always reported "current password is incorrect" would
+// have masked a real DB outage as a bad-password error, and also
+// misreported a disabled/deleted/pending account's rejection as the
+// same thing (review finding, PR #121).
+export class IncorrectPasswordError extends Error {}
+export class AccountNotActiveError extends Error {}
+
 export type LoginResult =
   | { status: "authenticated"; tokens: TokenPair }
   | { status: "mfa_required"; mfaPendingToken: string };
@@ -23,6 +33,19 @@ export interface RegisterInput {
   firstName: string;
   lastName: string;
   clubId?: string;
+}
+
+// ghs#98: the account-level counterpart to GET /players/me -- works for
+// every role, including admin/super_admin, which have no players row at
+// all (IAM-020's strict separation). firstName/lastName are null for
+// those, same reasoning as AdminUserListItem.
+export interface AccountProfile {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  firstName: string | null;
+  lastName: string | null;
 }
 
 // Narrow interface auth.service depends on for MFA code verification --
@@ -59,6 +82,13 @@ export interface AuthService {
   resendActivation(email: string): Promise<void>;
   requestPasswordReset(email: string): Promise<void>;
   resetPassword(rawToken: string, newPassword: string): Promise<void>;
+  // ghs#98: null, not a thrown error, when the caller's own account is
+  // genuinely gone -- realistically near-unreachable today (deletion is
+  // a soft status change, the row itself never disappears), but this
+  // still mirrors GET /players/me's own "a real, legitimate 404 case"
+  // reasoning rather than assuming it can never happen.
+  getMe(userId: string): Promise<AccountProfile | null>;
+  changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void>;
 }
 
 export function createAuthService(deps: AuthServiceDeps): AuthService {
@@ -231,6 +261,39 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       // Invalidates every other outstanding reset token for this user too
       // -- the real improvement over legacy's schema (ghs#8).
       await passwordResetTokens.markUsedAndInvalidateOthers(record.id, record.userId);
+    },
+
+    async getMe(userId) {
+      const user = await users.findById(userId);
+      if (!user) return null;
+      const player = await players.findByUserId(userId);
+      return {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        firstName: player?.firstName ?? null,
+        lastName: player?.lastName ?? null,
+      };
+    },
+
+    async changePassword(userId, currentPassword, newPassword) {
+      const user = await users.findById(userId);
+      if (!user) throw new Error("account not found");
+      // Same status gate as login/refresh/completeMfaLogin -- an access
+      // token stays valid until its own TTL regardless of a status
+      // change that happens after it was issued (no ordinary resource
+      // route re-checks status per request), so without this a
+      // disabled/deleted/pending account could still set new credentials
+      // for as long as its existing token remains valid (review finding,
+      // PR #121).
+      if (user.status !== "active") throw new AccountNotActiveError("account not active");
+
+      const currentOk = await verifyPassword(user.passwordHash, currentPassword);
+      if (!currentOk) throw new IncorrectPasswordError("current password is incorrect");
+
+      const passwordHash = await hashPassword(newPassword);
+      await users.setPasswordHash(userId, passwordHash);
     },
   };
 }

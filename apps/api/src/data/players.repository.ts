@@ -28,6 +28,9 @@ export interface CreatePlayerInput {
 export interface PlayersRepository {
   create(input: CreatePlayerInput, client?: PoolClient): Promise<Player>;
   findByUserId(userId: string): Promise<Player | null>;
+  // ghs#98: bulk variant of findByUserId, for composing a name onto each
+  // row of a paginated user list without an N+1 query per row.
+  findByUserIds(userIds: string[]): Promise<Player[]>;
   get(id: string): Promise<Player | null>;
 }
 
@@ -82,6 +85,15 @@ export function createPlayersRepository(pool: Pool): PlayersRepository {
         [userId],
       );
       return result.rows[0] ? toPlayer(result.rows[0]) : null;
+    },
+
+    async findByUserIds(userIds) {
+      if (userIds.length === 0) return [];
+      const result = await pool.query<PlayerRow>(
+        `SELECT ${SELECT_COLUMNS} FROM players WHERE user_id = ANY($1) AND deleted_at IS NULL`,
+        [userIds],
+      );
+      return result.rows.map(toPlayer);
     },
 
     async get(id) {
