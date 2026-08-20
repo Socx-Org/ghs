@@ -9,6 +9,7 @@ import LoginPage from "./pages/LoginPage";
 import NewRoundPage from "./pages/NewRoundPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import PlayerDashboardPage from "./pages/PlayerDashboardPage";
+import RegisterPage from "./pages/RegisterPage";
 import RoundEntryPage from "./pages/RoundEntryPage";
 import { RedirectIfAuthenticated } from "./routes/RedirectIfAuthenticated";
 import { RequireAdmin } from "./routes/RequireAdmin";
@@ -56,6 +57,7 @@ export default function AppRoutes() {
     <Routes>
       <Route element={<RedirectIfAuthenticated />}>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
       </Route>
       <Route element={<RequireAuth />}>
         {/* ghs#96: the real application shell, applied once at the

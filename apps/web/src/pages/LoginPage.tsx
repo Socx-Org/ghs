@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Alert, Button, FormField, Input, Logo } from "../components";
-import { ApiError, login, verifyMfa } from "../lib/api";
+import { ApiError, getSelfRegistrationEnabled, login, verifyMfa } from "../lib/api";
 import type { LoginRequest } from "../lib/api";
 
 // ghs#64: split-screen layout, structurally adapted from Tailwind UI's
@@ -164,6 +165,17 @@ export default function LoginPage() {
   const [step, setStep] = useState<LoginStep>({ kind: "credentials" });
   const navigate = useNavigate();
   const location = useLocation();
+  // ghs#105. Gated on `.data === true` below, deliberately not on
+  // isError -- fails closed on the initial fetch (data stays undefined
+  // until a real success), but a later *background* refetch failure
+  // (e.g. window refocus) leaves isError true while TanStack Query
+  // still retains the last-known-good `data` (confirmed in @tanstack/
+  // query-core's reducer). Reacting to that would flicker this link
+  // away on a transient network blip after it was already correctly
+  // showing -- same reasoning as RegisterPage's own gate, applied
+  // consistently here (review finding, PR #123, prompted fixing this
+  // comment to actually describe what the code below does).
+  const selfRegistrationQuery = useQuery({ queryKey: ["auth", "self-registration-enabled"], queryFn: getSelfRegistrationEnabled });
 
   function handleSuccess() {
     const state = location.state as LoginLocationState | null;
@@ -191,6 +203,15 @@ export default function LoginPage() {
               <MfaCodeForm mfaPendingToken={step.mfaPendingToken} onBack={() => setStep({ kind: "credentials" })} onSuccess={handleSuccess} />
             )}
           </div>
+
+          {step.kind === "credentials" && selfRegistrationQuery.data && (
+            <p className="mt-6 text-sm text-text-muted">
+              Don't have an account?{" "}
+              <Link to="/register" className="font-medium text-primary hover:underline">
+                Create an account
+              </Link>
+            </p>
+          )}
         </div>
       </div>
 

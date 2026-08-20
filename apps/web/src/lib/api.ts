@@ -166,6 +166,38 @@ export async function verifyMfa(input: MfaVerifyRequest): Promise<AuthTokens> {
   }
 }
 
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+}
+
+// ghs#105. bootstrapClient, not api -- unauthenticated, no session to
+// attach a bearer token to, same reasoning as login/verifyMfa above.
+// No tokens returned/set: registration doesn't log the caller in, it
+// starts the activation flow.
+export async function register(input: RegisterRequest): Promise<{ message: string }> {
+  try {
+    const { data } = await bootstrapClient.post<{ message: string }>("/auth/register", input);
+    return data;
+  } catch (error) {
+    throw new ApiError(errorMessage(error), axios.isAxiosError(error) ? error.response?.status : undefined);
+  }
+}
+
+// ghs#105. Unauthenticated -- an anonymous visitor on LoginPage needs
+// this before any session exists, to decide whether to show a "Create
+// an account" entry point at all.
+export async function getSelfRegistrationEnabled(): Promise<boolean> {
+  try {
+    const { data } = await bootstrapClient.get<{ enabled: boolean }>("/auth/self-registration-enabled");
+    return data.enabled;
+  } catch (error) {
+    throw new ApiError(errorMessage(error), axios.isAxiosError(error) ? error.response?.status : undefined);
+  }
+}
+
 export interface CreateUserRequest {
   email: string;
   password: string;

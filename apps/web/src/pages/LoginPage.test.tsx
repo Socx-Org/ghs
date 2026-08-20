@@ -40,16 +40,45 @@ afterEach(() => {
 // instead of retrying with backoff.
 function renderLogin() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const utils = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/login"]}>
         <AppRoutes />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...utils, queryClient };
 }
 
 describe("LoginPage", () => {
+  it("does not show a Create an account link when self-registration is off (or the check fails) -- fails closed (ghs#105)", async () => {
+    mock.onGet("/auth/self-registration-enabled").reply(200, { enabled: false });
+    renderLogin();
+    await waitFor(() => expect(mock.history.get?.length).toBeGreaterThan(0));
+    expect(screen.queryByRole("link", { name: "Create an account" })).not.toBeInTheDocument();
+  });
+
+  it("shows a working Create an account link when self-registration is on (ghs#105)", async () => {
+    mock.onGet("/auth/self-registration-enabled").reply(200, { enabled: true });
+    renderLogin();
+
+    const link = await screen.findByRole("link", { name: "Create an account" });
+    await userEvent.click(link);
+
+    expect(await screen.findByRole("heading", { name: "Create an account" })).toBeInTheDocument();
+  });
+
+  it("keeps the Create an account link visible through a background refetch failure (review finding, PR #123)", async () => {
+    mock.onGet("/auth/self-registration-enabled").reply(200, { enabled: true });
+    const { queryClient } = renderLogin();
+    await screen.findByRole("link", { name: "Create an account" });
+
+    mock.onGet("/auth/self-registration-enabled").reply(500, { error: "internal server error" });
+    await queryClient.refetchQueries({ queryKey: ["auth", "self-registration-enabled"] });
+
+    expect(screen.getByRole("link", { name: "Create an account" })).toBeInTheDocument();
+  });
+
   it("shows client-side validation errors without calling the API", async () => {
     renderLogin();
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
@@ -169,15 +198,18 @@ describe("LoginPage", () => {
     };
     mock.onPost("/auth/login").reply(200, tokens);
 
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
-      <MemoryRouter initialEntries={["/some/protected/page"]}>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route element={<RequireAuth />}>
-            <Route path="/some/protected/page" element={<p>The protected page</p>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/some/protected/page"]}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route element={<RequireAuth />}>
+              <Route path="/some/protected/page" element={<p>The protected page</p>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     // RequireAuth should have already redirected here with from state.
