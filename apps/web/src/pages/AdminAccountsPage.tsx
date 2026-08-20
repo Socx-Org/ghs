@@ -75,17 +75,27 @@ export default function AdminAccountsPage() {
   function renderActions(item: AdminUserListItem) {
     if (item.status === "deleted") return null;
     const isSelf = item.id === caller?.sub;
+    // Enable/Disable is only a real active<->disabled toggle (#98's
+    // PATCH .../status endpoint) -- a pending_verification account only
+    // gets Delete here. Offering "Enable" on it would silently
+    // force-activate the account, skipping the real activation-token
+    // flow entirely, which is a materially different, more consequential
+    // action than this button's label would honestly convey (review
+    // finding, PR #122).
+    const showStatusToggle = item.status === "active" || item.status === "disabled";
     const nextStatus = item.status === "active" ? "disabled" : "active";
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          isLoading={statusMutation.isPending && statusMutation.variables?.id === item.id}
-          onClick={() => statusMutation.mutate({ id: item.id, status: nextStatus })}
-        >
-          {item.status === "active" ? "Disable" : "Enable"}
-        </Button>
+        {showStatusToggle && (
+          <Button
+            variant="secondary"
+            size="sm"
+            isLoading={statusMutation.isPending && statusMutation.variables?.id === item.id}
+            onClick={() => statusMutation.mutate({ id: item.id, status: nextStatus })}
+          >
+            {item.status === "active" ? "Disable" : "Enable"}
+          </Button>
+        )}
         {/* Self-deletion is already rejected server-side (400), but not
             offering the action at all on your own row is the honest UI
             -- matching, not merely tolerating, that server rule. */}

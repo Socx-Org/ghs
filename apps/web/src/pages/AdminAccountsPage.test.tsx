@@ -36,6 +36,7 @@ const ACCOUNTS: AdminUserListItem[] = [
   { id: "user-2", email: "alice@example.com", role: "player", status: "active", createdAt: "2026-08-02T00:00:00.000Z", firstName: "Alice", lastName: "Whitfield" },
   { id: "user-3", email: "ben@example.com", role: "player", status: "disabled", createdAt: "2026-08-03T00:00:00.000Z", firstName: "Ben", lastName: "Okafor" },
   { id: "user-4", email: "gone@example.com", role: "player", status: "deleted", createdAt: "2026-08-04T00:00:00.000Z", firstName: "Gone", lastName: "User" },
+  { id: "user-5", email: "pending@example.com", role: "player", status: "pending_verification", createdAt: "2026-08-05T00:00:00.000Z", firstName: "Pending", lastName: "User" },
 ];
 
 let mock: MockAdapter;
@@ -130,6 +131,18 @@ describe("AdminAccountsPage", () => {
 
     const deletedRow = rowFor("gone@example.com");
     expect(deletedRow.querySelectorAll("button").length).toBe(0);
+  });
+
+  it("offers only Delete for a pending_verification row -- no Enable button that would silently force-activate it (review finding, PR #122)", async () => {
+    setTokens(ADMIN_TOKENS);
+    mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+    renderPage();
+    await screen.findByText("pending@example.com");
+
+    const pendingRow = rowFor("pending@example.com");
+    expect(within(pendingRow).queryByRole("button", { name: "Enable" })).not.toBeInTheDocument();
+    expect(within(pendingRow).queryByRole("button", { name: "Disable" })).not.toBeInTheDocument();
+    expect(within(pendingRow).getByRole("button", { name: "Delete" })).toBeInTheDocument();
   });
 
   it("Disable calls the real endpoint and refreshes the list on success", async () => {
