@@ -11,7 +11,13 @@ import { createPasswordResetTokenRepository } from "../src/data/password-reset-t
 import { createRefreshTokensRepository } from "../src/data/refresh-tokens.repository.ts";
 import { createMfaRepository } from "../src/data/mfa.repository.ts";
 import { createLocalAuthProvider } from "../src/application/auth-provider.ts";
-import { AccountNotActiveError, createAuthService } from "../src/application/auth.service.ts";
+import {
+  AccountNotActiveError,
+  ActivationTokenAlreadyUsedError,
+  ActivationTokenExpiredError,
+  ActivationTokenNotFoundError,
+  createAuthService,
+} from "../src/application/auth.service.ts";
 import { createMfaService } from "../src/application/mfa.service.ts";
 import { createAdminUsersService } from "../src/application/admin-users.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
@@ -137,6 +143,51 @@ test("full lifecycle: register -> activate -> login -> refresh", async () => {
   // reuse detection, ghs#8's DB-backed reimplementation of legacy's
   // Redis-backed one).
   await assert.rejects(() => authService.refresh(loginResult.tokens.refreshToken));
+});
+
+// ---------------------------------------------------------------------
+// ghs#106: activateAccount distinguishes expired/already-used/invalid --
+// found while scoping the frontend activation-landing issue, which
+// needs genuinely different UI per case (only "expired" offers a
+// resend action). The old activateAccount collapsed all three into one
+// generic thrown Error; this proves the three are now real, distinct
+// outcomes, each verified against a real token's real state in
+// Postgres, not assumed.
+// ---------------------------------------------------------------------
+
+test("activateAccount rejects an unknown/never-issued token with ActivationTokenNotFoundError", async () => {
+  const s = buildServices();
+  await assert.rejects(() => s.authService.activateAccount("this-token-was-never-issued"), ActivationTokenNotFoundError);
+});
+
+test("activateAccount rejects an already-used token with ActivationTokenAlreadyUsedError, and does not re-activate", async () => {
+  const s = buildServices();
+  await s.authService.register({ email: "already-used@example.com", password: "correct-horse-battery", firstName: "Already", lastName: "Used" });
+  const user = await s.users.findByEmail("already-used@example.com");
+  const [activationPayload] = await outboxPayloads(user!.id, "account_activation");
+  const token = activationPayload!.token as string;
+
+  await s.authService.activateAccount(token);
+  await assert.rejects(() => s.authService.activateAccount(token), ActivationTokenAlreadyUsedError);
+});
+
+test("activateAccount rejects an expired token with ActivationTokenExpiredError -- real token state manipulated directly in Postgres, not assumed", async () => {
+  const s = buildServices();
+  await s.authService.register({ email: "expired@example.com", password: "correct-horse-battery", firstName: "Expired", lastName: "Token" });
+  const user = await s.users.findByEmail("expired@example.com");
+  const [activationPayload] = await outboxPayloads(user!.id, "account_activation");
+  const token = activationPayload!.token as string;
+
+  // The 24h TTL can't be waited out in a test -- back-date the real row
+  // instead, exercising the same expires_at <= now() check the real
+  // clock would eventually trigger.
+  await pool.query("UPDATE account_activation_tokens SET expires_at = now() - interval '1 hour' WHERE user_id = $1", [user!.id]);
+
+  await assert.rejects(() => s.authService.activateAccount(token), ActivationTokenExpiredError);
+
+  // Still pending -- a rejected activation attempt makes no change.
+  const reloaded = await s.users.findByEmail("expired@example.com");
+  assert.equal(reloaded!.status, "pending_verification");
 });
 
 test("logout (ghs#59): revokes exactly the presented refresh token, not other active sessions for the same user", async () => {

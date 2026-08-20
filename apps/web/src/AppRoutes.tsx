@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import AppShell from "./components/AppShell";
 import ComponentsCatalogue from "./ComponentsCatalogue";
 import { useAuth } from "./hooks/useAuth";
+import ActivationPage from "./pages/ActivationPage";
 import AdminAccountsPage from "./pages/AdminAccountsPage";
 import AdminCreateUserPage from "./pages/AdminCreateUserPage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
@@ -59,6 +60,13 @@ export default function AppRoutes() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
       </Route>
+      {/* ghs#106: deliberately NOT inside RedirectIfAuthenticated -- the
+          backend's own POST /auth/activate is completely unauthenticated
+          and stateless, unrelated to the caller's own session. Redirecting
+          an already-logged-in visitor away would break the legitimate
+          case of activating a second account (or an admin testing a real
+          link) without first logging out of an unrelated session. */}
+      <Route path="/activate" element={<ActivationPage />} />
       <Route element={<RequireAuth />}>
         {/* ghs#96: the real application shell, applied once at the
             route level -- every authenticated page below is now pure

@@ -23,6 +23,18 @@ const PASSWORD_RESET_TOKEN_TTL_MINUTES = 30;
 export class IncorrectPasswordError extends Error {}
 export class AccountNotActiveError extends Error {}
 
+// ghs#106: distinguishable per-reason errors -- the old activateAccount
+// collapsed "expired", "already used", and "never existed" into one
+// generic thrown Error, and the route's own blanket catch collapsed
+// that further into one 400 message. Found while scoping the frontend
+// activation-landing issue, which needs to render genuinely different
+// UI per case (only "expired" offers a resend action) -- not assumed
+// from the issue's own text, which incorrectly stated the backend
+// already distinguished these.
+export class ActivationTokenNotFoundError extends Error {}
+export class ActivationTokenExpiredError extends Error {}
+export class ActivationTokenAlreadyUsedError extends Error {}
+
 export type LoginResult =
   | { status: "authenticated"; tokens: TokenPair }
   | { status: "mfa_required"; mfaPendingToken: string };
@@ -186,8 +198,10 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     },
 
     async activateAccount(rawToken) {
-      const record = await activationTokens.findValidByHash(hashToken(rawToken));
-      if (!record) throw new Error("invalid or expired activation token");
+      const record = await activationTokens.findByHash(hashToken(rawToken));
+      if (!record) throw new ActivationTokenNotFoundError("invalid activation token");
+      if (record.usedAt) throw new ActivationTokenAlreadyUsedError("activation token already used");
+      if (record.expiresAt <= new Date()) throw new ActivationTokenExpiredError("activation token expired");
 
       await users.setStatus(record.userId, "active");
       await users.markEmailVerified(record.userId);

@@ -1,8 +1,20 @@
 import type { Pool, PoolClient } from "pg";
 
+export interface ActivationTokenRecord {
+  id: string;
+  userId: string;
+  usedAt: Date | null;
+  expiresAt: Date;
+}
+
 export interface ActivationTokenRepository {
   create(userId: string, tokenHash: string, expiresAt: Date, client?: PoolClient): Promise<void>;
-  findValidByHash(tokenHash: string): Promise<{ id: string; userId: string } | null>;
+  // ghs#106: unrestricted lookup (unlike the old findValidByHash, which
+  // only ever returned a row for a currently-valid token) -- the caller
+  // needs to distinguish *why* a token isn't valid (expired vs already
+  // used vs never existed), which requires seeing the row even when
+  // it's no longer usable.
+  findByHash(tokenHash: string): Promise<ActivationTokenRecord | null>;
   markUsed(id: string): Promise<void>;
 }
 
@@ -16,13 +28,13 @@ export function createActivationTokenRepository(pool: Pool): ActivationTokenRepo
       );
     },
 
-    async findValidByHash(tokenHash) {
-      const result = await pool.query<{ id: string; user_id: string }>(
-        `SELECT id, user_id FROM account_activation_tokens
-         WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()`,
+    async findByHash(tokenHash) {
+      const result = await pool.query<{ id: string; user_id: string; used_at: Date | null; expires_at: Date }>(
+        `SELECT id, user_id, used_at, expires_at FROM account_activation_tokens WHERE token_hash = $1`,
         [tokenHash],
       );
-      return result.rows[0] ? { id: result.rows[0].id, userId: result.rows[0].user_id } : null;
+      const row = result.rows[0];
+      return row ? { id: row.id, userId: row.user_id, usedAt: row.used_at, expiresAt: row.expires_at } : null;
     },
 
     async markUsed(id) {

@@ -1,6 +1,12 @@
 import { Router } from "express";
 import type { AuthService } from "../../../application/auth.service.ts";
-import { AccountNotActiveError, IncorrectPasswordError } from "../../../application/auth.service.ts";
+import {
+  AccountNotActiveError,
+  ActivationTokenAlreadyUsedError,
+  ActivationTokenExpiredError,
+  ActivationTokenNotFoundError,
+  IncorrectPasswordError,
+} from "../../../application/auth.service.ts";
 import type { SystemSettingsService } from "../../../application/system-settings.service.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth } from "../middleware/require-auth.ts";
@@ -155,8 +161,23 @@ export function authRouter(service: AuthService, settings: SystemSettingsService
       }
       await service.activateAccount(token);
       res.status(200).json({ message: "Account activated." });
-    } catch {
-      res.status(400).json({ error: "invalid or expired activation token" });
+    } catch (err) {
+      // ghs#106: distinguishable codes, not one generic message -- the
+      // frontend's activation-landing screen shows genuinely different
+      // UI per case (only "expired" offers a resend action).
+      if (err instanceof ActivationTokenExpiredError) {
+        res.status(400).json({ error: "expired_token" });
+        return;
+      }
+      if (err instanceof ActivationTokenAlreadyUsedError) {
+        res.status(400).json({ error: "already_used_token" });
+        return;
+      }
+      if (err instanceof ActivationTokenNotFoundError) {
+        res.status(400).json({ error: "invalid_token" });
+        return;
+      }
+      next(err);
     }
   });
 
