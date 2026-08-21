@@ -638,6 +638,96 @@ test("POST /auth/activate: expired_token for a real token whose real row is back
 });
 
 // ---------------------------------------------------------------------
+// ghs#107: POST /auth/password-reset/confirm's three distinguishable
+// failure codes, over real HTTP -- same reasoning as the activation
+// tests above (ghs#106), applied to the sibling flow.
+// ---------------------------------------------------------------------
+
+async function passwordResetToken(baseUrl: string, adminToken: string, email: string): Promise<{ token: string; userId: string }> {
+  const created = await fetch(`${baseUrl}/api/v1/admin/users`, {
+    method: "POST",
+    headers: authHeader(adminToken),
+    body: JSON.stringify({ email, password: "reset-test-original-pw", role: "player", firstName: "Reset", lastName: "Test", autoActivate: true }),
+  });
+  const { userId } = await created.json();
+  await fetch(`${baseUrl}/api/v1/auth/password-reset/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  const outbox = await pool.query<{ payload: { token: string } }>(
+    `SELECT o.payload FROM notification_outbox o
+     JOIN notification_history h ON h.id = o.notification_history_id
+     WHERE h.user_id = $1 AND h.event_type = 'password_reset'
+     ORDER BY o.created_at DESC LIMIT 1`,
+    [userId],
+  );
+  return { token: outbox.rows[0]!.payload.token, userId };
+}
+
+test("POST /auth/password-reset/confirm: 200 on a real valid token, then a real unknown token is invalid_token", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const { token } = await passwordResetToken(baseUrl, superAdmin.token, "http-reset-ok@example.com");
+
+    const okRes = await fetch(`${baseUrl}/api/v1/auth/password-reset/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, newPassword: "http-reset-new-pw" }),
+    });
+    assert.equal(okRes.status, 200);
+
+    const unknownRes = await fetch(`${baseUrl}/api/v1/auth/password-reset/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "this-token-was-never-issued", newPassword: "irrelevant-pw" }),
+    });
+    assert.equal(unknownRes.status, 400);
+    assert.deepEqual(await unknownRes.json(), { error: "invalid_token" });
+  });
+});
+
+test("POST /auth/password-reset/confirm: already_used_token on a real token's second use", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const { token } = await passwordResetToken(baseUrl, superAdmin.token, "http-reset-reused@example.com");
+
+    await fetch(`${baseUrl}/api/v1/auth/password-reset/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, newPassword: "http-reset-first-pw" }),
+    });
+    const secondRes = await fetch(`${baseUrl}/api/v1/auth/password-reset/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, newPassword: "http-reset-second-pw" }),
+    });
+    assert.equal(secondRes.status, 400);
+    assert.deepEqual(await secondRes.json(), { error: "already_used_token" });
+  });
+});
+
+test("POST /auth/password-reset/confirm: expired_token for a real token whose real row is backdated in Postgres", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const { token, userId } = await passwordResetToken(baseUrl, superAdmin.token, "http-reset-expired@example.com");
+
+    await pool.query("UPDATE password_reset_tokens SET expires_at = now() - interval '1 hour' WHERE user_id = $1", [userId]);
+
+    const res = await fetch(`${baseUrl}/api/v1/auth/password-reset/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, newPassword: "irrelevant-pw" }),
+    });
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "expired_token" });
+  });
+});
+
+// ---------------------------------------------------------------------
 // Authentication boundary: JWT signature verification is what makes
 // role-based authorization trustworthy at all. Retained as verification
 // of the EXISTING boundary (jwt.verify, already in place since Phase 1),

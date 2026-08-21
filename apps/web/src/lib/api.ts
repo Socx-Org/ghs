@@ -223,6 +223,27 @@ export async function resendActivation(email: string): Promise<{ message: string
   }
 }
 
+// ghs#107. Always the same response regardless of whether the email is
+// registered -- the backend's own enumeration protection; the UI must
+// not contradict it.
+export async function requestPasswordReset(email: string): Promise<{ message: string }> {
+  try {
+    const { data } = await bootstrapClient.post<{ message: string }>("/auth/password-reset/request", { email });
+    return data;
+  } catch (error) {
+    throw new ApiError(errorMessage(error), axios.isAxiosError(error) ? error.response?.status : undefined);
+  }
+}
+
+export async function confirmPasswordReset(token: string, newPassword: string): Promise<{ message: string }> {
+  try {
+    const { data } = await bootstrapClient.post<{ message: string }>("/auth/password-reset/confirm", { token, newPassword });
+    return data;
+  } catch (error) {
+    throw new ApiError(errorMessage(error), axios.isAxiosError(error) ? error.response?.status : undefined);
+  }
+}
+
 export interface CreateUserRequest {
   email: string;
   password: string;

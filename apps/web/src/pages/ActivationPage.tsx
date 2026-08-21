@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Alert, Button, FormField, Input, Logo, Spinner } from "../components";
 import { ApiError, activateAccount, resendActivation } from "../lib/api";
+import { classifyTokenError } from "../lib/tokenOutcome";
 
 // ghs#106. Same split-panel visual pattern as LoginPage/RegisterPage.
 // Four real, distinct outcomes -- no generic "something went wrong"
@@ -14,19 +15,10 @@ import { ApiError, activateAccount, resendActivation } from "../lib/api";
 // (see auth.service.ts's ActivationToken*Error classes) -- the original
 // issue text assumed this was already true, which it wasn't; verified
 // directly, not assumed, before building this screen on top of it.
-
-type ActivationOutcome = "expired" | "already_used" | "invalid";
-
-function classifyError(error: unknown): ActivationOutcome {
-  if (error instanceof ApiError) {
-    if (error.message === "expired_token") return "expired";
-    if (error.message === "already_used_token") return "already_used";
-  }
-  // invalid_token, a missing/malformed response, or a network failure
-  // all land here -- none of them have a more specific, honest story to
-  // tell than "this link isn't valid."
-  return "invalid";
-}
+//
+// ghs#107: classifyTokenError moved to lib/tokenOutcome.ts once
+// ResetPasswordPage needed the byte-for-byte identical classification
+// (same wire codes, same reason) -- no longer defined locally here.
 
 const resendSchema = z.object({ email: z.string().email("Enter a valid email address") });
 type ResendFormValues = z.infer<typeof resendSchema>;
@@ -123,14 +115,14 @@ export default function ActivationPage() {
                 Go to sign in
               </Button>
             </>
-          ) : classifyError(activateQuery.error) === "expired" ? (
+          ) : classifyTokenError(activateQuery.error) === "expired" ? (
             <>
               <h1 className="mt-8 text-2xl font-semibold text-text">This activation link has expired</h1>
               <p className="mt-2 text-sm text-text-muted">Enter your email address and we'll send you a new one.</p>
               <ResendActivationForm />
               <BackToSignIn />
             </>
-          ) : classifyError(activateQuery.error) === "already_used" ? (
+          ) : classifyTokenError(activateQuery.error) === "already_used" ? (
             <>
               <h1 className="mt-8 text-2xl font-semibold text-text">This account is already activated</h1>
               <p className="mt-2 text-sm text-text-muted">This activation link has already been used. You can sign in directly.</p>

@@ -6,6 +6,9 @@ import {
   ActivationTokenExpiredError,
   ActivationTokenNotFoundError,
   IncorrectPasswordError,
+  PasswordResetTokenAlreadyUsedError,
+  PasswordResetTokenExpiredError,
+  PasswordResetTokenNotFoundError,
 } from "../../../application/auth.service.ts";
 import type { SystemSettingsService } from "../../../application/system-settings.service.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
@@ -224,8 +227,23 @@ export function authRouter(service: AuthService, settings: SystemSettingsService
       }
       await service.resetPassword(token, newPassword);
       res.status(200).json({ message: "Password reset." });
-    } catch {
-      res.status(400).json({ error: "invalid or expired reset token" });
+    } catch (err) {
+      // ghs#107: distinguishable codes, same reasoning and same wire
+      // shape as POST /auth/activate (ghs#106) -- the frontend's reset-
+      // confirmation screen renders genuinely different UI per case.
+      if (err instanceof PasswordResetTokenExpiredError) {
+        res.status(400).json({ error: "expired_token" });
+        return;
+      }
+      if (err instanceof PasswordResetTokenAlreadyUsedError) {
+        res.status(400).json({ error: "already_used_token" });
+        return;
+      }
+      if (err instanceof PasswordResetTokenNotFoundError) {
+        res.status(400).json({ error: "invalid_token" });
+        return;
+      }
+      next(err);
     }
   });
 
