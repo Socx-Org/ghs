@@ -187,4 +187,88 @@ describe("RoundEntryPage", () => {
     expect(screen.queryByLabelText("Strokes")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Submit for review" })).not.toBeInTheDocument();
   });
+
+  // ghs#68: the real gap this issue closes -- a rejected round
+  // previously went straight into this same entry form with zero
+  // indication it had been rejected, or why.
+  describe("rejection reason", () => {
+    it("shows the status badge and the real rejection reason prominently for a rejected round", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound({
+        status: "rejected",
+        rejectionReason: "Hole 2's stroke count looks wrong -- please double check.",
+      }));
+
+      renderEntry();
+
+      expect(await screen.findByText("Rejected")).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent("Hole 2's stroke count looks wrong -- please double check.");
+      // Still editable -- the hole-entry form renders underneath, same
+      // as any other editable status.
+      expect(screen.getAllByLabelText("Strokes").length).toBeGreaterThan(0);
+    });
+
+    it("shows no rejection alert for a draft round (nothing to show)", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "draft" }));
+
+      renderEntry();
+      await screen.findByText("Draft");
+
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("shows the status badge but no rejection alert for an amending round -- no reason exists to show (confirmed directly: reopenForAmendment never persists its reason on the round)", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "amending", rejectionReason: null }));
+
+      renderEntry();
+
+      expect(await screen.findByText("Amending")).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("edits and resubmits a rejected round, landing back in pending for real", async () => {
+      const round = makeRound({
+        status: "rejected",
+        rejectionReason: "Hole 2's stroke count looks wrong -- please double check.",
+        holeScores: [
+          { id: "hs-1", holeNumber: 1, strokes: 4, putts: null, gir: false, fairwayResult: null, inSand: false, penalties: 0, netDoubleBogeyAdjusted: 4 },
+          { id: "hs-2", holeNumber: 2, strokes: 3, putts: null, gir: false, fairwayResult: null, inSand: false, penalties: 0, netDoubleBogeyAdjusted: 3 },
+        ],
+      });
+      mock.onGet("/rounds/round-1").reply(() => [200, round]);
+      mock.onPost("/rounds/round-1/holes").reply((config) => {
+        const body = JSON.parse(config.data);
+        const hole = round.holeScores.find((h) => h.holeNumber === body.holeNumber)!;
+        hole.strokes = body.strokes;
+        hole.netDoubleBogeyAdjusted = body.strokes;
+        return [200, hole];
+      });
+      mock.onPost("/rounds/round-1/submit").reply(200, { round: makeRound({ status: "pending" }), recalculation: null });
+      mock.onGet("/players/me").reply(200, { id: "player-1", clubId: null, firstName: "A", lastName: "B", country: "GB", createdAt: "2026-01-01T00:00:00.000Z", handicapIndex: null, lowHandicapIndex: null });
+      mock.onGet("/players/player-1/rounds").reply(200, []);
+
+      renderEntry();
+      await screen.findByRole("alert");
+
+      // The actual correction the rejection reason asks for -- hole 2's
+      // stroke count, 3 -> 4 -- via the real hole-entry form, not a
+      // pre-seeded fixture. Proves this is a genuine edit-then-resubmit
+      // loop, not just a resubmit of unchanged data.
+      const holeTwoCard = screen.getByText("Par 3 · Stroke index 2").closest<HTMLElement>("div.rounded-lg")!;
+      const strokesInput = within(holeTwoCard).getByLabelText("Strokes");
+      await userEvent.clear(strokesInput);
+      await userEvent.type(strokesInput, "4");
+      await userEvent.click(within(holeTwoCard).getByRole("button", { name: "Save hole" }));
+
+      await waitFor(() => expect(mock.history.post?.some((r) => r.url === "/rounds/round-1/holes")).toBe(true));
+      const holeBody = JSON.parse(mock.history.post!.find((r) => r.url === "/rounds/round-1/holes")!.data);
+      expect(holeBody).toMatchObject({ holeNumber: 2, strokes: 4 });
+
+      const submitButton = await screen.findByRole("button", { name: "Submit for review" });
+      expect(submitButton).not.toBeDisabled();
+      await userEvent.click(submitButton);
+
+      await waitFor(() => expect(screen.getByText("Recent rounds")).toBeInTheDocument());
+      expect(mock.history.post!.some((r) => r.url === "/rounds/round-1/submit")).toBe(true);
+    });
+  });
 });

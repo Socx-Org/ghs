@@ -175,6 +175,35 @@ describe("AppRoutes", () => {
     expect(screen.getByText("Course details")).toBeInTheDocument();
   });
 
+  it("redirects /admin/rounds/pending to /login when unauthenticated (ghs#67)", () => {
+    renderAt("/admin/rounds/pending");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("redirects /admin/rounds/pending to / for an authenticated non-admin (ghs#67)", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/admin/rounds/pending");
+    expect(screen.queryByRole("heading", { name: "Pending rounds" })).not.toBeInTheDocument();
+    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
+  });
+
+  it("renders the pending queue at /admin/rounds/pending for an admin (ghs#67)", () => {
+    setTokens(ADMIN_TOKENS);
+    renderAt("/admin/rounds/pending");
+    expect(screen.getByRole("heading", { name: "Pending rounds" })).toBeInTheDocument();
+  });
+
+  it("redirects /admin/rounds/:id to /login when unauthenticated (ghs#67)", () => {
+    renderAt("/admin/rounds/some-round-id");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("renders the round-review screen at /admin/rounds/:id for an admin (ghs#67)", () => {
+    setTokens(ADMIN_TOKENS);
+    renderAt("/admin/rounds/some-round-id");
+    expect(screen.getByRole("heading", { name: "Review round" })).toBeInTheDocument();
+  });
+
   it("redirects /admin/users/new to /login when unauthenticated (ghs#86)", () => {
     renderAt("/admin/users/new");
     expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
