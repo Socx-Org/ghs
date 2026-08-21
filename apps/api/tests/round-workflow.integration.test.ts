@@ -256,7 +256,7 @@ test("deleteRound soft-deletes and recalculates when the round had a differentia
   const baseline = await recalculationOrchestrator.recalculatePlayerHandicap(player.id, "round_approved");
   assert.equal(baseline.handicapIndex, 8.6); // {10,12,14,20} -> lowest 1 (10), adj -1 -> 8.6
 
-  const result = await roundsService.deleteRound(toDeleteId);
+  const result = await roundsService.deleteRound(toDeleteId, "admin");
 
   assert.equal(result.round, null, "a soft-deleted round is invisible to the same filtered read every other round uses");
   assert.ok(result.recalculation);
@@ -266,6 +266,117 @@ test("deleteRound soft-deletes and recalculates when the round had a differentia
 
   // Genuinely gone, not just excluded from the calculation.
   assert.equal(await roundsRepo.get(toDeleteId), null);
+});
+
+// ghs#147 (platform-owner decision): a player may delete their own
+// round while it's still editable (draft/rejected/amending), but never
+// an already-approved one -- only admin/super_admin keep the
+// unrestricted-status behaviour proven above.
+test("deleteRound (ghs#147): a player caller can delete their own editable-status round, real database proof", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "SelfDelete", lastName: "Editable" });
+  const { roundsRepo, roundsService } = buildServices();
+
+  const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  assert.equal(round.status, "draft");
+
+  const result = await roundsService.deleteRound(round.id, "player");
+
+  assert.equal(result.round, null);
+  assert.equal(result.recalculation, null, "a draft round never had a differential -- nothing to recalculate");
+  assert.equal(await roundsRepo.get(round.id), null, "genuinely gone");
+});
+
+test("deleteRound (ghs#147): a player caller cannot delete their own round once it's no longer editable (pending/approved)", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "SelfDelete", lastName: "Blocked" });
+  const { roundsRepo, roundsService } = buildServices();
+
+  const pendingRound = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsRepo.setStatus(pendingRound.id, "pending");
+  await assert.rejects(
+    () => roundsService.deleteRound(pendingRound.id, "player"),
+    /cannot delete a round in status 'pending'/,
+  );
+
+  const approvedId = await createApprovedRound(player.id, teeConfigurationId, "2026-05-02T09:00:00.000Z", 12.0);
+  await assert.rejects(
+    () => roundsService.deleteRound(approvedId, "player"),
+    /cannot delete a round in status 'approved'/,
+  );
+
+  // Genuinely untouched by either rejected attempt.
+  assert.ok(await roundsRepo.get(pendingRound.id));
+  assert.ok(await roundsRepo.get(approvedId));
+});
+
+test("HTTP DELETE /rounds/:id (ghs#147): a player deletes their own draft round directly (200), the same route admin uses", async () => {
+  const authConfig: AuthConfig = {
+    jwtSecret: "round-workflow-147-test-secret",
+    jwtAccessExpiresInSeconds: 900,
+    jwtRefreshExpiresInSeconds: 2_592_000,
+    mfaPendingExpiresInSeconds: 300,
+    mfaEncryptionKey: randomBytes(32),
+  };
+
+  const users = createUsersRepository(pool);
+  const players = createPlayersRepository(pool);
+  const activationTokens = createActivationTokenRepository(pool);
+  const passwordResetTokens = createPasswordResetTokenRepository(pool);
+  const refreshTokens = createRefreshTokensRepository(pool);
+  const mfaRepo = createMfaRepository(pool);
+  const clubsRepo = createClubsRepository(pool);
+  const coursesRepo = createCoursesRepository(pool);
+  const settingsRepo = createSystemSettingsRepository(pool);
+  const { roundsRepo, roundsService, notificationsRepository } = buildServices();
+
+  const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
+  const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
+  const systemSettingsService = createSystemSettingsService(settingsRepo);
+  const authService = createAuthService({
+    pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+  });
+  const clubsService = createClubsService(clubsRepo, logger);
+  const coursesService = createCoursesService(coursesRepo, logger);
+  const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
+  const pccService = createPccService(createPccRepository(pool));
+  const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
+  const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
+
+  const app = createApp({
+    logger, clubsService, coursesService, authService, mfaService,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, playersRepository: players, authProvider,
+  });
+
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once("listening", resolve));
+  const { port } = server.address() as { port: number };
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const teeConfigurationId = await createTeeConfiguration();
+    const playerUser = await adminUsersService.adminCreateUser({
+      email: "self-delete-player@example.com", password: "player-pw-1", role: "player",
+      firstName: "SelfDelete", lastName: "Http", autoActivate: true,
+    });
+    const playerRecord = await players.findByUserId(playerUser.userId);
+    const login = await authService.login("self-delete-player@example.com", "player-pw-1");
+    if (login.status !== "authenticated") throw new Error("unreachable");
+    const asPlayer = { Authorization: `Bearer ${login.tokens.accessToken}` };
+
+    const round = await roundsRepo.create({ playerId: playerRecord!.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+
+    const response = await fetch(`${baseUrl}/api/v1/rounds/${round.id}`, { method: "DELETE", headers: asPlayer });
+    assert.equal(response.status, 200);
+    const result = await response.json() as RoundWorkflowResult;
+    assert.equal(result.round, null);
+    assert.equal(await roundsRepo.get(round.id), null, "genuinely gone");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test("amendment lifecycle end-to-end: reopen retracts before any correction, re-approval re-includes the corrected differential (ghs#23, platform-owner-approved design)", async () => {
@@ -430,8 +541,9 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
     const asPlayer = { "Content-Type": "application/json", Authorization: `Bearer ${playerToken}` };
     const asAdmin = { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` };
 
-    // A player cannot reject, reopen, or delete -- these are real
-    // workflow actions, admin-only (matching legacy's own behaviour).
+    // A player cannot reject or reopen -- these remain real workflow
+    // actions, admin-only (matching legacy's own behaviour), unaffected
+    // by ghs#147.
     const playerReject = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/status`, {
       method: "PATCH", headers: asPlayer, body: JSON.stringify({ status: "rejected", rejectionReason: "x" }),
     });
@@ -442,8 +554,24 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
     });
     assert.equal(playerReopen.status, 403);
 
-    const playerDelete = await fetch(`${baseUrl}/api/v1/rounds/${round.id}`, { method: "DELETE", headers: asPlayer });
-    assert.equal(playerDelete.status, 403);
+    // ghs#147: delete is no longer purely admin-only -- the OWNING
+    // player clears the authorization gate, but this round is
+    // 'pending' (not editable), so the service's own status
+    // restriction rejects it with 409, not 403. A real ownership
+    // boundary (a different player entirely) still gets 403 --
+    // asserted separately right after.
+    const playerDeleteOwnPending = await fetch(`${baseUrl}/api/v1/rounds/${round.id}`, { method: "DELETE", headers: asPlayer });
+    assert.equal(playerDeleteOwnPending.status, 409, "a player cannot delete their own round once it's no longer editable");
+
+    const otherPlayerUser = await adminUsersService.adminCreateUser({
+      email: "workflow-other-player@example.com", password: "other-player-pw-1", role: "player",
+      firstName: "Other", lastName: "Player", autoActivate: true,
+    });
+    const otherPlayerLogin = await authService.login("workflow-other-player@example.com", "other-player-pw-1");
+    if (otherPlayerLogin.status !== "authenticated") throw new Error("unreachable");
+    const asOtherPlayer = { "Content-Type": "application/json", Authorization: `Bearer ${otherPlayerLogin.tokens.accessToken}` };
+    const otherPlayerDelete = await fetch(`${baseUrl}/api/v1/rounds/${round.id}`, { method: "DELETE", headers: asOtherPlayer });
+    assert.equal(otherPlayerDelete.status, 403, "a different player entirely cannot delete someone else's round, regardless of status");
 
     // Admin reject without a reason is a validation error, not a silent no-op.
     const rejectNoReason = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/status`, {

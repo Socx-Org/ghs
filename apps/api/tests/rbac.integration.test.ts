@@ -194,7 +194,13 @@ const ADMIN_GATED_ROUTES: RouteCase[] = [
   // and reach RoundNotFoundError -> 404, never 401/403), same pattern
   // already used above for PATCH /admin/tee-configurations/:id/pcc.
   { name: "PATCH /rounds/:id/status", method: "PATCH", path: "/rounds/00000000-0000-0000-0000-000000000000/status", body: { status: "approved" } },
-  { name: "DELETE /rounds/:id", method: "DELETE", path: "/rounds/00000000-0000-0000-0000-000000000000" },
+  // ghs#147: DELETE /rounds/:id is deliberately NOT in this admin-gated
+  // matrix any more -- a player may now delete their own round too
+  // (status-restricted), so a dummy UUID reaches the route's own
+  // 404-before-403 ordering (RoundNotFoundError) for a player just like
+  // it does for an admin, not a 401/403. Its own ownership/status-
+  // restriction behaviour is covered by dedicated tests in
+  // round-workflow.integration.test.ts instead.
   { name: "POST /players/:id/handicap-overrides", method: "POST", path: "/players/00000000-0000-0000-0000-000000000000/handicap-overrides", body: { newIndex: 10.0, reason: "RBAC matrix test" } },
   // ghs#61 -- a real list endpoint, no dummy-ID path param needed; the
   // authorization gate is exercised identically either way.

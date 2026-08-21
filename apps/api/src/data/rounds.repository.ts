@@ -50,6 +50,24 @@ export interface RoundSummary {
   status: RoundStatus;
 }
 
+// ghs#147: the "My Rounds" list's own row shape -- same course/tee-name
+// enrichment AdminRoundListItem already has (#100/#113), applied to the
+// player's-own-rounds query instead. A separate type from RoundSummary
+// above (not an extension of it) -- RoundSummary is also the building
+// block toRound() spreads into the full Round aggregate (get/
+// getForUpdate's own queries, neither of which joins courses/
+// tee_configurations), so widening it would break those call sites.
+export interface PlayerRoundListItem {
+  id: string;
+  playerId: string;
+  courseId: string;
+  courseName: string;
+  teeConfigurationId: string;
+  teeConfigurationName: string;
+  playedAt: string;
+  status: RoundStatus;
+}
+
 // ghs#61: a purpose-built, lightweight projection for the admin pending-
 // review queue -- deliberately not the full Round aggregate (no hole
 // scores, no score fields an admin doesn't need just to decide which
@@ -200,7 +218,7 @@ export interface RoundsRepository {
   addHoleScore(roundId: string, input: CreateHoleScoreInput, client?: PoolClient): Promise<HoleScore>;
   updateScores(id: string, update: RoundScoreUpdate): Promise<Round>;
   get(id: string): Promise<Round | null>;
-  listByPlayer(playerId: string): Promise<RoundSummary[]>;
+  listByPlayer(playerId: string): Promise<PlayerRoundListItem[]>;
   // ghs#61: every round awaiting review, across all players -- the admin
   // pending-queue's own real query, not a filtered view of listByPlayer
   // (which is player-scoped) or get (which is single-round). Deliberately
@@ -505,11 +523,44 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
     },
 
     async listByPlayer(playerId) {
-      const result = await pool.query<RoundRow>(
-        `SELECT ${ROUND_COLUMNS} FROM rounds WHERE player_id = $1 AND deleted_at IS NULL ORDER BY played_at DESC`,
+      // ghs#147: course/tee names joined in, same enrichment
+      // listAdminRounds already does for the admin equivalent (#100/
+      // #113) -- the "My Rounds" list needs this to render meaningfully
+      // without an extra per-row fetch, and RoundSummary/toRoundSummary
+      // deliberately stay untouched (see PlayerRoundListItem's own doc
+      // comment for why).
+      const result = await pool.query<{
+        id: string;
+        player_id: string;
+        course_id: string;
+        course_name: string;
+        tee_configuration_id: string;
+        tee_configuration_name: string;
+        played_at: Date;
+        status: RoundStatus;
+      }>(
+        `SELECT
+           r.id, r.player_id,
+           c.id AS course_id, c.name AS course_name,
+           tc.id AS tee_configuration_id, tc.name AS tee_configuration_name,
+           r.played_at, r.status
+         FROM rounds r
+         JOIN tee_configurations tc ON tc.id = r.tee_configuration_id
+         JOIN courses c ON c.id = tc.course_id
+         WHERE r.player_id = $1 AND r.deleted_at IS NULL
+         ORDER BY r.played_at DESC, r.id ASC`,
         [playerId],
       );
-      return result.rows.map(toRoundSummary);
+      return result.rows.map((row) => ({
+        id: row.id,
+        playerId: row.player_id,
+        courseId: row.course_id,
+        courseName: row.course_name,
+        teeConfigurationId: row.tee_configuration_id,
+        teeConfigurationName: row.tee_configuration_name,
+        playedAt: row.played_at.toISOString(),
+        status: row.status,
+      }));
     },
 
     async listPendingQueue() {

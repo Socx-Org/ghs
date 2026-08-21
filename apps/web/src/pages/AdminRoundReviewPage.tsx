@@ -1,27 +1,8 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Alert,
-  Button,
-  Card,
-  CardBody,
-  CardHeader,
-  Modal,
-  RoundStatusBadge,
-  Skeleton,
-  Stat,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeaderCell,
-  TableRow,
-  Textarea,
-  useToast,
-} from "../components";
+import { Alert, Button, Card, CardBody, CardHeader, HolesTable, Modal, RoundStatusBadge, Skeleton, Stat, Textarea, useToast } from "../components";
 import { ApiError, approveRound, deleteRound, getPlayer, getRound, getTeeConfiguration, rejectRound } from "../lib/api";
-import type { FairwayResult, HoleScore } from "../types/domain";
 
 // ghs#67: the admin's round-review screen -- reached from the pending
 // queue, but not itself queue-scoped (it re-fetches everything for
@@ -35,6 +16,11 @@ import type { FairwayResult, HoleScore } from "../types/domain";
 // Approve/Reject (only meaningful while pending), rounds.service.ts's
 // deleteRound allows deletion from any status, so its button isn't
 // gated by isPending below.
+//
+// ghs#147: this screen's own hole-by-hole table was extracted into the
+// shared HolesTable component once RoundDetailsPage (the player's own
+// round-detail view) needed the exact same presentation -- not worth a
+// third duplication.
 
 function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -42,49 +28,6 @@ function formatPlayedAt(iso: string): string {
 
 function describeError(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
-}
-
-function fairwayLabel(result: FairwayResult | null): string {
-  if (result === "hit") return "Hit";
-  if (result === "missed_left") return "Missed L";
-  if (result === "missed_right") return "Missed R";
-  return "—";
-}
-
-function HolesTable({ holes, holeScores }: { holes: { id: string; holeNumber: number; par: number }[]; holeScores: HoleScore[] }) {
-  return (
-    <Table>
-      <TableHead>
-        <TableRow>
-          <TableHeaderCell>Hole</TableHeaderCell>
-          <TableHeaderCell>Par</TableHeaderCell>
-          <TableHeaderCell>Strokes</TableHeaderCell>
-          <TableHeaderCell>Putts</TableHeaderCell>
-          <TableHeaderCell>GIR</TableHeaderCell>
-          <TableHeaderCell>Fairway</TableHeaderCell>
-          <TableHeaderCell>Sand</TableHeaderCell>
-          <TableHeaderCell>Penalties</TableHeaderCell>
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {holes.map((hole) => {
-          const score = holeScores.find((s) => s.holeNumber === hole.holeNumber);
-          return (
-            <TableRow key={hole.id}>
-              <TableCell className="font-medium">{hole.holeNumber}</TableCell>
-              <TableCell>{hole.par}</TableCell>
-              <TableCell>{score?.strokes ?? "—"}</TableCell>
-              <TableCell>{score?.putts ?? "—"}</TableCell>
-              <TableCell>{score ? (score.gir ? "Yes" : "No") : "—"}</TableCell>
-              <TableCell>{score ? fairwayLabel(score.fairwayResult) : "—"}</TableCell>
-              <TableCell>{score ? (score.inSand ? "Yes" : "No") : "—"}</TableCell>
-              <TableCell>{score?.penalties ?? "—"}</TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
-  );
 }
 
 export default function AdminRoundReviewPage() {

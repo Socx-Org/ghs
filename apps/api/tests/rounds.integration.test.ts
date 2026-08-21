@@ -166,6 +166,32 @@ test("a round can be created with zero hole scores and have them added increment
   assert.equal(midRound!.holeScores.length, 2, "a round mid-play is not forced to have all 18 holes");
 });
 
+test("listByPlayer (ghs#147): real course/tee names joined in, ordered newest-played-first, scoped to the requesting player only", async () => {
+  const courses = createCoursesRepository(pool);
+  const course = await courses.create({
+    name: "My Rounds Test Course", country: "ES",
+    teeConfigurations: [{ name: "Blue", holeCount: 18, courseRating: 71.2, slopeRating: 128, holes: [] }],
+  });
+  const teeConfigurationId = course.teeConfigurations[0]!.id;
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "MyRounds", lastName: "Test" });
+  const otherPlayer = await players.create({ firstName: "Other", lastName: "Player" });
+  const rounds = createRoundsRepository(pool);
+
+  const older = await rounds.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  const newer = await rounds.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-05T09:00:00.000Z" });
+  await rounds.create({ playerId: otherPlayer.id, teeConfigurationId, playedAt: "2026-05-06T09:00:00.000Z" });
+
+  const list = await rounds.listByPlayer(player.id);
+
+  assert.equal(list.length, 2, "only this player's own rounds, not the other player's");
+  assert.deepEqual(list.map((r) => r.id), [newer.id, older.id], "newest played date first");
+  assert.equal(list[0]!.courseName, "My Rounds Test Course");
+  assert.equal(list[0]!.teeConfigurationName, "Blue");
+  assert.equal(list[0]!.courseId, course.id);
+  assert.equal(list[0]!.teeConfigurationId, teeConfigurationId);
+});
+
 test("HTTP: a player can submit their own round and add hole scores, but not another player's", async () => {
   const authConfig: AuthConfig = {
     jwtSecret: "rounds-test-secret",

@@ -6,12 +6,12 @@ import type {
   ListAdminRoundsFilter,
   ListAdminRoundsResult,
   PendingRoundQueueItem,
+  PlayerRoundListItem,
   Round,
   RoundForUpdate,
   RoundScoreUpdate,
   RoundsRepository,
   RoundStatus,
-  RoundSummary,
 } from "../data/rounds.repository.ts";
 import type { CoursesRepository } from "../data/courses.repository.ts";
 import type { ScoringService } from "./scoring.service.ts";
@@ -57,7 +57,7 @@ export interface RoundsService {
   // write-only-by-nobody for columns this schema already has.
   updateScores(id: string, update: RoundScoreUpdate): Promise<Round>;
   getRound(id: string): Promise<Round | null>;
-  listRoundsForPlayer(playerId: string): Promise<RoundSummary[]>;
+  listRoundsForPlayer(playerId: string): Promise<PlayerRoundListItem[]>;
   // ghs#61: the admin pending-review queue, across all players -- a thin
   // pass-through to the repository's own purpose-built query. No
   // business logic belongs here (unlike the workflow transitions below),
@@ -117,10 +117,21 @@ export interface RoundsService {
   // only logged that it should have.
   rejectRound(id: string, reason: string): Promise<RoundWorkflowResult>;
 
-  // Soft delete, any status. Recalculates only if the round had a real
-  // differential (matches the same "did this round ever actually
-  // contribute" check rejectRound uses).
-  deleteRound(id: string): Promise<RoundWorkflowResult>;
+  // Soft delete. Recalculates only if the round had a real differential
+  // (matches the same "did this round ever actually contribute" check
+  // rejectRound uses).
+  //
+  // callerRole (ghs#147, platform-owner decision): admin/super_admin
+  // may delete a round in any status, unchanged. A player may only
+  // delete their own round while it's still editable
+  // (draft/rejected/amending) -- never one that's already
+  // pending/approved, since an approved round has genuinely
+  // contributed to real handicap history and quietly erasing it is a
+  // handicap-integrity question, not a UI detail. The route layer
+  // handles the ownership check (identity.sub === round.playerId);
+  // this status restriction is enforced here, under the same lock as
+  // every other authoritative status check in this file.
+  deleteRound(id: string, callerRole: "player" | "admin" | "super_admin"): Promise<RoundWorkflowResult>;
 
   // approved -> amending, mandatory reason. The round is excluded from
   // the player's effective differentials the moment its status changes
@@ -551,10 +562,19 @@ export function createRoundsService(
       );
     },
 
-    async deleteRound(id) {
+    async deleteRound(id, callerRole) {
       return runWorkflowTransition(
         id,
-        () => { /* deletion is allowed from any status */ },
+        (existing) => {
+          // ghs#147: the authoritative check, under the same lock as
+          // every other status-sensitive transition in this file --
+          // an admin/super_admin caller is unrestricted, matching the
+          // pre-existing behaviour; a player caller may only delete
+          // their own round while it's still editable.
+          if (callerRole === "player" && !isEditableStatus(existing.status)) {
+            throw new InvalidRoundTransitionError(`cannot delete a round in status '${existing.status}'`);
+          }
+        },
         async (client, existing) => {
           await repository.softDelete(id, client);
           if (existing.scoreDifferential === null) {

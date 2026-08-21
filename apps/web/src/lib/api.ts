@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { AccountProfile, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PendingRoundQueueItem, PlayerProfile, Round, RoundSummary, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
+import type { AccountProfile, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PendingRoundQueueItem, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -319,8 +319,8 @@ export async function getMyPlayerProfile(): Promise<PlayerProfile> {
   return data;
 }
 
-export async function getPlayerRounds(playerId: string): Promise<RoundSummary[]> {
-  const { data } = await api.get<RoundSummary[]>(`/players/${playerId}/rounds`);
+export async function getPlayerRounds(playerId: string): Promise<PlayerRoundListItem[]> {
+  const { data } = await api.get<PlayerRoundListItem[]>(`/players/${playerId}/rounds`);
   return data;
 }
 

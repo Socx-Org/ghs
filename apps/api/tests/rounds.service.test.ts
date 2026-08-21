@@ -8,12 +8,12 @@ import type {
   CreateHoleScoreInput,
   CreateRoundInput,
   HoleScore,
+  PlayerRoundListItem,
   Round,
   RoundForUpdate,
   RoundScoreUpdate,
   RoundsRepository,
   RoundStatus,
-  RoundSummary,
 } from "../src/data/rounds.repository.ts";
 import type { CoursesRepository, TeeConfiguration } from "../src/data/courses.repository.ts";
 import type { DailyPcc } from "../src/data/pcc.repository.ts";
@@ -322,10 +322,19 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
       if (deleted.has(id)) return null;
       return rounds.get(id) ?? null;
     },
-    async listByPlayer(playerId: string): Promise<RoundSummary[]> {
+    async listByPlayer(playerId: string): Promise<PlayerRoundListItem[]> {
+      // ghs#147: this fake has no course/tee fixtures wired in at all
+      // (a pure round-filtering unit test, not concerned with names) --
+      // fixed placeholder course/tee fields satisfy the real shape
+      // without fabricating a whole courses fixture just for this.
       return [...rounds.values()]
         .filter((r) => r.playerId === playerId && !deleted.has(r.id))
-        .map(({ id, playerId: p, teeConfigurationId, playedAt, status }) => ({ id, playerId: p, teeConfigurationId, playedAt, status }));
+        .map(({ id, playerId: p, teeConfigurationId, playedAt, status }) => ({
+          id, playerId: p, teeConfigurationId,
+          courseId: "course-1", courseName: "Fake Course",
+          teeConfigurationName: "Fake Tee",
+          playedAt, status,
+        }));
     },
     async listPendingQueue() { throw new Error("not used by these tests"); },
     async listAdminRounds() { throw new Error("not used by these tests"); },
@@ -745,7 +754,7 @@ test("deleteRound soft-deletes and recalculates when the round had a differentia
   await repo.updateScores(round.id, { scoreDifferential: 8.0 });
   await repo.setStatus(round.id, "approved");
 
-  const result = await service.deleteRound(round.id);
+  const result = await service.deleteRound(round.id, "admin");
 
   assert.equal(await service.getRound(round.id), null, "soft-deleted rounds are excluded from reads");
   assert.equal(recalculation.calls.length, 1);
