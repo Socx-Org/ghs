@@ -125,7 +125,7 @@ export function createApp(deps: AppDeps): Express {
   v1Router.use(adminPccRouter(deps.pccService, deps.authProvider));
   v1Router.use(clubsRouter(deps.clubsService, deps.authProvider));
   v1Router.use(coursesRouter(deps.coursesService, deps.authProvider));
-  v1Router.use(teeConfigurationsRouter(deps.coursesService));
+  v1Router.use(teeConfigurationsRouter(deps.coursesService, deps.authProvider));
   v1Router.use(roundsRouter(deps.roundsService, deps.playersRepository, deps.authProvider));
   v1Router.use(handicapOverridesRouter(deps.handicapOverridesService, deps.playersRepository, deps.authProvider));
   v1Router.use(playersRouter(deps.playersRepository, deps.authProvider));
@@ -136,6 +136,19 @@ export function createApp(deps: AppDeps): Express {
   // structurally (OPS-050.3: never the raw request body, which may contain
   // sensitive fields) and never leak an internal message to the client.
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+    // express.json() (body-parser) throws its own error -- status 400,
+    // type "entity.parse.failed" -- for a request body that isn't valid
+    // JSON at all (or, under its default strict mode, valid JSON that
+    // isn't array/object-shaped, e.g. a bare `null`/number/string).
+    // Surfaced here as a clean 400 rather than swept into the generic
+    // 500 below -- a malformed request body is a client error on every
+    // JSON-bodied route in this app, not an unhandled server fault
+    // (found while fixing a PATCH /courses/:id review finding, PR #131
+    // -- this gap predates that route and isn't specific to it).
+    if ((err as { type?: string }).type === "entity.parse.failed") {
+      res.status(400).json({ error: "request body is not valid JSON" });
+      return;
+    }
     deps.logger.error("unhandled request error", { error: err.message });
     res.status(500).json({ error: "internal server error" });
   });

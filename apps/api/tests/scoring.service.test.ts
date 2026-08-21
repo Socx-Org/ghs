@@ -108,6 +108,11 @@ function fakeCoursesRepository(): CoursesRepository {
     async getTeeConfiguration(id) {
       return id === FAKE_TEE_CONFIGURATION.id ? FAKE_TEE_CONFIGURATION : null;
     },
+    async update() { throw new Error("not used"); },
+    async delete() { throw new Error("not used"); },
+    async createTeeConfiguration() { throw new Error("not used"); },
+    async updateTeeConfiguration() { throw new Error("not used"); },
+    async deleteTeeConfiguration() { throw new Error("not used"); },
   };
 }
 
