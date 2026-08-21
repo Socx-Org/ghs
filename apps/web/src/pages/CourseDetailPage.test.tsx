@@ -221,6 +221,32 @@ describe("CourseDetailPage", () => {
       expect(body.holes).toHaveLength(9);
     });
 
+    // Review finding, PR #136: the create modal was previously always
+    // mounted (Modal never unmounts children when closed), so
+    // TeeConfigurationForm's own state -- whatever was typed, including
+    // validation errors -- persisted across a close/reopen instead of
+    // resetting to fresh defaults.
+    it("resets to fresh, blank defaults each time the Add modal is reopened, not whatever was typed last time", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+
+      renderAsRole("admin");
+      await screen.findByText("Blue");
+
+      await userEvent.click(screen.getByRole("button", { name: "Add tee configuration" }));
+      let dialog = await screen.findByRole("dialog", { name: "Add tee configuration" });
+      await userEvent.type(within(dialog).getByLabelText("Name"), "Stale Draft");
+      // Trip a validation error too -- it must not survive the reopen either.
+      await userEvent.click(within(dialog).getByRole("button", { name: "Add tee configuration" }));
+      await within(dialog).findByText("Enter a course rating");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Add tee configuration" }));
+      dialog = await screen.findByRole("dialog", { name: "Add tee configuration" });
+      expect(within(dialog).getByLabelText("Name")).toHaveValue("");
+      expect(within(dialog).queryByText("Enter a course rating")).not.toBeInTheDocument();
+    });
+
     it("edits an existing tee configuration, pre-filled from its real data", async () => {
       mock.onGet("/courses/course-1").reply(200, COURSE);
       mock.onPatch("/tee-configurations/tee-1").reply(200, { ...COURSE.teeConfigurations[0], name: "Blue (Updated)" });

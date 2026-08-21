@@ -215,15 +215,24 @@ function TeeConfigurationsSection({ course, isAdmin }: { course: Course; isAdmin
         )}
       </CardBody>
 
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Add tee configuration" className="sm:max-w-2xl">
-        <TeeConfigurationForm
-          onSubmit={async (input) => {
-            await createMutation.mutateAsync(input);
-          }}
-          onCancel={() => setCreateOpen(false)}
-          submitLabel="Add tee configuration"
-        />
-      </Modal>
+      {/* Conditionally rendered, not just open={createOpen} on an
+          always-mounted Modal (review finding, PR #136) -- Modal never
+          unmounts its children when closed, so TeeConfigurationForm's
+          own useForm state (whatever was typed, including validation
+          errors) would otherwise persist across a close/reopen instead
+          of resetting to fresh defaults. Same pattern already used for
+          the Edit/Delete modals below. */}
+      {createOpen && (
+        <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Add tee configuration" className="sm:max-w-2xl">
+          <TeeConfigurationForm
+            onSubmit={async (input) => {
+              await createMutation.mutateAsync(input);
+            }}
+            onCancel={() => setCreateOpen(false)}
+            submitLabel="Add tee configuration"
+          />
+        </Modal>
+      )}
 
       {editingTee && (
         <Modal open={Boolean(editingTee)} onClose={() => setEditingTee(null)} title="Edit tee configuration" className="sm:max-w-2xl">
