@@ -87,6 +87,23 @@ export interface PendingRoundQueueItem {
   playedAt: string;
 }
 
+// Mirrors apps/api/src/data/rounds.repository.ts's AdminRoundListItem
+// exactly (ghs#100/#113) -- the general admin all-rounds browser's row
+// shape, same fields as PendingRoundQueueItem above plus status, since
+// (unlike the pending-only queue) this list spans every status.
+export interface AdminRoundListItem {
+  id: string;
+  playerId: string;
+  playerFirstName: string;
+  playerLastName: string;
+  courseId: string;
+  courseName: string;
+  teeConfigurationId: string;
+  teeConfigurationName: string;
+  playedAt: string;
+  status: RoundStatus;
+}
+
 // Mirrors apps/api/src/data/rounds.repository.ts's HoleScore.
 export type FairwayResult = "hit" | "missed_left" | "missed_right";
 

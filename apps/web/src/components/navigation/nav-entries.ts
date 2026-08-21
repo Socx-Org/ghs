@@ -1,4 +1,4 @@
-import { ClipboardCheck, Flag, LandPlot, LayoutDashboard, ShieldCheck, Users } from "lucide-react";
+import { ClipboardCheck, Flag, History, LandPlot, LayoutDashboard, ShieldCheck, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { cn } from "../../lib/cn";
@@ -32,6 +32,9 @@ export function useNavEntries(): NavEntry[] {
     entries.push({ to: "/admin/users/new", label: "Create Account", icon: ShieldCheck });
     // ghs#67
     entries.push({ to: "/admin/rounds/pending", label: "Pending Rounds", icon: ClipboardCheck });
+    // ghs#113: a separate entry from Pending Rounds above -- this one
+    // spans every status, not just the review queue.
+    entries.push({ to: "/admin/rounds", label: "All Rounds", icon: History });
   }
   return entries;
 }

@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { AccountProfile, AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PendingRoundQueueItem, PlayerProfile, Round, RoundSummary, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
+import type { AccountProfile, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PendingRoundQueueItem, PlayerProfile, Round, RoundSummary, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -471,6 +471,21 @@ export async function approveRound(id: string): Promise<Round> {
 
 export async function rejectRound(id: string, rejectionReason: string): Promise<Round> {
   const { data } = await api.patch<Round>(`/rounds/${id}/status`, { status: "rejected", rejectionReason });
+  return data;
+}
+
+export interface ListAdminRoundsResult {
+  items: AdminRoundListItem[];
+  total: number;
+}
+
+// ghs#113. No filter/pagination params sent, same reasoning as
+// listUsers above (ghs#104) -- the backend's own defaults (limit 50, no
+// filter) are the entire scope this issue's own list screen needs; a
+// UI for filtering/pagination is a separate, still-open issue (#138),
+// not merely unimplemented here.
+export async function listAdminRounds(): Promise<ListAdminRoundsResult> {
+  const { data } = await api.get<ListAdminRoundsResult>("/admin/rounds");
   return data;
 }
 
