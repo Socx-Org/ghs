@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PlayerProfile, Round, RoundSummary, TeeConfiguration, UserRole, UserStatus } from "../types/domain";
+import type { AccountProfile, AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PlayerProfile, Round, RoundSummary, TeeConfiguration, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -242,6 +242,20 @@ export async function confirmPasswordReset(token: string, newPassword: string): 
   } catch (error) {
     throw new ApiError(errorMessage(error), axios.isAxiosError(error) ? error.response?.status : undefined);
   }
+}
+
+// ghs#98. Routed through `api`, same reasoning as createUser/
+// getMyPlayerProfile below -- an ordinary authenticated feature call,
+// not part of the auth bootstrap flow. Unlike getMyPlayerProfile,
+// works for every role (admin/super_admin have no players row at all).
+export async function getMe(): Promise<AccountProfile> {
+  const { data } = await api.get<AccountProfile>("/auth/me");
+  return data;
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<{ message: string }> {
+  const { data } = await api.post<{ message: string }>("/auth/change-password", { currentPassword, newPassword });
+  return data;
 }
 
 export interface CreateUserRequest {

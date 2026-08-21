@@ -55,6 +55,14 @@ describe("AccountMenu", () => {
     expect(screen.getByRole("button", { name: /Sign out/ })).toBeInTheDocument();
   });
 
+  it("includes a Profile link to /profile, ghs#108", async () => {
+    renderMenu();
+    await userEvent.click(screen.getByRole("button", { name: "Account menu" }));
+
+    const profileLink = screen.getByRole("link", { name: "Profile" });
+    expect(profileLink).toHaveAttribute("href", "/profile");
+  });
+
   it("closes on Escape and returns focus to the trigger", async () => {
     renderMenu();
     const trigger = screen.getByRole("button", { name: "Account menu" });

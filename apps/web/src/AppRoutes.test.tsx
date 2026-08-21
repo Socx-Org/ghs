@@ -101,6 +101,23 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("button", { name: "Account menu" })).toBeInTheDocument();
   });
 
+  it("redirects /profile to /login when unauthenticated (ghs#108)", () => {
+    renderAt("/profile");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("renders the profile screen at /profile for an authenticated player (ghs#108)", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/profile");
+    expect(screen.getByRole("heading", { name: "Profile" })).toBeInTheDocument();
+  });
+
+  it("renders the profile screen at /profile for an authenticated admin too, ghs#108 -- not admin-gated", () => {
+    setTokens(ADMIN_TOKENS);
+    renderAt("/profile");
+    expect(screen.getByRole("heading", { name: "Profile" })).toBeInTheDocument();
+  });
+
   it("redirects /admin/users/new to /login when unauthenticated (ghs#86)", () => {
     renderAt("/admin/users/new");
     expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
