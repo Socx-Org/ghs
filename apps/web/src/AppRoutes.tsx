@@ -7,6 +7,7 @@ import AdminAccountsPage from "./pages/AdminAccountsPage";
 import AdminCreateUserPage from "./pages/AdminCreateUserPage";
 import AdminPendingQueuePage from "./pages/AdminPendingQueuePage";
 import AdminRoundReviewPage from "./pages/AdminRoundReviewPage";
+import AdminRoundsListPage from "./pages/AdminRoundsListPage";
 import CourseDetailPage from "./pages/CourseDetailPage";
 import CourseListPage from "./pages/CourseListPage";
 import CreateCoursePage from "./pages/CreateCoursePage";
@@ -107,6 +108,13 @@ export default function AppRoutes() {
                 has (matches PATCH /rounds/:id/status and GET /admin/
                 rounds/pending both being admin-gated on the backend). */}
             <Route path="/admin/rounds/pending" element={<AdminPendingQueuePage />} />
+            {/* ghs#113: the general all-rounds browser -- a separate
+                screen from the pending queue above, not a generalisation
+                of it (matches GET /admin/rounds being a separate
+                endpoint from GET /admin/rounds/pending). No path
+                collision with /admin/rounds/:id below -- an exact
+                "/admin/rounds" match is a distinct route entirely. */}
+            <Route path="/admin/rounds" element={<AdminRoundsListPage />} />
             <Route path="/admin/rounds/:id" element={<AdminRoundReviewPage />} />
           </Route>
         </Route>
