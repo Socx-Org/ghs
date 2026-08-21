@@ -65,6 +65,23 @@ export interface RoundSummary {
   status: RoundStatus;
 }
 
+// Mirrors apps/api/src/data/rounds.repository.ts's PendingRoundQueueItem
+// exactly (ghs#61/#67) -- exactly the fields a queue row needs to
+// render (round id, player identity, course, tee configuration, played
+// date), not the full Round shape (no hole scores/aggregate fields an
+// admin doesn't need just to decide which round to open next).
+export interface PendingRoundQueueItem {
+  id: string;
+  playerId: string;
+  playerFirstName: string;
+  playerLastName: string;
+  courseId: string;
+  courseName: string;
+  teeConfigurationId: string;
+  teeConfigurationName: string;
+  playedAt: string;
+}
+
 // Mirrors apps/api/src/data/rounds.repository.ts's HoleScore.
 export type FairwayResult = "hit" | "missed_left" | "missed_right";
 

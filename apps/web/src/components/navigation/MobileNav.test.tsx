@@ -77,6 +77,15 @@ describe("MobileNav", () => {
     expect(screen.getByRole("link", { name: /^Courses$/ })).toBeInTheDocument();
   });
 
+  it("shows Pending Rounds for admin, not for a player (ghs#67)", () => {
+    renderMobileNav({ role: "admin" });
+    expect(screen.getByRole("link", { name: /Pending Rounds/ })).toBeInTheDocument();
+
+    cleanup();
+    renderMobileNav({ role: "player" });
+    expect(screen.queryByRole("link", { name: /Pending Rounds/ })).not.toBeInTheDocument();
+  });
+
   it("closes on selecting a nav item", async () => {
     const onClose = vi.fn();
     renderMobileNav({ onClose });
