@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Alert, Button, Card, CardBody, CardHeader, FormField, Input, Modal, Skeleton, TeeConfigurationForm, useToast } from "../components";
-import { ApiError, createTeeConfiguration, deleteTeeConfiguration, getCourse, updateCourse, updateTeeConfiguration } from "../lib/api";
+import { ApiError, createTeeConfiguration, deleteCourse, deleteTeeConfiguration, getCourse, updateCourse, updateTeeConfiguration } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import type { Course, TeeConfiguration, TeeConfigurationInput } from "../types/domain";
 
@@ -22,9 +22,18 @@ import type { Course, TeeConfiguration, TeeConfigurationInput } from "../types/d
 //
 // Reachable by every authenticated role (matches GET /courses/:id
 // having no role restriction, same reasoning as #109's course list) --
-// only the edit form/tee-configuration actions are admin-gated; a non-
-// admin sees the same read-only info a course list entry already
-// implied existed.
+// only the edit form/delete action/tee-configuration actions are
+// admin-gated; a non-admin sees the same read-only info a course list
+// entry already implied existed.
+//
+// ghs#111: delete lives here, not on the course list (#109) -- #109's
+// own scope explicitly excludes an actions column, and this detail page
+// is already the one real place per-course admin actions live (the
+// edit form above it). Real Modal confirmation, same pattern as account
+// deletion (#104) -- not window.confirm(). No cascading "delete
+// referencing rounds too" option (explicit non-scope) -- a 409
+// course_has_rounds response is mapped to a clean explanation, not a
+// raw error.
 
 const updateCourseSchema = z.object({
   // .trim() before .min() -- a whitespace-only value must fail client-
@@ -42,6 +51,16 @@ type UpdateCourseFormValues = z.infer<typeof updateCourseSchema>;
 
 function describeError(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
+}
+
+// ghs#111/#99. "course_has_rounds" is the backend's own stable code,
+// not human copy (same convention as auth's token-classification
+// errors) -- mapped to a real explanation here, not shown verbatim.
+function describeDeleteError(error: unknown): string {
+  if (error instanceof ApiError && error.message === "course_has_rounds") {
+    return "This course can't be deleted because it has rounds recorded against it.";
+  }
+  return describeError(error, "Couldn't delete the course. Try again.");
 }
 
 function locationLine(course: Pick<Course, "city" | "country">): string | null {
@@ -276,9 +295,29 @@ function TeeConfigurationsSection({ course, isAdmin }: { course: Course; isAdmin
 export default function CourseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { show } = useToast();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
   const courseQuery = useQuery({ queryKey: ["courses", id], queryFn: () => getCourse(id!), enabled: Boolean(id) });
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteCourse(id!),
+    onSuccess: () => {
+      setDeleteModalOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["courses"] });
+      show({ variant: "success", message: "Course deleted.", duration: 2500 });
+      navigate("/courses");
+    },
+    onError: (error) => {
+      // Deliberately doesn't close the modal here (only onSuccess does)
+      // -- same convention as account deletion (#104): the admin can
+      // see the toast and decide to cancel or retry from the
+      // still-open confirmation, rather than being bounced out of it.
+      show({ variant: "error", message: describeDeleteError(error) });
+    },
+  });
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4 sm:p-6">
@@ -313,7 +352,44 @@ export default function CourseDetailPage() {
         </CardBody>
       </Card>
 
+      {courseQuery.data && isAdmin && (
+        <Card>
+          <CardHeader>
+            <h2 className="text-sm font-semibold text-text">Danger zone</h2>
+          </CardHeader>
+          <CardBody className="flex items-center justify-between gap-3">
+            <p className="text-sm text-text-muted">Deleting a course cannot be undone from here.</p>
+            <Button variant="destructive" onClick={() => setDeleteModalOpen(true)}>
+              Delete course
+            </Button>
+          </CardBody>
+        </Card>
+      )}
+
       {courseQuery.data && <TeeConfigurationsSection course={courseQuery.data} isAdmin={isAdmin} />}
+
+      {courseQuery.data && (
+        <Modal
+          open={deleteModalOpen}
+          onClose={() => setDeleteModalOpen(false)}
+          title="Delete course"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setDeleteModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" isLoading={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>
+                Delete course
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-text">
+            Delete <strong>{courseQuery.data.name}</strong>? This is a destructive action -- it can't be undone. Rounds
+            already recorded against this course's tee configurations will block the deletion.
+          </p>
+        </Modal>
+      )}
     </div>
   );
 }

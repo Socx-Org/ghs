@@ -362,6 +362,14 @@ export async function updateCourse(id: string, input: UpdateCourseRequest): Prom
   return data;
 }
 
+// ghs#111. On a 409 conflict, error.message is the backend's own stable
+// code ("course_has_rounds") -- not human-facing copy, same convention
+// as the auth token-classification errors (ghs#106/#107). The caller
+// maps it, this function doesn't turn it into copy itself.
+export async function deleteCourse(id: string): Promise<void> {
+  await api.delete(`/courses/${id}`);
+}
+
 export interface CreateRoundInput {
   playerId: string;
   teeConfigurationId: string;

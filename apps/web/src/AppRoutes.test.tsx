@@ -3,6 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import AppRoutes from "./AppRoutes";
+import { ToastProvider } from "./components";
 import { setTokens } from "./lib/auth-store";
 
 function makeAccessToken(claims: object): string {
@@ -30,13 +31,20 @@ const ADMIN_TOKENS = {
 // false so an unmocked network call (this file doesn't mock `api`,
 // only cares about routing) settles into its error state immediately
 // instead of retrying with backoff and slowing the test down.
+// ghs#111: ToastProvider wraps AppRoutes here too, matching App.tsx's
+// own real tree (App.tsx wraps everything in it globally) -- some
+// reachable page (CourseDetailPage, since this issue) now calls
+// useToast() unconditionally, so rendering AppRoutes without it would
+// crash on any route that can reach it, not just /courses/:id itself.
 function renderAt(path: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <AppRoutes />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
