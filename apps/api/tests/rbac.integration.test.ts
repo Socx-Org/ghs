@@ -199,6 +199,8 @@ const ADMIN_GATED_ROUTES: RouteCase[] = [
   // ghs#61 -- a real list endpoint, no dummy-ID path param needed; the
   // authorization gate is exercised identically either way.
   { name: "GET /admin/rounds/pending", method: "GET", path: "/admin/rounds/pending" },
+  // ghs#100 -- same rationale as GET /admin/rounds/pending above.
+  { name: "GET /admin/rounds", method: "GET", path: "/admin/rounds" },
 ];
 
 for (const route of ADMIN_GATED_ROUTES) {

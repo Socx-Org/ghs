@@ -68,6 +68,34 @@ export interface PendingRoundQueueItem {
   playedAt: string;
 }
 
+// ghs#100/#113: the general admin all-rounds browser -- same shape as
+// PendingRoundQueueItem plus status, since (unlike the pending-only
+// queue) this list spans every status.
+export interface AdminRoundListItem {
+  id: string;
+  playerId: string;
+  playerFirstName: string;
+  playerLastName: string;
+  courseId: string;
+  courseName: string;
+  teeConfigurationId: string;
+  teeConfigurationName: string;
+  playedAt: string;
+  status: RoundStatus;
+}
+
+export interface ListAdminRoundsFilter {
+  status?: RoundStatus;
+  playerId?: string;
+  limit: number;
+  offset: number;
+}
+
+export interface ListAdminRoundsResult {
+  items: AdminRoundListItem[];
+  total: number;
+}
+
 export interface CreateHoleScoreInput {
   holeNumber: number;
   strokes: number;
@@ -86,6 +114,10 @@ export interface CreateRoundInput {
   playingHandicap?: number;
   isTournament?: boolean;
   is9Hole?: boolean;
+  // ghs#100: captured at creation time -- see migration 014's own doc
+  // comment for why this isn't looked up live from users.role instead.
+  // Optional/undefined stores NULL, same as every pre-existing round.
+  createdByRole?: "player" | "admin" | "super_admin";
   // Optional -- real gameplay enters holes incrementally (open question
   // resolved, ghs#9); a round may be created with zero hole scores and
   // have them added one at a time via addHoleScore.
@@ -145,6 +177,8 @@ export interface RoundForUpdate {
   // tee_configurations.hole_count can't distinguish from each other --
   // see the completeness rule at its call site) at least 9 scores.
   is9Hole: boolean;
+  // ghs#100: submitForReview's auto-approval fast-path check.
+  createdByRole: "player" | "admin" | "super_admin" | null;
 }
 
 export interface RoundsRepository {
@@ -174,6 +208,11 @@ export interface RoundsRepository {
   // approved scope (a purpose-built queue endpoint, not a general admin
   // rounds browser).
   listPendingQueue(): Promise<PendingRoundQueueItem[]>;
+  // ghs#100/#113: the general admin all-rounds browser -- filterable by
+  // status/player, paginated. A separate query from listPendingQueue
+  // above, not a generalisation of it: that one stays purpose-built and
+  // deliberately narrow for the pending-review workflow specifically.
+  listAdminRounds(filter: ListAdminRoundsFilter): Promise<ListAdminRoundsResult>;
   // Every approved round with a real differential -- the exact input the
   // WHS calculation engine (ghs#22) needs. Excludes anything without a
   // score_differential yet (unscored, or scoring not yet run) and
@@ -191,6 +230,15 @@ export interface RoundsRepository {
   // before deciding anything, so two concurrent transitions on the same
   // round (e.g. an admin double-clicking "approve") can't race.
   getForUpdate(id: string, client: PoolClient): Promise<RoundForUpdate | null>;
+  // ghs#100: a lightweight, lock-free read -- submitForReview's own
+  // routing decision (admin-created fast path vs. the ordinary pending
+  // transition) needs this before any transaction opens, so it can't
+  // use getForUpdate (which requires one already). Returns null both
+  // when the round doesn't exist and when no role was ever recorded --
+  // neither case should route to the fast path, and a nonexistent round
+  // is still caught correctly by whichever path's own real read runs
+  // next.
+  getCreatedByRole(id: string): Promise<"player" | "admin" | "super_admin" | null>;
   // ghs#92: the real count of distinct hole scores recorded so far --
   // submitForReview's completeness check needs a number to compare
   // against the tee configuration's hole count (or, for is9Hole, 9),
@@ -352,8 +400,8 @@ async function insertHoleScore(
 // service.ts's runRecalculation).
 async function runCreate(client: PoolClient, input: CreateRoundInput): Promise<Round> {
   const roundResult = await client.query<RoundRow>(
-    `INSERT INTO rounds (player_id, tee_configuration_id, played_at, playing_handicap, is_tournament, is_9_hole, status)
-     VALUES ($1, $2, $3, $4, $5, $6, 'draft')
+    `INSERT INTO rounds (player_id, tee_configuration_id, played_at, playing_handicap, is_tournament, is_9_hole, created_by_role, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft')
      RETURNING ${ROUND_COLUMNS}`,
     [
       input.playerId,
@@ -362,6 +410,7 @@ async function runCreate(client: PoolClient, input: CreateRoundInput): Promise<R
       input.playingHandicap ?? null,
       input.isTournament ?? false,
       input.is9Hole ?? false,
+      input.createdByRole ?? null,
     ],
   );
   const roundRow = roundResult.rows[0]!;
@@ -514,6 +563,73 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       }));
     },
 
+    async listAdminRounds(filter) {
+      const conditions: string[] = ["r.deleted_at IS NULL"];
+      const values: unknown[] = [];
+
+      if (filter.status) {
+        values.push(filter.status);
+        conditions.push(`r.status = $${values.length}`);
+      }
+      if (filter.playerId) {
+        values.push(filter.playerId);
+        conditions.push(`r.player_id = $${values.length}`);
+      }
+      const whereClause = conditions.join(" AND ");
+
+      const countResult = await pool.query<{ count: string }>(
+        `SELECT count(*)::text AS count
+         FROM rounds r
+         WHERE ${whereClause}`,
+        values,
+      );
+      const total = Number(countResult.rows[0]!.count);
+
+      values.push(filter.limit, filter.offset);
+      const result = await pool.query<{
+        id: string;
+        player_id: string;
+        player_first_name: string;
+        player_last_name: string;
+        course_id: string;
+        course_name: string;
+        tee_configuration_id: string;
+        tee_configuration_name: string;
+        played_at: Date;
+        status: RoundStatus;
+      }>(
+        `SELECT
+           r.id, r.player_id, p.first_name AS player_first_name, p.last_name AS player_last_name,
+           c.id AS course_id, c.name AS course_name,
+           tc.id AS tee_configuration_id, tc.name AS tee_configuration_name,
+           r.played_at, r.status
+         FROM rounds r
+         JOIN players p ON p.id = r.player_id
+         JOIN tee_configurations tc ON tc.id = r.tee_configuration_id
+         JOIN courses c ON c.id = tc.course_id
+         WHERE ${whereClause}
+         ORDER BY r.played_at DESC, r.id ASC
+         LIMIT $${values.length - 1} OFFSET $${values.length}`,
+        values,
+      );
+
+      return {
+        items: result.rows.map((row) => ({
+          id: row.id,
+          playerId: row.player_id,
+          playerFirstName: row.player_first_name,
+          playerLastName: row.player_last_name,
+          courseId: row.course_id,
+          courseName: row.course_name,
+          teeConfigurationId: row.tee_configuration_id,
+          teeConfigurationName: row.tee_configuration_name,
+          playedAt: row.played_at.toISOString(),
+          status: row.status,
+        })),
+        total,
+      };
+    },
+
     async listApprovedDifferentialsForPlayer(playerId, client) {
       const result = await (client ?? pool).query<{ id: string; played_at: Date; score_differential: string; is_9_hole: boolean }>(
         `SELECT id, played_at, score_differential, is_9_hole
@@ -542,8 +658,9 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         status: RoundStatus;
         score_differential: string | null;
         is_9_hole: boolean;
+        created_by_role: "player" | "admin" | "super_admin" | null;
       }>(
-        `SELECT id, player_id, tee_configuration_id, played_at, status, score_differential, is_9_hole
+        `SELECT id, player_id, tee_configuration_id, played_at, status, score_differential, is_9_hole, created_by_role
          FROM rounds
          WHERE id = $1 AND deleted_at IS NULL
          FOR UPDATE`,
@@ -559,7 +676,16 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         status: row.status,
         scoreDifferential: row.score_differential === null ? null : Number(row.score_differential),
         is9Hole: row.is_9_hole,
+        createdByRole: row.created_by_role,
       };
+    },
+
+    async getCreatedByRole(id) {
+      const result = await pool.query<{ created_by_role: "player" | "admin" | "super_admin" | null }>(
+        "SELECT created_by_role FROM rounds WHERE id = $1 AND deleted_at IS NULL",
+        [id],
+      );
+      return result.rows[0]?.created_by_role ?? null;
     },
 
     async countHoleScores(roundId, client) {

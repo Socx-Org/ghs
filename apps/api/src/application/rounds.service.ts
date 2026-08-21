@@ -3,6 +3,8 @@ import type {
   CreateHoleScoreInput,
   CreateRoundInput,
   HoleScore,
+  ListAdminRoundsFilter,
+  ListAdminRoundsResult,
   PendingRoundQueueItem,
   Round,
   RoundForUpdate,
@@ -62,6 +64,9 @@ export interface RoundsService {
   // so no wrapping beyond the interface/application layering ADR-060
   // already requires of every route.
   listPendingQueue(): Promise<PendingRoundQueueItem[]>;
+  // ghs#100/#113: the general admin all-rounds browser -- same thin
+  // pass-through reasoning as listPendingQueue above.
+  listAdminRounds(filter: ListAdminRoundsFilter): Promise<ListAdminRoundsResult>;
 
   // draft|rejected|amending -> pending (ghs#58). The explicit moment a
   // round actually becomes visible to the admin pending-queue -- never
@@ -73,7 +78,18 @@ export interface RoundsService {
   // per listApprovedDifferentialsForPlayer), so landing in 'pending'
   // changes nothing recalculation needs to see yet -- approveRound is
   // still what triggers that, unchanged.
-  submitForReview(id: string): Promise<RoundWorkflowResult>;
+  //
+  // submittedByRole (ghs#100 review fix, PR #141): the ghs#100 fast path
+  // below only ever auto-approves when the round was BOTH created by an
+  // admin/super_admin AND is being submitted right now by an admin/
+  // super_admin. createdByRole alone isn't enough -- it's a snapshot of
+  // who created the round, not who is choosing to submit it, and a
+  // player is permitted to edit/submit their own round's holes
+  // (authorizeForPlayer) regardless of who originally drafted it. Without
+  // this second check, a player could take over an admin-drafted round
+  // and have their own submission silently skip review -- exactly the
+  // gate this fast path must never bypass for a player's own action.
+  submitForReview(id: string, submittedByRole: "player" | "admin" | "super_admin"): Promise<RoundWorkflowResult>;
 
   // Every method below is a real workflow transition (ghs#23): each
   // opens its own transaction, locks the round row first
@@ -218,6 +234,101 @@ export function createRoundsService(
     }
   }
 
+  // Extracted from the returned object's approveRound below so
+  // submitAdminCreatedRound (ghs#100) can reuse it verbatim, unchanged --
+  // see that function's own doc comment for why.
+  async function approveRoundInternal(id: string): Promise<RoundWorkflowResult> {
+    // Checked before rescoring, not left to surface from inside it:
+    // without this, a missing round would throw ScoringService's generic
+    // "round not found" Error instead of RoundNotFoundError (500 instead
+    // of 404), and a round in a non-approvable status would still have
+    // rescoreBeforeApproval persist new score/differential values via
+    // recomputeRoundAggregates before the transition below ever gets a
+    // chance to reject it -- a real, unwanted side effect on a call that
+    // ultimately fails (caught in review, PR #32).
+    const existing = await repository.get(id);
+    if (!existing) throw new RoundNotFoundError(`round ${id} not found`);
+    assertApprovableStatus(existing.status);
+
+    await rescoreBeforeApproval(id);
+
+    const { roundApproved } = await systemSettings.getNotificationSettings();
+
+    return runWorkflowTransition(
+      id,
+      // Re-checked here too, under the row lock: the status above was
+      // read outside any transaction, so it could in principle have
+      // changed between that check and this one (e.g. a concurrent
+      // reject) -- this is the authoritative check.
+      (existing) => assertApprovableStatus(existing.status),
+      async (client, existing) => {
+        const trigger = existing.status === "amending" ? "amendment_approved" : "round_approved";
+        await repository.setStatus(id, "approved", undefined, client);
+        // Notification event_type is always "round_approved", even for
+        // an amendment re-approval -- "same as ordinary approval", per
+        // ghs#25's own domain trigger table. The recalculation trigger
+        // tag (amendment_approved vs round_approved) still distinguishes
+        // them internally, just not in what the player is told.
+        // enqueue: same gating as createRound above (ghs#41).
+        await notifyPlayer(existing.playerId, "round_approved", { roundId: id, trigger }, client, { enqueue: roundApproved });
+        const result = await recalculation.recalculatePlayerHandicap(existing.playerId, trigger, client);
+        logger.info("round approved", { roundId: id, playerId: existing.playerId, trigger, recalculationStatus: result.status });
+        return result;
+      },
+    );
+  }
+
+  // ghs#100: an admin-created round (created_by_role, captured at
+  // creation time -- migration 014) skips the pending queue entirely on
+  // submit -- the admin themselves is the person of record entering
+  // it, and an admin reviewing their own entry makes no sense.
+  //
+  // Review fix, PR #141: the completeness check and the actual approval
+  // must not have an unlocked gap between them -- a round is still
+  // editable (draft/rejected/amending) right up until its status
+  // genuinely changes, so a naive "check completeness, rescore, then
+  // lock-and-approve" sequence leaves a real window where a concurrent
+  // addHoleScore (ghs#58, itself lock-checked) could slip in edits the
+  // approval below would never see. Closing that window has to happen
+  // under a lock, but ScoringService.recomputeRoundAggregates can't run
+  // inside one (it always opens its own connection -- see
+  // rescoreBeforeApproval's own comment) -- so instead of trying to
+  // combine both under one lock, this reuses the two already-safe,
+  // already-tested primitives in sequence: first, a quiet (no
+  // notification -- this is an internal implementation step, not a
+  // real "submitted for review" event a player should be told about)
+  // locked transition straight to 'pending', with the SAME completeness
+  // check submitForReview's ordinary path runs at that exact same
+  // transition point; then approveRoundInternal, completely unchanged,
+  // exactly as a human admin approving a real pending round would
+  // trigger it. The instant the quiet transition commits,
+  // addHoleScore's own lock-checked isEditableStatus rejects any
+  // further edit -- the same guarantee the ordinary pending->approved
+  // path has always relied on, now genuinely held here too.
+  async function submitAdminCreatedRound(id: string): Promise<RoundWorkflowResult> {
+    await runWorkflowTransition(
+      id,
+      (existing) => {
+        if (!isEditableStatus(existing.status)) {
+          throw new InvalidRoundTransitionError(`cannot submit a round in status '${existing.status}' for review`);
+        }
+      },
+      async (client, existing) => {
+        const teeConfiguration = await courses.getTeeConfiguration(existing.teeConfigurationId);
+        if (!teeConfiguration) throw new Error("tee configuration not found");
+        const recordedCount = await repository.countHoleScores(id, client);
+        const requiredCount = existing.is9Hole ? 9 : teeConfiguration.holes.length;
+        if (recordedCount < requiredCount) {
+          throw new IncompleteRoundError(`round has ${recordedCount} of ${requiredCount} required hole scores recorded`);
+        }
+        await repository.setStatus(id, "pending", undefined, client);
+        return null;
+      },
+    );
+
+    return approveRoundInternal(id);
+  }
+
   return {
     async createRound(input) {
       let holeScores = input.holeScores ?? [];
@@ -325,7 +436,28 @@ export function createRoundsService(
       return repository.listPendingQueue();
     },
 
-    async submitForReview(id) {
+    async listAdminRounds(filter) {
+      return repository.listAdminRounds(filter);
+    },
+
+    async submitForReview(id, submittedByRole) {
+      // ghs#100: a lightweight, lock-free read used only to decide
+      // which path applies, before any transaction opens -- not a
+      // substitute for either path's own getForUpdate/get read, which
+      // still re-validates everything for real. A nonexistent round
+      // (createdByRole comes back null either way) is still caught
+      // correctly by whichever path runs next, so this doesn't need its
+      // own not-found handling.
+      const createdByRole = await repository.getCreatedByRole(id);
+      const isAdminCreated = createdByRole === "admin" || createdByRole === "super_admin";
+      // Review fix, PR #141: both conditions must hold -- see this
+      // method's own interface doc comment for why createdByRole alone
+      // isn't a safe enough signal on its own.
+      const isAdminSubmitting = submittedByRole === "admin" || submittedByRole === "super_admin";
+      if (isAdminCreated && isAdminSubmitting) {
+        return submitAdminCreatedRound(id);
+      }
+
       const { roundSubmitted } = await systemSettings.getNotificationSettings();
 
       return runWorkflowTransition(
@@ -381,44 +513,7 @@ export function createRoundsService(
     },
 
     async approveRound(id) {
-      // Checked before rescoring, not left to surface from inside it:
-      // without this, a missing round would throw ScoringService's generic
-      // "round not found" Error instead of RoundNotFoundError (500 instead
-      // of 404), and a round in a non-approvable status would still have
-      // rescoreBeforeApproval persist new score/differential values via
-      // recomputeRoundAggregates before the transition below ever gets a
-      // chance to reject it -- a real, unwanted side effect on a call that
-      // ultimately fails (caught in review, PR #32).
-      const existing = await repository.get(id);
-      if (!existing) throw new RoundNotFoundError(`round ${id} not found`);
-      assertApprovableStatus(existing.status);
-
-      await rescoreBeforeApproval(id);
-
-      const { roundApproved } = await systemSettings.getNotificationSettings();
-
-      return runWorkflowTransition(
-        id,
-        // Re-checked here too, under the row lock: the status above was
-        // read outside any transaction, so it could in principle have
-        // changed between that check and this one (e.g. a concurrent
-        // reject) -- this is the authoritative check.
-        (existing) => assertApprovableStatus(existing.status),
-        async (client, existing) => {
-          const trigger = existing.status === "amending" ? "amendment_approved" : "round_approved";
-          await repository.setStatus(id, "approved", undefined, client);
-          // Notification event_type is always "round_approved", even for
-          // an amendment re-approval -- "same as ordinary approval", per
-          // ghs#25's own domain trigger table. The recalculation trigger
-          // tag (amendment_approved vs round_approved) still distinguishes
-          // them internally, just not in what the player is told.
-          // enqueue: same gating as createRound above (ghs#41).
-          await notifyPlayer(existing.playerId, "round_approved", { roundId: id, trigger }, client, { enqueue: roundApproved });
-          const result = await recalculation.recalculatePlayerHandicap(existing.playerId, trigger, client);
-          logger.info("round approved", { roundId: id, playerId: existing.playerId, trigger, recalculationStatus: result.status });
-          return result;
-        },
-      );
+      return approveRoundInternal(id);
     },
 
     async rejectRound(id, reason) {
