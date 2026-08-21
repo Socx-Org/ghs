@@ -127,6 +127,25 @@ export interface TeeConfiguration {
   holes: Hole[];
 }
 
+// ghs#112. The create/update request shape (apps/api/src/interface/
+// http/routes/courses.ts's parseTeeConfiguration) -- no ids, since
+// PATCH /tee-configurations/:id is a full replacement (holes are
+// deleted and reinserted wholesale, not merged, ghs#99).
+export interface TeeConfigurationHoleInput {
+  holeNumber: number;
+  distanceYards: number;
+  par: number;
+  strokeIndex: number;
+}
+
+export interface TeeConfigurationInput {
+  name: string;
+  holeCount: 9 | 18;
+  courseRating: number;
+  slopeRating: number;
+  holes: TeeConfigurationHoleInput[];
+}
+
 export interface CourseSummary {
   id: string;
   clubId: string | null;

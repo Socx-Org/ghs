@@ -37,9 +37,10 @@ afterEach(() => {
   localStorage.clear();
 });
 
-// ghs#111: a successful create navigates to CourseDetailPage, which
-// now calls useToast() unconditionally -- same reasoning as
-// AppRoutes.test.tsx's own renderAt fix.
+// ghs#111/#112: a successful create navigates to CourseDetailPage,
+// which (and whose TeeConfigurationsSection) now call useToast()
+// unconditionally -- same reasoning as AppRoutes.test.tsx's and
+// CourseDetailPage.test.tsx's own renderAsRole/renderAt fixes.
 function renderAsRole(role: "player" | "admin" = "admin") {
   setTokens(tokensFor(role));
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

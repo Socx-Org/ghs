@@ -37,6 +37,11 @@ afterEach(() => {
   localStorage.clear();
 });
 
+// ghs#112: TeeConfigurationsSection (rendered once courseQuery.data
+// resolves) now calls useToast() unconditionally, matching how
+// App.tsx's real tree already wraps everything in ToastProvider
+// globally -- without it here, any test that mocks a successful course
+// fetch would crash on render.
 function renderAsRole(role: "player" | "admin" = "admin", courseId = "course-1") {
   setTokens(tokensFor(role));
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -58,7 +63,14 @@ const COURSE = {
   city: "Pebble Beach",
   country: "US",
   teeConfigurations: [
-    { id: "tee-1", name: "Blue", holeCount: 18, courseRating: 74.1, slopeRating: 135, holes: [] },
+    {
+      id: "tee-1",
+      name: "Blue",
+      holeCount: 9,
+      courseRating: 74.1,
+      slopeRating: 135,
+      holes: Array.from({ length: 9 }, (_, i) => ({ id: `hole-${i + 1}`, holeNumber: i + 1, distanceYards: 380 + i, par: 4, strokeIndex: i + 1 })),
+    },
   ],
 };
 
@@ -70,7 +82,7 @@ describe("CourseDetailPage", () => {
     expect(await screen.findByRole("heading", { name: "Pebble Beach" })).toBeInTheDocument();
     expect(screen.getByText("Pebble Beach, US")).toBeInTheDocument();
     expect(screen.getByText("Blue")).toBeInTheDocument();
-    expect(screen.getByText(/18 holes/)).toBeInTheDocument();
+    expect(screen.getByText(/9 holes/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Course name")).not.toBeInTheDocument();
   });
 
@@ -153,6 +165,140 @@ describe("CourseDetailPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("a course with this name and country already exists");
+  });
+
+  // ghs#112
+  describe("tee configurations", () => {
+    it("shows Add/Edit/Delete tee-configuration actions for admin, not for a player", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      renderAsRole("admin");
+      await screen.findByText("Blue");
+      expect(screen.getByRole("button", { name: "Add tee configuration" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+
+      cleanup();
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      renderAsRole("player");
+      await screen.findByText("Blue");
+      expect(screen.queryByRole("button", { name: "Add tee configuration" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    });
+
+    it("creates a tee configuration via the shared form, shows a success toast, and closes the modal", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      mock.onPost("/courses/course-1/tee-configurations").reply(201, {
+        id: "tee-2",
+        name: "White",
+        holeCount: 9,
+        courseRating: 71.2,
+        slopeRating: 128,
+        holes: Array.from({ length: 9 }, (_, i) => ({ id: `new-hole-${i + 1}`, holeNumber: i + 1, distanceYards: 300 + i, par: 4, strokeIndex: i + 1 })),
+      });
+
+      renderAsRole("admin");
+      await screen.findByText("Blue");
+      await userEvent.click(screen.getByRole("button", { name: "Add tee configuration" }));
+      const dialog = await screen.findByRole("dialog", { name: "Add tee configuration" });
+
+      await userEvent.type(within(dialog).getByLabelText("Name"), "White");
+      await userEvent.selectOptions(within(dialog).getByLabelText("Holes"), "9");
+      await userEvent.type(within(dialog).getByLabelText("Course rating"), "71.2");
+      await userEvent.type(within(dialog).getByLabelText("Slope rating"), "128");
+      for (let i = 0; i < 9; i++) {
+        await userEvent.type(within(dialog).getByLabelText(`Hole ${i + 1} distance in yards`), String(300 + i));
+        await userEvent.type(within(dialog).getByLabelText(`Hole ${i + 1} par`), "4");
+        await userEvent.type(within(dialog).getByLabelText(`Hole ${i + 1} stroke index`), String(i + 1));
+      }
+      await userEvent.click(within(dialog).getByRole("button", { name: "Add tee configuration" }));
+
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Tee configuration added."));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      const [request] = mock.history.post ?? [];
+      const body = JSON.parse(request.data);
+      expect(body).toMatchObject({ name: "White", holeCount: 9, courseRating: 71.2, slopeRating: 128 });
+      expect(body.holes).toHaveLength(9);
+    });
+
+    // Review finding, PR #136: the create modal was previously always
+    // mounted (Modal never unmounts children when closed), so
+    // TeeConfigurationForm's own state -- whatever was typed, including
+    // validation errors -- persisted across a close/reopen instead of
+    // resetting to fresh defaults.
+    it("resets to fresh, blank defaults each time the Add modal is reopened, not whatever was typed last time", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+
+      renderAsRole("admin");
+      await screen.findByText("Blue");
+
+      await userEvent.click(screen.getByRole("button", { name: "Add tee configuration" }));
+      let dialog = await screen.findByRole("dialog", { name: "Add tee configuration" });
+      await userEvent.type(within(dialog).getByLabelText("Name"), "Stale Draft");
+      // Trip a validation error too -- it must not survive the reopen either.
+      await userEvent.click(within(dialog).getByRole("button", { name: "Add tee configuration" }));
+      await within(dialog).findByText("Enter a course rating");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Add tee configuration" }));
+      dialog = await screen.findByRole("dialog", { name: "Add tee configuration" });
+      expect(within(dialog).getByLabelText("Name")).toHaveValue("");
+      expect(within(dialog).queryByText("Enter a course rating")).not.toBeInTheDocument();
+    });
+
+    it("edits an existing tee configuration, pre-filled from its real data", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      mock.onPatch("/tee-configurations/tee-1").reply(200, { ...COURSE.teeConfigurations[0], name: "Blue (Updated)" });
+
+      renderAsRole("admin");
+      await screen.findByText("Blue");
+      await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+      const dialog = await screen.findByRole("dialog", { name: "Edit tee configuration" });
+
+      expect(within(dialog).getByLabelText("Name")).toHaveValue("Blue");
+      expect(within(dialog).getByLabelText("Holes")).toHaveValue("9");
+      expect(within(dialog).getByLabelText("Course rating")).toHaveValue(74.1);
+      expect(within(dialog).getByLabelText("Hole 1 distance in yards")).toHaveValue(380);
+
+      await userEvent.clear(within(dialog).getByLabelText("Name"));
+      await userEvent.type(within(dialog).getByLabelText("Name"), "Blue (Updated)");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Tee configuration updated."));
+      const [request] = mock.history.patch!.filter((r) => r.url === "/tee-configurations/tee-1");
+      expect(JSON.parse(request!.data)).toMatchObject({ name: "Blue (Updated)", holeCount: 9 });
+    });
+
+    it("deletes an unreferenced tee configuration via a real Modal confirmation", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      mock.onDelete("/tee-configurations/tee-1").reply(200, { message: "Tee configuration deleted." });
+
+      renderAsRole("admin");
+      await screen.findByText("Blue");
+      await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+      const dialog = await screen.findByRole("dialog", { name: "Delete tee configuration" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Delete tee configuration" }));
+
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Tee configuration deleted."));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("shows a clear explanation, not a raw error code, for a tee_configuration_has_rounds conflict -- modal stays open", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      mock.onDelete("/tee-configurations/tee-1").reply(409, { error: "tee_configuration_has_rounds" });
+
+      renderAsRole("admin");
+      await screen.findByText("Blue");
+      await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+      const dialog = await screen.findByRole("dialog", { name: "Delete tee configuration" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Delete tee configuration" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "This tee configuration can't be deleted because it has rounds recorded against it.",
+      );
+      expect(screen.getByRole("dialog", { name: "Delete tee configuration" })).toBeInTheDocument();
+    });
   });
 
   // ghs#111

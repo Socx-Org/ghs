@@ -4,22 +4,27 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Alert, Button, Card, CardBody, CardHeader, FormField, Input, Modal, Skeleton, useToast } from "../components";
-import { ApiError, deleteCourse, getCourse, updateCourse } from "../lib/api";
+import { Alert, Button, Card, CardBody, CardHeader, FormField, Input, Modal, Skeleton, TeeConfigurationForm, useToast } from "../components";
+import { ApiError, createTeeConfiguration, deleteCourse, deleteTeeConfiguration, getCourse, updateCourse, updateTeeConfiguration } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
-import type { Course } from "../types/domain";
+import type { Course, TeeConfiguration, TeeConfigurationInput } from "../types/domain";
 
-// ghs#110: course detail/edit screen -- design doc section 6.4. Also
-// the "course detail view" #112 (Tee Configuration management) builds
-// its own list/create/update/delete actions into -- the Tee
-// Configurations section below is deliberately read-only for now (name/
-// hole count/ratings only, no per-hole breakdown), not this issue's own
-// scope to make interactive.
+// ghs#110: course detail/edit screen -- design doc section 6.4.
+//
+// ghs#112: the Tee Configurations section below now owns real list/
+// create/update/delete actions, built on the one shared
+// TeeConfigurationForm component (components/domain) -- per the design
+// doc's own "do not duplicate tee configuration UI patterns across
+// unrelated screens" instruction. #110's create-course form
+// deliberately has no tee-configuration fields of its own for exactly
+// this reason (see that issue's PR) -- this is the only place a tee
+// configuration is ever created, edited, or removed.
 //
 // Reachable by every authenticated role (matches GET /courses/:id
 // having no role restriction, same reasoning as #109's course list) --
-// only the edit form/delete action are admin-gated; a non-admin sees
-// the same read-only info a course list entry already implied existed.
+// only the edit form/delete action/tee-configuration actions are
+// admin-gated; a non-admin sees the same read-only info a course list
+// entry already implied existed.
 //
 // ghs#111: delete lives here, not on the course list (#109) -- #109's
 // own scope explicitly excludes an actions column, and this detail page
@@ -129,6 +134,164 @@ function CourseReadOnlyView({ course }: { course: Course }) {
   );
 }
 
+// ghs#112/#99. "tee_configuration_has_rounds" is the backend's own
+// stable code, not human copy -- same convention as
+// describeDeleteError (course delete, #111).
+function describeTeeDeleteError(error: unknown): string {
+  if (error instanceof ApiError && error.message === "tee_configuration_has_rounds") {
+    return "This tee configuration can't be deleted because it has rounds recorded against it.";
+  }
+  return describeError(error, "Couldn't delete the tee configuration. Try again.");
+}
+
+function TeeConfigurationsSection({ course, isAdmin }: { course: Course; isAdmin: boolean }) {
+  const queryClient = useQueryClient();
+  const { show } = useToast();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingTee, setEditingTee] = useState<TeeConfiguration | null>(null);
+  const [deletingTee, setDeletingTee] = useState<TeeConfiguration | null>(null);
+
+  function invalidate() {
+    queryClient.invalidateQueries({ queryKey: ["courses", course.id] });
+    queryClient.invalidateQueries({ queryKey: ["courses"] });
+  }
+
+  const createMutation = useMutation({
+    mutationFn: (input: TeeConfigurationInput) => createTeeConfiguration(course.id, input),
+    onSuccess: () => {
+      invalidate();
+      setCreateOpen(false);
+      show({ variant: "success", message: "Tee configuration added.", duration: 2500 });
+    },
+    onError: (error) => {
+      show({ variant: "error", message: describeError(error, "Couldn't add the tee configuration. Try again.") });
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (input: TeeConfigurationInput) => updateTeeConfiguration(editingTee!.id, input),
+    onSuccess: () => {
+      invalidate();
+      setEditingTee(null);
+      show({ variant: "success", message: "Tee configuration updated.", duration: 2500 });
+    },
+    onError: (error) => {
+      show({ variant: "error", message: describeError(error, "Couldn't update the tee configuration. Try again.") });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteTeeConfiguration(deletingTee!.id),
+    onSuccess: () => {
+      invalidate();
+      setDeletingTee(null);
+      show({ variant: "success", message: "Tee configuration deleted.", duration: 2500 });
+    },
+    onError: (error) => {
+      // Deliberately doesn't close the modal here -- same convention as
+      // course delete (#111): the admin can see the toast and decide to
+      // cancel or retry from the still-open confirmation.
+      show({ variant: "error", message: describeTeeDeleteError(error) });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-text">Tee configurations</h2>
+        {isAdmin && (
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            Add tee configuration
+          </Button>
+        )}
+      </CardHeader>
+      <CardBody>
+        {course.teeConfigurations.length === 0 ? (
+          <p className="text-sm text-text-muted">No tee configurations yet.</p>
+        ) : (
+          <ul className="flex flex-col divide-y divide-border">
+            {course.teeConfigurations.map((tee) => (
+              <li key={tee.id} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                <div>
+                  <span className="text-sm font-medium text-text">{tee.name}</span>
+                  <p className="text-xs text-text-muted">
+                    {tee.holeCount} holes · rating {tee.courseRating.toFixed(1)} · slope {tee.slopeRating}
+                  </p>
+                </div>
+                {isAdmin && (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => setEditingTee(tee)}>
+                      Edit
+                    </Button>
+                    <Button variant="destructive" size="sm" onClick={() => setDeletingTee(tee)}>
+                      Delete
+                    </Button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardBody>
+
+      {/* Conditionally rendered, not just open={createOpen} on an
+          always-mounted Modal (review finding, PR #136) -- Modal never
+          unmounts its children when closed, so TeeConfigurationForm's
+          own useForm state (whatever was typed, including validation
+          errors) would otherwise persist across a close/reopen instead
+          of resetting to fresh defaults. Same pattern already used for
+          the Edit/Delete modals below. */}
+      {createOpen && (
+        <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Add tee configuration" className="sm:max-w-2xl">
+          <TeeConfigurationForm
+            onSubmit={async (input) => {
+              await createMutation.mutateAsync(input);
+            }}
+            onCancel={() => setCreateOpen(false)}
+            submitLabel="Add tee configuration"
+          />
+        </Modal>
+      )}
+
+      {editingTee && (
+        <Modal open={Boolean(editingTee)} onClose={() => setEditingTee(null)} title="Edit tee configuration" className="sm:max-w-2xl">
+          <TeeConfigurationForm
+            initialValues={editingTee}
+            onSubmit={async (input) => {
+              await updateMutation.mutateAsync(input);
+            }}
+            onCancel={() => setEditingTee(null)}
+            submitLabel="Save changes"
+          />
+        </Modal>
+      )}
+
+      {deletingTee && (
+        <Modal
+          open={Boolean(deletingTee)}
+          onClose={() => setDeletingTee(null)}
+          title="Delete tee configuration"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setDeletingTee(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" isLoading={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>
+                Delete tee configuration
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-text">
+            Delete <strong>{deletingTee.name}</strong>? This is a destructive action -- it can't be undone. Rounds
+            already recorded against it will block the deletion.
+          </p>
+        </Modal>
+      )}
+    </Card>
+  );
+}
+
 export default function CourseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -203,29 +366,7 @@ export default function CourseDetailPage() {
         </Card>
       )}
 
-      {courseQuery.data && (
-        <Card>
-          <CardHeader>
-            <h2 className="text-sm font-semibold text-text">Tee configurations</h2>
-          </CardHeader>
-          <CardBody>
-            {courseQuery.data.teeConfigurations.length === 0 ? (
-              <p className="text-sm text-text-muted">No tee configurations yet.</p>
-            ) : (
-              <ul className="flex flex-col divide-y divide-border">
-                {courseQuery.data.teeConfigurations.map((tee) => (
-                  <li key={tee.id} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
-                    <span className="text-sm font-medium text-text">{tee.name}</span>
-                    <span className="text-xs text-text-muted">
-                      {tee.holeCount} holes · rating {tee.courseRating.toFixed(1)} · slope {tee.slopeRating}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardBody>
-        </Card>
-      )}
+      {courseQuery.data && <TeeConfigurationsSection course={courseQuery.data} isAdmin={isAdmin} />}
 
       {courseQuery.data && (
         <Modal
