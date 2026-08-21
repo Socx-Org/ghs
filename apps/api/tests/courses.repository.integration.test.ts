@@ -176,6 +176,28 @@ test("delete() returns false for an already-deleted or genuinely nonexistent cou
   assert.equal(await courses.delete("00000000-0000-0000-0000-000000000000"), false, "never existed");
 });
 
+// Review finding, PR #131: delete() previously checked for referencing
+// rounds BEFORE checking whether the course was already soft-deleted --
+// an already-deleted course whose (still physically present) tee
+// configuration still carries an old round reference would throw
+// CourseHasRoundsError a second time instead of the documented
+// false/404 for a course that's already gone. Simulated directly via
+// SQL (not delete() itself, which would correctly refuse given the
+// referencing round below -- that's the whole point: proving the fix
+// checks existence first, not that a course could realistically reach
+// this exact state through delete() alone).
+test("delete() returns false, not a thrown conflict, for a course that is already soft-deleted even though its tee configuration still has a referencing round (review finding, PR #131)", async () => {
+  const courses = createCoursesRepository(pool);
+  const created = await courses.create({
+    name: "Already Deleted Course With Stale Round Reference",
+    teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 71, slopeRating: 120, holes: [] }],
+  });
+  await createReferencingRound(created.teeConfigurations[0]!.id);
+  await pool.query("UPDATE courses SET deleted_at = now() WHERE id = $1", [created.id]);
+
+  assert.equal(await courses.delete(created.id), false);
+});
+
 // The issue's own central acceptance criterion: a real round referencing
 // one of this course's tee configurations must produce a distinguishable
 // error, not silently soft-delete a course real round history still
@@ -300,6 +322,21 @@ test("deleteTeeConfiguration() throws TeeConfigurationHasRoundsError when refere
   // Not actually soft-deleted -- getTeeConfiguration (used by scoring/
   // round-entry for an *existing* round) must keep resolving it.
   assert.ok(await courses.getTeeConfiguration(teeId));
+});
+
+// Review finding, PR #131 -- same ordering fix and same reasoning as
+// delete()'s own equivalent regression test above.
+test("deleteTeeConfiguration() returns false, not a thrown conflict, for a tee configuration that is already soft-deleted even though a round still references it (review finding, PR #131)", async () => {
+  const courses = createCoursesRepository(pool);
+  const created = await courses.create({
+    name: "Course With Already Deleted Tee And Stale Round Reference",
+    teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 71, slopeRating: 120, holes: [] }],
+  });
+  const teeId = created.teeConfigurations[0]!.id;
+  await createReferencingRound(teeId);
+  await pool.query("UPDATE tee_configurations SET deleted_at = now() WHERE id = $1", [teeId]);
+
+  assert.equal(await courses.deleteTeeConfiguration(teeId), false);
 });
 
 // The critical soft-delete filtering distinction this issue's design

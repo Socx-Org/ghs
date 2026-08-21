@@ -129,6 +129,15 @@ export function coursesRouter(service: CoursesService, authProvider: AuthProvide
   // clear case PATCH additionally needs.
   router.patch("/courses/:id", ...requireAdmin, async (req, res, next) => {
     try {
+      // The `in` operator throws a TypeError on a non-object right-hand
+      // side -- a valid JSON body can legally be a primitive or null
+      // (e.g. a literal `null`, `"oops"`, or `42`), which would
+      // otherwise crash this into a 500 instead of a clean 400 (review
+      // finding, PR #131).
+      if (typeof req.body !== "object" || req.body === null || Array.isArray(req.body)) {
+        res.status(400).json({ error: "request body must be a JSON object" });
+        return;
+      }
       const body = req.body as Record<string, unknown>;
       const input: UpdateCourseInput = {};
 

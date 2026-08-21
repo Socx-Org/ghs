@@ -1,0 +1,14 @@
+-- ghs#99 review fix (PR #131): the index migration 012 added
+-- (idx_tee_configurations_deleted_at, on deleted_at alone under a
+-- `WHERE deleted_at IS NULL` partial predicate) indexes a column whose
+-- value is identical (NULL) for every row the predicate lets in -- zero
+-- selectivity, no real query benefit. The actual access pattern this
+-- soft-delete supports (fetchTeeConfigurationsForCourse: course_id = $1
+-- AND deleted_at IS NULL, courses.repository.ts) is already served
+-- well enough by the pre-existing idx_tee_configurations_course_id
+-- (migration 001) -- tee configurations per course is a small number of
+-- rows regardless, so a second, more elaborate composite index isn't
+-- justified by any real evidence at this data volume. Dropped rather
+-- than replaced. 012 itself is left as originally applied (ghs#71's own
+-- immutable-ledger convention) -- this is a forward fix, not an edit.
+DROP INDEX IF EXISTS idx_tee_configurations_deleted_at;

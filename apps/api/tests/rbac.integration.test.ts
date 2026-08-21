@@ -241,6 +241,30 @@ test("no route accepts an unauthenticated request for an admin-gated operation (
 });
 
 // ---------------------------------------------------------------------
+// ghs#99 review fix, PR #131: PATCH /courses/:id used the `in` operator
+// on the parsed JSON body, which throws a TypeError (-> unhandled 500)
+// for any non-object top-level JSON value -- a real, valid case
+// express.json() will happily parse.
+// ---------------------------------------------------------------------
+
+for (const [label, body] of [["null", "null"], ["a string", '"oops"'], ["a number", "42"]] as const) {
+  test(`PATCH /courses/:id returns 400, not a 500 crash, for a JSON body that is ${label}`, async () => {
+    const ctx = buildApp();
+    await withServer(ctx.app, async (baseUrl) => {
+      const admin = await createUserWithRole(ctx, "admin");
+
+      const res = await fetch(`${baseUrl}/api/v1/courses/00000000-0000-0000-0000-000000000000`, {
+        method: "PATCH",
+        headers: authHeader(admin.token),
+        body,
+      });
+
+      assert.equal(res.status, 400);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------
 // POST /admin/users: the confirmed gap and its fix -- only super_admin
 // may create/promote to admin or super_admin.
 // ---------------------------------------------------------------------

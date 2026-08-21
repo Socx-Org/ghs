@@ -343,6 +343,15 @@ export function createCoursesRepository(pool: Pool): CoursesRepository {
     },
 
     async delete(id) {
+      // Existence/not-already-deleted checked FIRST -- otherwise an
+      // already soft-deleted course whose (still physically present,
+      // soft-delete doesn't remove them) tee configurations happen to
+      // carry an old round reference would throw CourseHasRoundsError
+      // (409) a second time instead of the documented false/404 for an
+      // already-gone course (review finding, PR #131).
+      const courseResult = await pool.query("SELECT id FROM courses WHERE id = $1 AND deleted_at IS NULL", [id]);
+      if (courseResult.rows.length === 0) return false;
+
       const teeIdsResult = await pool.query<{ id: string }>(
         "SELECT id FROM tee_configurations WHERE course_id = $1",
         [id],
@@ -441,6 +450,13 @@ export function createCoursesRepository(pool: Pool): CoursesRepository {
     },
 
     async deleteTeeConfiguration(id) {
+      // Same ordering fix as delete() above, same reasoning (review
+      // finding, PR #131): existence/not-already-deleted first, so an
+      // already soft-deleted tee configuration a round happens to still
+      // reference reports false/404, never a 409 conflict.
+      const existsResult = await pool.query("SELECT id FROM tee_configurations WHERE id = $1 AND deleted_at IS NULL", [id]);
+      if (existsResult.rows.length === 0) return false;
+
       if (await hasReferencingRounds(pool, [id])) {
         throw new TeeConfigurationHasRoundsError("tee_configuration_has_rounds");
       }
