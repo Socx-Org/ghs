@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Alert, Card, CardBody, EmptyState, ListView, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell } from "../components";
-import { ApiError, listAdminRounds } from "../lib/api";
+import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, useToast } from "../components";
+import { ApiError, deleteRound, listAdminRounds } from "../lib/api";
 import type { AdminRoundListItem } from "../types/domain";
 
 // ghs#113: the general admin all-rounds browser -- distinct from the
@@ -11,6 +12,15 @@ import type { AdminRoundListItem } from "../types/domain";
 // relies entirely on the backend's own defaults, same reasoning as
 // AdminAccountsPage (#104): a UI for that is #138, a separate, still-open
 // issue, not this one's scope.
+//
+// ghs#115: a per-row delete action, admin-only, real confirmation Modal
+// (never window.confirm()). Unlike AdminRoundReviewPage's own delete
+// (which already has the full round loaded, so its confirmation can
+// name whether THIS round has a recorded score), this list's own
+// AdminRoundListItem row shape has no scoreDifferential -- the
+// confirmation here is deliberately general; the real per-round
+// outcome is still surfaced honestly afterward, via the toast, from the
+// actual DELETE response.
 
 function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -21,7 +31,48 @@ function describeQueryError(error: unknown, fallback: string): string {
 }
 
 export default function AdminRoundsListPage() {
+  const queryClient = useQueryClient();
+  const { show } = useToast();
+  const [deleteTarget, setDeleteTarget] = useState<AdminRoundListItem | null>(null);
+
   const roundsQuery = useQuery({ queryKey: ["admin", "rounds"], queryFn: listAdminRounds });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteRound(id),
+    onSuccess: (result, id) => {
+      // Review finding, PR #145: the app-wide QueryClient (App.tsx)
+      // caches across routes -- if this round's own ["rounds", id]
+      // query was ever populated (e.g. the admin had visited its
+      // review screen before returning here), it would otherwise stay
+      // cached and stale until its own background refetch eventually
+      // discovers the 404. Removed outright, same as
+      // AdminRoundReviewPage's own delete handling, rather than left to
+      // go stale.
+      queryClient.removeQueries({ queryKey: ["rounds", id] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "rounds"] });
+      setDeleteTarget(null);
+      show({
+        variant: "success",
+        message: result.recalculated ? "Round deleted. The player's handicap has been recalculated." : "Round deleted.",
+        duration: 3000,
+      });
+    },
+    onError: (error) => {
+      // Deliberately doesn't close the modal here -- same convention as
+      // account/course/tee-configuration delete (#98/#111/#112): the
+      // admin can see the toast and retry from the still-open
+      // confirmation.
+      show({ variant: "error", message: describeQueryError(error, "Couldn't delete this round. Try again.") });
+    },
+  });
+
+  function renderActions(item: AdminRoundListItem) {
+    return (
+      <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(item)}>
+        Delete
+      </Button>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
@@ -52,6 +103,9 @@ export default function AdminRoundsListPage() {
                   <TableHeaderCell>Tee</TableHeaderCell>
                   <TableHeaderCell>Played</TableHeaderCell>
                   <TableHeaderCell>Status</TableHeaderCell>
+                  <TableHeaderCell>
+                    <span className="sr-only">Actions</span>
+                  </TableHeaderCell>
                 </>
               }
               renderTableRow={(item) => (
@@ -67,11 +121,12 @@ export default function AdminRoundsListPage() {
                   <TableCell>
                     <RoundStatusBadge status={item.status} />
                   </TableCell>
+                  <TableCell>{renderActions(item)}</TableCell>
                 </>
               )}
               renderCard={(item) => (
                 <Card>
-                  <CardBody className="flex flex-col gap-1">
+                  <CardBody className="flex flex-col gap-2">
                     <div className="flex items-center justify-between gap-2">
                       <Link to={`/admin/rounds/${item.id}`} className="text-sm font-medium text-primary hover:underline">
                         {item.playerFirstName} {item.playerLastName}
@@ -82,6 +137,7 @@ export default function AdminRoundsListPage() {
                       {item.courseName} · {item.teeConfigurationName}
                     </p>
                     <p className="text-xs text-text-muted">{formatPlayedAt(item.playedAt)}</p>
+                    <div>{renderActions(item)}</div>
                   </CardBody>
                 </Card>
               )}
@@ -90,6 +146,31 @@ export default function AdminRoundsListPage() {
           )}
         </CardBody>
       </Card>
+
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete round"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              isLoading={deleteMutation.isPending}
+              onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+            >
+              Delete round
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-text">
+          Delete {deleteTarget?.playerFirstName} {deleteTarget?.playerLastName}'s round permanently? This can't be undone.
+          If it had a recorded score, their handicap will be recalculated.
+        </p>
+      </Modal>
     </div>
   );
 }
