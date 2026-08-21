@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Card, CardBody, CardHeader, HoleEntryCard, RoundStatusBadge, Skeleton, Stat } from "../components";
+import { Alert, Button, Card, CardBody, CardHeader, HoleEntryCard, RoundStatusBadge, Skeleton, Stat, useToast } from "../components";
 import { ApiError, getRound, getTeeConfiguration, submitRound } from "../lib/api";
 import type { Round, TeeConfiguration } from "../types/domain";
 
@@ -116,6 +116,7 @@ export default function RoundEntryPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { show } = useToast();
   const [submitFeedback, setSubmitFeedback] = useState<string | null>(null);
 
   const roundQuery = useQuery({ queryKey: ["rounds", id], queryFn: () => getRound(id!), enabled: Boolean(id) });
@@ -128,9 +129,20 @@ export default function RoundEntryPage() {
 
   const submitMutation = useMutation({
     mutationFn: () => submitRound(id!),
-    onSuccess: () => {
+    onSuccess: (submittedRound) => {
       queryClient.invalidateQueries({ queryKey: ["rounds", id] });
       queryClient.invalidateQueries({ queryKey: ["players"] });
+      // ghs#114: an admin-created round auto-approves on submit (#100)
+      // instead of entering the pending queue -- the confirmation
+      // message reflects whichever real outcome the backend's response
+      // actually reports, not an assumption based on who's viewing this
+      // screen (an admin could in principle submit their own player
+      // round too, which still goes to pending like any other).
+      show({
+        variant: "success",
+        message: submittedRound.status === "approved" ? "Round approved automatically." : "Submitted for review.",
+        duration: 2500,
+      });
       navigate("/", { replace: true });
     },
   });

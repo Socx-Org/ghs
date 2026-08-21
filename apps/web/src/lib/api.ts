@@ -291,8 +291,15 @@ export interface ListUsersResult {
 // defaults (limit 50, no filter) are the entire scope this issue's own
 // list screen needs; a UI for filtering/pagination is explicit
 // non-scope (see the issue), not merely unimplemented.
-export async function listUsers(): Promise<ListUsersResult> {
-  const { data } = await api.get<ListUsersResult>("/admin/users");
+//
+// ghs#114: an optional role filter, added for the admin round-creation
+// player-selector's own real need (only ever wants role=player) --
+// the backend already accepts this query param (RBAC-tested), this was
+// just never threaded through the frontend client before now. Kept
+// optional so AdminAccountsPage's own existing no-filter call is
+// unaffected.
+export async function listUsers(filter?: { role?: UserRole }): Promise<ListUsersResult> {
+  const { data } = await api.get<ListUsersResult>("/admin/users", { params: filter });
   return data;
 }
 

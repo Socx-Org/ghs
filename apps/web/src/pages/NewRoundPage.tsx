@@ -5,8 +5,9 @@ import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Alert, Button, Checkbox, FormField, Input, Select } from "../components";
-import { ApiError, createRound, getCourse, getMyPlayerProfile, listCourses } from "../lib/api";
+import { ApiError, createRound, getCourse, getMyPlayerProfile, listCourses, listUsers } from "../lib/api";
 import { playedAtToIsoString } from "../lib/dates";
+import { useAuth } from "../hooks/useAuth";
 
 // ghs#94: the start of the round-entry flow -- course, then tee
 // configuration (its own query, only once a course is chosen, since
@@ -14,8 +15,17 @@ import { playedAtToIsoString } from "../lib/dates";
 // nested under GET /courses/:id, ghs#57's own data shape), then the
 // date played. Creates the round in 'draft' and hands off to
 // RoundEntryPage for the actual scoring.
+//
+// ghs#114: an admin/super_admin caller additionally gets a player-
+// selection step -- POST /rounds already accepts an arbitrary playerId
+// from an admin caller (ghs#9), only the frontend never offered a way
+// to choose one. playerId is validated at submit time (mirroring this
+// file's own existing profile-not-loaded-yet check below), not via the
+// zod schema -- whether it's required depends on the caller's role,
+// which isn't known at schema-definition time.
 
 const schema = z.object({
+  playerId: z.string().optional(),
   courseId: z.string().min(1, "Choose a course"),
   teeConfigurationId: z.string().min(1, "Choose a tee"),
   playedAt: z.string().min(1, "Choose a date"),
@@ -31,9 +41,17 @@ function today(): string {
 export default function NewRoundPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  const profileQuery = useQuery({ queryKey: ["players", "me"], queryFn: getMyPlayerProfile });
+  // Only a player caller has a players/me profile at all (IAM-020's
+  // strict users/players separation) -- gated off for admin/super_admin
+  // to avoid an always-404 request neither of them can ever satisfy.
+  const profileQuery = useQuery({ queryKey: ["players", "me"], queryFn: getMyPlayerProfile, enabled: !isAdmin });
+  // ghs#114: the player-selector's own data source -- GET /admin/users
+  // filtered to role=player, gated to admin/super_admin only.
+  const playersQuery = useQuery({ queryKey: ["admin", "users", { role: "player" }], queryFn: () => listUsers({ role: "player" }), enabled: isAdmin });
   const coursesQuery = useQuery({ queryKey: ["courses"], queryFn: listCourses });
 
   const {
@@ -44,7 +62,7 @@ export default function NewRoundPage() {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { courseId: "", teeConfigurationId: "", playedAt: today(), isTournament: false, is9Hole: false },
+    defaultValues: { playerId: "", courseId: "", teeConfigurationId: "", playedAt: today(), isTournament: false, is9Hole: false },
   });
 
   const courseId = useWatch({ control, name: "courseId" });
@@ -71,21 +89,34 @@ export default function NewRoundPage() {
 
   async function onSubmit(values: FormValues) {
     setFeedback(null);
-    if (!profileQuery.data) {
-      // Real feedback, not a silent no-op (review finding, PR #95) --
-      // reachable if the profile query is still pending or has failed
-      // by the time the (already-populated, since courses/tees loaded
-      // independently) form is submitted.
-      setFeedback(
-        profileQuery.error instanceof ApiError
-          ? profileQuery.error.message
-          : "Still loading your profile -- try again in a moment.",
-      );
-      return;
+    // ghs#114: an admin/super_admin caller supplies playerId from the
+    // selector below; a player caller always acts on their own profile,
+    // same as before this issue. Validated here, not via the zod schema
+    // (whether playerId is required depends on isAdmin, not known at
+    // schema-definition time) -- same "real feedback, not a silent
+    // no-op" discipline as the profile-not-loaded check this mirrors
+    // (review finding, PR #95).
+    let playerId: string;
+    if (isAdmin) {
+      if (!values.playerId) {
+        setFeedback("Choose a player.");
+        return;
+      }
+      playerId = values.playerId;
+    } else {
+      if (!profileQuery.data) {
+        setFeedback(
+          profileQuery.error instanceof ApiError
+            ? profileQuery.error.message
+            : "Still loading your profile -- try again in a moment.",
+        );
+        return;
+      }
+      playerId = profileQuery.data.id;
     }
     try {
       await createRoundMutation.mutateAsync({
-        playerId: profileQuery.data.id,
+        playerId,
         teeConfigurationId: values.teeConfigurationId,
         playedAt: playedAtToIsoString(values.playedAt),
         isTournament: values.isTournament,
@@ -102,10 +133,29 @@ export default function NewRoundPage() {
         ← Back
       </Button>
       <h1 className="mt-4 text-2xl font-semibold text-text">Start a round</h1>
-      <p className="mt-2 text-sm text-text-muted">Choose the course and tee you're playing, then enter your scores hole by hole.</p>
+      <p className="mt-2 text-sm text-text-muted">
+        {isAdmin
+          ? "Choose the player, course, and tee, then enter their scores hole by hole."
+          : "Choose the course and tee you're playing, then enter your scores hole by hole."}
+      </p>
 
       <form className="mt-8 flex flex-col gap-6" onSubmit={handleSubmit(onSubmit)} noValidate>
         {feedback && <Alert variant="error">{feedback}</Alert>}
+
+        {isAdmin && (
+          <FormField label="Player">
+            <Select {...register("playerId")} disabled={playersQuery.isPending}>
+              <option value="">{playersQuery.isPending ? "Loading players…" : "Select a player"}</option>
+              {playersQuery.data?.items
+                .filter((item) => item.playerId !== null)
+                .map((item) => (
+                  <option key={item.playerId} value={item.playerId!}>
+                    {item.firstName} {item.lastName}
+                  </option>
+                ))}
+            </Select>
+          </FormField>
+        )}
 
         <FormField label="Course" error={errors.courseId?.message}>
           <Select {...register("courseId")} disabled={coursesQuery.isPending}>

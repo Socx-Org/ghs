@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import MockAdapter from "axios-mock-adapter";
 import AppRoutes from "../AppRoutes";
 import PlayerDashboardPage from "./PlayerDashboardPage";
+import { ToastProvider } from "../components";
 import { api } from "../lib/api";
 import { setTokens } from "../lib/auth-store";
 
@@ -55,9 +56,11 @@ function renderDashboardViaRoutes() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/"]}>
-        <AppRoutes />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={["/"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }

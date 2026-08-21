@@ -34,6 +34,13 @@ export interface AdminUserListItem {
   // not a fabricated name.
   firstName: string | null;
   lastName: string | null;
+  // ghs#114: the players table's own id, distinct from `id` above
+  // (a users table id) -- found missing while implementing #114's own
+  // stated intention to use this endpoint as the player-lookup source
+  // for admin round creation, which needs the real players.id to pass
+  // as POST /rounds' playerId, not a users.id. Same null-for-non-player
+  // reasoning as firstName/lastName above.
+  playerId: string | null;
 }
 
 export interface ListUsersInput {
@@ -150,6 +157,7 @@ export function createAdminUsersService(
           createdAt: u.createdAt,
           firstName: player?.firstName ?? null,
           lastName: player?.lastName ?? null,
+          playerId: player?.id ?? null,
         };
       });
 
