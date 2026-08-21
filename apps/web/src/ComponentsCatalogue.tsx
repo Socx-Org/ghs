@@ -50,6 +50,7 @@ import {
   TableHead,
   TableHeaderCell,
   TableRow,
+  Textarea,
   ThemeToggle,
   ToggleGroup,
 } from "./components";
@@ -429,6 +430,10 @@ export default function ComponentsCatalogue() {
                     <Checkbox checked={nineHole} onChange={(e) => setNineHole(e.target.checked)} />
                     This is a tournament round
                   </label>
+                </FormField>
+
+                <FormField label="Notes" helpText="Textarea, e.g. a round's rejection reason (ghs#67).">
+                  <Textarea placeholder="Enter a reason…" />
                 </FormField>
               </div>
             </CardBody>

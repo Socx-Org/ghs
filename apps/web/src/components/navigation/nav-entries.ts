@@ -1,4 +1,4 @@
-import { Flag, LandPlot, LayoutDashboard, ShieldCheck, Users } from "lucide-react";
+import { ClipboardCheck, Flag, LandPlot, LayoutDashboard, ShieldCheck, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { cn } from "../../lib/cn";
@@ -30,6 +30,8 @@ export function useNavEntries(): NavEntry[] {
   if (user?.role === "admin" || user?.role === "super_admin") {
     entries.push({ to: "/admin/users", label: "Accounts", icon: Users });
     entries.push({ to: "/admin/users/new", label: "Create Account", icon: ShieldCheck });
+    // ghs#67
+    entries.push({ to: "/admin/rounds/pending", label: "Pending Rounds", icon: ClipboardCheck });
   }
   return entries;
 }
