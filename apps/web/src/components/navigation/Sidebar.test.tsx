@@ -64,6 +64,17 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /^Accounts$/ })).toBeInTheDocument();
   });
 
+  it("shows Courses for every role, ghs#109 -- no role restriction on viewing", () => {
+    setTokens(tokensFor("player"));
+    renderSidebar();
+    expect(screen.getByRole("link", { name: /^Courses$/ })).toBeInTheDocument();
+
+    cleanup();
+    setTokens(tokensFor("admin"));
+    renderSidebar();
+    expect(screen.getByRole("link", { name: /^Courses$/ })).toBeInTheDocument();
+  });
+
   it("marks the current route's link as active", () => {
     setTokens(tokensFor("player"));
     renderSidebar("/rounds/new");

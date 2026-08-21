@@ -35,9 +35,9 @@ function ControlledMobileNav({ onClose }: { onClose?: () => void }) {
   );
 }
 
-function renderMobileNav(props: { open?: boolean; onClose?: () => void } = {}) {
+function renderMobileNav(props: { open?: boolean; onClose?: () => void; role?: string } = {}) {
   setTokens({
-    accessToken: makeAccessToken({ sub: "user-1", email: "a@example.com", ghs_role: "player" }),
+    accessToken: makeAccessToken({ sub: "user-1", email: "a@example.com", ghs_role: props.role ?? "player" }),
     refreshToken: "refresh-1",
     expiresIn: 900,
   });
@@ -65,6 +65,16 @@ describe("MobileNav", () => {
     renderMobileNav();
     expect(screen.getByRole("link", { name: /Dashboard/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /New Round/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Courses$/ })).toBeInTheDocument();
+  });
+
+  // ghs#109: review finding, PR #130 -- the PR description claimed this
+  // file covers every role, but renderMobileNav previously hardcoded
+  // "player" with no way to override it, so the claim was never actually
+  // exercised here. Matches Sidebar.test.tsx's own equivalent case.
+  it("shows Courses for every role, ghs#109 -- no role restriction on viewing", () => {
+    renderMobileNav({ role: "admin" });
+    expect(screen.getByRole("link", { name: /^Courses$/ })).toBeInTheDocument();
   });
 
   it("closes on selecting a nav item", async () => {
