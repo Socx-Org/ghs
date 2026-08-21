@@ -198,6 +198,24 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
   });
 
+  it("redirects /admin/rounds to /login when unauthenticated (ghs#113)", () => {
+    renderAt("/admin/rounds");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("redirects /admin/rounds to / for an authenticated non-admin (ghs#113)", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/admin/rounds");
+    expect(screen.queryByRole("heading", { name: "All rounds" })).not.toBeInTheDocument();
+    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
+  });
+
+  it("renders the all-rounds list at /admin/rounds for an admin, not confused with /admin/rounds/pending (ghs#113)", () => {
+    setTokens(ADMIN_TOKENS);
+    renderAt("/admin/rounds");
+    expect(screen.getByRole("heading", { name: "All rounds" })).toBeInTheDocument();
+  });
+
   it("renders the round-review screen at /admin/rounds/:id for an admin (ghs#67)", () => {
     setTokens(ADMIN_TOKENS);
     renderAt("/admin/rounds/some-round-id");
