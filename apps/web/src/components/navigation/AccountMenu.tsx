@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { ChevronDown, LogOut, UserCircle } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { ChevronDown, LogOut, User, UserCircle } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 
 function roleLabel(role: string): string {
@@ -84,6 +84,14 @@ export function AccountMenu() {
             <p className="text-xs text-text-muted">{roleLabel(user.role)}</p>
           </div>
           <div className="my-1 border-t border-border" />
+          <Link
+            to="/profile"
+            onClick={() => setOpen(false)}
+            className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-sm text-text hover:bg-text/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary"
+          >
+            <User aria-hidden="true" className="h-4 w-4" />
+            Profile
+          </Link>
           <button
             type="button"
             onClick={handleLogout}

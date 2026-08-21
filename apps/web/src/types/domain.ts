@@ -26,6 +26,20 @@ export interface AdminUserListItem {
   lastName: string | null;
 }
 
+// Mirrors apps/api/src/application/auth.service.ts's AccountProfile
+// exactly (ghs#98) -- the account-level counterpart to PlayerProfile
+// below, returned by GET /auth/me. Works for every role, including
+// admin/super_admin (firstName/lastName null for those, same reasoning
+// as AdminUserListItem).
+export interface AccountProfile {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  firstName: string | null;
+  lastName: string | null;
+}
+
 // Mirrors apps/api/src/interface/http/routes/players.ts's
 // toPlayerProfileResponse (ghs#60/#89) -- userId deliberately excluded,
 // same reasoning as the backend's own DTO (PR #75: an internal
