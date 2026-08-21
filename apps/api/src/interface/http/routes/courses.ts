@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { CoursesService } from "../../../application/courses.service.ts";
-import type { CreateCourseInput, CreateHoleInput, CreateTeeConfigurationInput } from "../../../data/courses.repository.ts";
+import type { CreateCourseInput, CreateHoleInput, CreateTeeConfigurationInput, UpdateCourseInput } from "../../../data/courses.repository.ts";
+import { CourseHasRoundsError } from "../../../data/courses.repository.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth, requireRole } from "../middleware/require-auth.ts";
 
@@ -26,7 +27,10 @@ function parseHole(value: unknown): CreateHoleInput | null {
   return { holeNumber: h.holeNumber, distanceYards: h.distanceYards, par: h.par, strokeIndex: h.strokeIndex };
 }
 
-function parseTeeConfiguration(value: unknown): CreateTeeConfigurationInput | null {
+// Exported for tee-configurations.ts's own standalone update route
+// (ghs#99) -- "same validation as create" means the actual same
+// function, not a second copy of these rules to keep in sync.
+export function parseTeeConfiguration(value: unknown): CreateTeeConfigurationInput | null {
   if (typeof value !== "object" || value === null) return null;
   const t = value as Record<string, unknown>;
   if (
@@ -112,6 +116,103 @@ export function coursesRouter(service: CoursesService, authProvider: AuthProvide
 
       const course = await service.createCourse(input);
       res.status(201).json(course);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ghs#99. Partial update -- a field is only validated/applied when its
+  // key is present in the body at all (matching UpdateCourseInput's own
+  // "presence, not truthiness" semantics); null is a valid, meaningful
+  // value for the three nullable columns (explicitly clears them), same
+  // as createCourse's own optional-string convention but allowing the
+  // clear case PATCH additionally needs.
+  router.patch("/courses/:id", ...requireAdmin, async (req, res, next) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+      const input: UpdateCourseInput = {};
+
+      if ("name" in body) {
+        if (typeof body.name !== "string" || body.name.trim().length === 0) {
+          res.status(400).json({ error: "name must be a non-empty string" });
+          return;
+        }
+        input.name = body.name.trim();
+      }
+      if ("clubId" in body) {
+        if (body.clubId !== null && typeof body.clubId !== "string") {
+          res.status(400).json({ error: "clubId must be a string or null" });
+          return;
+        }
+        input.clubId = body.clubId;
+      }
+      if ("city" in body) {
+        if (body.city !== null && typeof body.city !== "string") {
+          res.status(400).json({ error: "city must be a string or null" });
+          return;
+        }
+        input.city = body.city;
+      }
+      if ("country" in body) {
+        if (body.country !== null && typeof body.country !== "string") {
+          res.status(400).json({ error: "country must be a string or null" });
+          return;
+        }
+        input.country = body.country;
+      }
+
+      const course = await service.updateCourse(String(req.params.id), input);
+      if (!course) {
+        res.status(404).json({ error: "course not found" });
+        return;
+      }
+      res.status(200).json(course);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ghs#99. Soft-delete (deleted_at, matching CoursesRepository.list()'s
+  // own existing filter) -- 409 course_has_rounds, not a raw constraint
+  // violation, when any of this course's tee configurations is still
+  // referenced by an existing round (courses.repository.ts's own
+  // CourseHasRoundsError doc comment explains why this is a soft-delete-
+  // time business rule, not literally an FK violation).
+  router.delete("/courses/:id", ...requireAdmin, async (req, res, next) => {
+    try {
+      const deleted = await service.deleteCourse(String(req.params.id));
+      if (!deleted) {
+        res.status(404).json({ error: "course not found" });
+        return;
+      }
+      res.status(200).json({ message: "Course deleted." });
+    } catch (err) {
+      if (err instanceof CourseHasRoundsError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  // ghs#99. Standalone tee-configuration creation on an existing course
+  // -- same parseTeeConfiguration validation createCourse's own nested
+  // teeConfigurations[] entries already use, not a second, divergent
+  // rule set.
+  router.post("/courses/:id/tee-configurations", ...requireAdmin, async (req, res, next) => {
+    try {
+      const tee = parseTeeConfiguration(req.body);
+      if (!tee) {
+        res.status(400).json({ error: "invalid tee configuration" });
+        return;
+      }
+
+      const teeConfiguration = await service.createTeeConfiguration(String(req.params.id), tee);
+      if (!teeConfiguration) {
+        res.status(404).json({ error: "course not found" });
+        return;
+      }
+      res.status(201).json(teeConfiguration);
     } catch (err) {
       next(err);
     }

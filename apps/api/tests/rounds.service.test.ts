@@ -75,6 +75,21 @@ function fakeCoursesRepository(): CoursesRepository {
       if (id === FULL_TEE_CONFIGURATION.id) return FULL_TEE_CONFIGURATION;
       return null;
     },
+    async update() {
+      throw new Error("not used by these tests");
+    },
+    async delete() {
+      throw new Error("not used by these tests");
+    },
+    async createTeeConfiguration() {
+      throw new Error("not used by these tests");
+    },
+    async updateTeeConfiguration() {
+      throw new Error("not used by these tests");
+    },
+    async deleteTeeConfiguration() {
+      throw new Error("not used by these tests");
+    },
   };
 }
 

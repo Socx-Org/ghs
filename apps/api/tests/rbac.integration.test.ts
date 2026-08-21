@@ -159,6 +159,22 @@ interface RouteCase {
 const ADMIN_GATED_ROUTES: RouteCase[] = [
   { name: "POST /clubs", method: "POST", path: "/clubs", body: { name: "RBAC Test Club" } },
   { name: "POST /courses", method: "POST", path: "/courses", body: { name: "RBAC Test Course" } },
+  // ghs#99.
+  { name: "PATCH /courses/:id", method: "PATCH", path: "/courses/00000000-0000-0000-0000-000000000000", body: { name: "RBAC Test Course Update" } },
+  { name: "DELETE /courses/:id", method: "DELETE", path: "/courses/00000000-0000-0000-0000-000000000000" },
+  {
+    name: "POST /courses/:id/tee-configurations",
+    method: "POST",
+    path: "/courses/00000000-0000-0000-0000-000000000000/tee-configurations",
+    body: { name: "RBAC Tee", holeCount: 18, courseRating: 72, slopeRating: 113, holes: [] },
+  },
+  {
+    name: "PATCH /tee-configurations/:id",
+    method: "PATCH",
+    path: "/tee-configurations/00000000-0000-0000-0000-000000000000",
+    body: { name: "RBAC Tee", holeCount: 18, courseRating: 72, slopeRating: 113, holes: [] },
+  },
+  { name: "DELETE /tee-configurations/:id", method: "DELETE", path: "/tee-configurations/00000000-0000-0000-0000-000000000000" },
   { name: "GET /admin/tee-configurations/:id/pcc", method: "GET", path: "/admin/tee-configurations/00000000-0000-0000-0000-000000000000/pcc?playedOn=2026-05-01" },
   { name: "PATCH /admin/tee-configurations/:id/pcc", method: "PATCH", path: "/admin/tee-configurations/00000000-0000-0000-0000-000000000000/pcc", body: { playedOn: "2026-05-01", pcc: 0 } },
   { name: "GET /admin/settings", method: "GET", path: "/admin/settings" },
