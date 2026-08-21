@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import MockAdapter from "axios-mock-adapter";
 import AppRoutes from "../AppRoutes";
+import { ToastProvider } from "../components";
 import { api } from "../lib/api";
 import { setTokens } from "../lib/auth-store";
 
@@ -36,14 +37,19 @@ afterEach(() => {
   localStorage.clear();
 });
 
+// ghs#112: a successful create navigates to CourseDetailPage, whose
+// TeeConfigurationsSection now calls useToast() unconditionally --
+// same reasoning as CourseDetailPage.test.tsx's own renderAsRole fix.
 function renderAsRole(role: "player" | "admin" = "admin") {
   setTokens(tokensFor(role));
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/courses/new"]}>
-        <AppRoutes />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={["/courses/new"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }

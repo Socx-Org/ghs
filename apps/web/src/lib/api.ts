@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { AccountProfile, AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PlayerProfile, Round, RoundSummary, TeeConfiguration, UserRole, UserStatus } from "../types/domain";
+import type { AccountProfile, AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PlayerProfile, Round, RoundSummary, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -383,6 +383,27 @@ export async function getRound(id: string): Promise<Round> {
 export async function getTeeConfiguration(id: string): Promise<TeeConfiguration> {
   const { data } = await api.get<TeeConfiguration>(`/tee-configurations/${id}`);
   return data;
+}
+
+// ghs#112. Standalone tee-configuration creation on an existing course
+// (ghs#99) -- reused for the one real tee-configuration create/edit
+// component this app has (TeeConfigurationForm), not a page-specific
+// duplicate.
+export async function createTeeConfiguration(courseId: string, input: TeeConfigurationInput): Promise<TeeConfiguration> {
+  const { data } = await api.post<TeeConfiguration>(`/courses/${courseId}/tee-configurations`, input);
+  return data;
+}
+
+// Full replacement, same shape as createTeeConfiguration (ghs#99).
+export async function updateTeeConfiguration(id: string, input: TeeConfigurationInput): Promise<TeeConfiguration> {
+  const { data } = await api.patch<TeeConfiguration>(`/tee-configurations/${id}`, input);
+  return data;
+}
+
+// On a 409 conflict, error.message is the backend's own stable code
+// ("tee_configuration_has_rounds") -- same convention as deleteCourse.
+export async function deleteTeeConfiguration(id: string): Promise<void> {
+  await api.delete(`/tee-configurations/${id}`);
 }
 
 export interface AddHoleScoreInput {

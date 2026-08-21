@@ -34,3 +34,4 @@ export * from "./domain/RoleBadge";
 export * from "./domain/AccountStatusBadge";
 export * from "./domain/RequireRole";
 export * from "./domain/HoleEntryCard";
+export * from "./domain/TeeConfigurationForm";
