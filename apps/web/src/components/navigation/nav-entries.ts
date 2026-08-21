@@ -1,4 +1,4 @@
-import { Flag, LayoutDashboard, ShieldCheck, Users } from "lucide-react";
+import { Flag, LandPlot, LayoutDashboard, ShieldCheck, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { cn } from "../../lib/cn";
@@ -19,6 +19,11 @@ export interface NavEntry {
 export function useNavEntries(): NavEntry[] {
   const { user } = useAuth();
   const entries: NavEntry[] = [{ to: "/", label: "Dashboard", icon: LayoutDashboard }];
+  // ghs#109: GET /courses has no role restriction on the backend, and
+  // this issue's own scope says the same on the frontend -- every
+  // authenticated role gets this entry, unlike Accounts/Create Account
+  // below.
+  entries.push({ to: "/courses", label: "Courses", icon: LandPlot });
   if (user?.role === "player") {
     entries.push({ to: "/rounds/new", label: "New Round", icon: Flag });
   }

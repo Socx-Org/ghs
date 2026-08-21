@@ -5,6 +5,7 @@ import { useAuth } from "./hooks/useAuth";
 import ActivationPage from "./pages/ActivationPage";
 import AdminAccountsPage from "./pages/AdminAccountsPage";
 import AdminCreateUserPage from "./pages/AdminCreateUserPage";
+import CourseListPage from "./pages/CourseListPage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import LoginPage from "./pages/LoginPage";
@@ -83,6 +84,7 @@ export default function AppRoutes() {
         <Route element={<AppShell />}>
           <Route path="/" element={<HomeRoute />} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/courses" element={<CourseListPage />} />
           <Route path="/rounds/new" element={<NewRoundPage />} />
           <Route path="/rounds/:id" element={<RoundEntryPage />} />
           <Route element={<RequireAdmin />}>

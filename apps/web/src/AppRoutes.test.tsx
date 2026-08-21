@@ -118,6 +118,23 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("heading", { name: "Profile" })).toBeInTheDocument();
   });
 
+  it("redirects /courses to /login when unauthenticated (ghs#109)", () => {
+    renderAt("/courses");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("renders the course list at /courses for an authenticated player, ghs#109 -- no role restriction on viewing", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/courses");
+    expect(screen.getByRole("heading", { name: "Courses" })).toBeInTheDocument();
+  });
+
+  it("renders the course list at /courses for an authenticated admin (ghs#109)", () => {
+    setTokens(ADMIN_TOKENS);
+    renderAt("/courses");
+    expect(screen.getByRole("heading", { name: "Courses" })).toBeInTheDocument();
+  });
+
   it("redirects /admin/users/new to /login when unauthenticated (ghs#86)", () => {
     renderAt("/admin/users/new");
     expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();

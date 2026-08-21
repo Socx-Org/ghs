@@ -65,6 +65,7 @@ describe("MobileNav", () => {
     renderMobileNav();
     expect(screen.getByRole("link", { name: /Dashboard/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /New Round/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Courses$/ })).toBeInTheDocument();
   });
 
   it("closes on selecting a nav item", async () => {
