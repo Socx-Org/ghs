@@ -172,7 +172,11 @@ export default function AdminRoundReviewPage() {
           <Card>
             <CardHeader className="flex items-center justify-between gap-3">
               <h2 className="text-sm font-semibold text-text">
-                {playerQuery.data ? `${playerQuery.data.firstName} ${playerQuery.data.lastName}` : "Player"}
+                {playerQuery.isError
+                  ? "Couldn't load player name"
+                  : playerQuery.data
+                    ? `${playerQuery.data.firstName} ${playerQuery.data.lastName}`
+                    : "Player"}
               </h2>
               <RoundStatusBadge status={round.status} />
             </CardHeader>

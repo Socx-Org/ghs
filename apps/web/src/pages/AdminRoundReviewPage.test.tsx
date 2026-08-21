@@ -201,6 +201,22 @@ describe("AdminRoundReviewPage", () => {
     expect(within(dialog).getByLabelText("Reason")).toHaveValue("");
   });
 
+  // Review finding (PR #139): a failed player re-fetch used to fall back
+  // silently to the generic "Player" label, hiding the load failure and
+  // making the screen look partially broken with no indication anything
+  // went wrong. The round/tee data and Approve/Reject actions must still
+  // work -- only the player's name is affected.
+  it("surfaces a failed player fetch instead of silently falling back to a generic label", async () => {
+    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "pending" }));
+    mock.onGet("/players/player-1").reply(500);
+
+    renderAsRole("admin");
+
+    expect(await screen.findByText("Couldn't load player name")).toBeInTheDocument();
+    expect(screen.queryByText("Player")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeInTheDocument();
+  });
+
   it("shows the server's error message on a failed approve, without navigating away", async () => {
     mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "pending" }));
     mock.onPatch("/rounds/round-1/status").reply(409, { error: "round is not in a state that allows approval" });
