@@ -151,7 +151,7 @@ test("submitForReview writes notification_history and its child notification_out
   const { roundsService } = buildServices();
 
   const round = await roundsService.createRound({ playerId, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
-  await roundsService.submitForReview(round.id);
+  await roundsService.submitForReview(round.id, "player");
 
   const history = await historyRowsForUser(userId);
   assert.deepEqual(history.map((h) => h.event_type), ["round_submitted"]);
@@ -175,7 +175,7 @@ test("submitForReview: notify_round_submitted=false still writes notification_hi
   await systemSettingsService.setNotificationSetting("roundSubmitted", false, null);
 
   const round = await roundsService.createRound({ playerId, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
-  await roundsService.submitForReview(round.id);
+  await roundsService.submitForReview(round.id, "player");
 
   const history = await historyRowsForUser(userId);
   assert.deepEqual(history.map((h) => h.event_type), ["round_submitted"], "the round was genuinely submitted -- notification_history still records it");

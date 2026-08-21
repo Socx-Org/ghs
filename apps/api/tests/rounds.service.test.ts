@@ -395,7 +395,7 @@ test("submitForReview writes a round_submitted notification (ghs#58, moved from 
 
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
   await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
-  await service.submitForReview(round.id);
+  await service.submitForReview(round.id, "player");
 
   assert.equal(notifications.recordedCalls.length, 1);
   const call = notifications.recordedCalls[0]!;
@@ -413,7 +413,7 @@ test("submitForReview accepts draft, rejected, and amending -- always landing on
     await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
     if (sourceStatus !== "draft") await repo.setStatus(round.id, sourceStatus, sourceStatus === "rejected" ? "some reason" : undefined);
 
-    const result = await service.submitForReview(round.id);
+    const result = await service.submitForReview(round.id, "player");
     assert.equal(result.round!.status, "pending", `submitting from '${sourceStatus}' must land on 'pending'`);
   }
 });
@@ -426,7 +426,7 @@ test("submitForReview rejects pending and approved -- already under review or al
     const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
     await repo.setStatus(round.id, sourceStatus);
 
-    await assert.rejects(() => service.submitForReview(round.id), InvalidRoundTransitionError, `submitting from '${sourceStatus}' must be rejected`);
+    await assert.rejects(() => service.submitForReview(round.id, "player"), InvalidRoundTransitionError, `submitting from '${sourceStatus}' must be rejected`);
   }
 });
 
@@ -437,7 +437,7 @@ test("submitForReview clears a stale rejection reason when resubmitting a reject
   await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
   await repo.setStatus(round.id, "rejected", "Missing hole 4");
 
-  const result = await service.submitForReview(round.id);
+  const result = await service.submitForReview(round.id, "player");
 
   assert.equal(result.round!.status, "pending");
   assert.equal(result.round!.rejectionReason, null, "resubmitting clears the old reason -- it no longer describes the round's current state");
@@ -474,12 +474,12 @@ test("approveRound writes a round_approved notification, and rejectRound writes 
 
   const approvedRound = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
   await service.addHoleScore(approvedRound.id, { holeNumber: 1, strokes: 4 });
-  await service.submitForReview(approvedRound.id);
+  await service.submitForReview(approvedRound.id, "player");
   await service.approveRound(approvedRound.id);
 
   const rejectedRound = await service.createRound({ playerId: "player-2", teeConfigurationId: "tee-1", playedAt: "2026-05-02T09:00:00.000Z" });
   await service.addHoleScore(rejectedRound.id, { holeNumber: 1, strokes: 4 });
-  await service.submitForReview(rejectedRound.id);
+  await service.submitForReview(rejectedRound.id, "player");
   await service.rejectRound(rejectedRound.id, "Incomplete scorecard");
 
   const eventTypes = notifications.recordedCalls.map((c) => c.eventType);
@@ -496,7 +496,7 @@ test("submitForReview: notify_round_submitted=false still writes notification_hi
 
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
   await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
-  await service.submitForReview(round.id);
+  await service.submitForReview(round.id, "player");
 
   assert.equal(notifications.recordedCalls.length, 1, "the business event genuinely happened -- notification_history still gets a row");
   assert.equal(notifications.recordedCalls[0]!.enqueued, false, "but no outbox row -- nothing for the worker to ever deliver");
@@ -509,7 +509,7 @@ test("approveRound: notify_round_approved=false still writes notification_histor
 
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
   await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
-  await service.submitForReview(round.id);
+  await service.submitForReview(round.id, "player");
   await service.approveRound(round.id);
 
   const approvedCall = notifications.recordedCalls.find((c) => c.eventType === "round_approved")!;
@@ -610,13 +610,13 @@ test("submitForReview rejects a round missing hole scores (ghs#92)", async () =>
   const service = roundsService(fakeRepository());
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: FULL_TEE_CONFIGURATION.id, playedAt: "2026-05-01T09:00:00.000Z" });
 
-  await assert.rejects(() => service.submitForReview(round.id), IncompleteRoundError);
+  await assert.rejects(() => service.submitForReview(round.id, "player"), IncompleteRoundError);
 
   // Scoring 17 of 18 required holes still isn't enough.
   for (let holeNumber = 1; holeNumber <= 17; holeNumber++) {
     await service.addHoleScore(round.id, { holeNumber, strokes: 4 });
   }
-  await assert.rejects(() => service.submitForReview(round.id), IncompleteRoundError);
+  await assert.rejects(() => service.submitForReview(round.id, "player"), IncompleteRoundError);
 });
 
 test("submitForReview succeeds once every hole in the tee configuration has a recorded score (ghs#92)", async () => {
@@ -626,7 +626,7 @@ test("submitForReview succeeds once every hole in the tee configuration has a re
     await service.addHoleScore(round.id, { holeNumber, strokes: 4 });
   }
 
-  const result = await service.submitForReview(round.id);
+  const result = await service.submitForReview(round.id, "player");
   assert.equal(result.round!.status, "pending");
 });
 
@@ -639,10 +639,10 @@ test("submitForReview: an is9Hole round only requires 9 recorded scores, not all
   for (let holeNumber = 1; holeNumber <= 8; holeNumber++) {
     await service.addHoleScore(round.id, { holeNumber, strokes: 4 });
   }
-  await assert.rejects(() => service.submitForReview(round.id), IncompleteRoundError, "8 recorded scores is still short of the 9 required");
+  await assert.rejects(() => service.submitForReview(round.id, "player"), IncompleteRoundError, "8 recorded scores is still short of the 9 required");
 
   await service.addHoleScore(round.id, { holeNumber: 9, strokes: 4 });
-  const result = await service.submitForReview(round.id);
+  const result = await service.submitForReview(round.id, "player");
   assert.equal(result.round!.status, "pending", "9 recorded scores is enough for an is9Hole round, even against an 18-hole tee configuration");
 });
 
@@ -652,7 +652,7 @@ test("approveRound rescoring then approves and recalculates via the ghs#24 orche
   const service = roundsService(repo, recalculation, zeroPccService());
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
   await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
-  await service.submitForReview(round.id);
+  await service.submitForReview(round.id, "player");
 
   const result = await service.approveRound(round.id);
 
@@ -728,7 +728,7 @@ test("rejectRound skips recalculation when the round never had a differential --
   const service = roundsService(repo, recalculation);
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
   await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
-  await service.submitForReview(round.id);
+  await service.submitForReview(round.id, "player");
 
   const result = await service.rejectRound(round.id, "Incomplete scorecard");
 

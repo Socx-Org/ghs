@@ -78,7 +78,18 @@ export interface RoundsService {
   // per listApprovedDifferentialsForPlayer), so landing in 'pending'
   // changes nothing recalculation needs to see yet -- approveRound is
   // still what triggers that, unchanged.
-  submitForReview(id: string): Promise<RoundWorkflowResult>;
+  //
+  // submittedByRole (ghs#100 review fix, PR #141): the ghs#100 fast path
+  // below only ever auto-approves when the round was BOTH created by an
+  // admin/super_admin AND is being submitted right now by an admin/
+  // super_admin. createdByRole alone isn't enough -- it's a snapshot of
+  // who created the round, not who is choosing to submit it, and a
+  // player is permitted to edit/submit their own round's holes
+  // (authorizeForPlayer) regardless of who originally drafted it. Without
+  // this second check, a player could take over an admin-drafted round
+  // and have their own submission silently skip review -- exactly the
+  // gate this fast path must never bypass for a player's own action.
+  submitForReview(id: string, submittedByRole: "player" | "admin" | "super_admin"): Promise<RoundWorkflowResult>;
 
   // Every method below is a real workflow transition (ghs#23): each
   // opens its own transaction, locks the round row first
@@ -386,7 +397,7 @@ export function createRoundsService(
       return repository.listAdminRounds(filter);
     },
 
-    async submitForReview(id) {
+    async submitForReview(id, submittedByRole) {
       // ghs#100: a lightweight, lock-free read used only to decide
       // which path applies, before any transaction opens -- not a
       // substitute for either path's own getForUpdate/get read, which
@@ -395,7 +406,12 @@ export function createRoundsService(
       // correctly by whichever path runs next, so this doesn't need its
       // own not-found handling.
       const createdByRole = await repository.getCreatedByRole(id);
-      if (createdByRole === "admin" || createdByRole === "super_admin") {
+      const isAdminCreated = createdByRole === "admin" || createdByRole === "super_admin";
+      // Review fix, PR #141: both conditions must hold -- see this
+      // method's own interface doc comment for why createdByRole alone
+      // isn't a safe enough signal on its own.
+      const isAdminSubmitting = submittedByRole === "admin" || submittedByRole === "super_admin";
+      if (isAdminCreated && isAdminSubmitting) {
         return submitAdminCreatedRound(id);
       }
 

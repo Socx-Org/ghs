@@ -224,7 +224,10 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         return;
       }
 
-      res.status(200).json(await service.submitForReview(roundId));
+      // ghs#100 review fix, PR #141: the actual caller's role right now,
+      // not just who created the round -- see submitForReview's own doc
+      // comment for why both are needed.
+      res.status(200).json(await service.submitForReview(roundId, identity.ghsRole as "player" | "admin" | "super_admin"));
     } catch (err) {
       if (err instanceof RoundNotFoundError) {
         res.status(404).json({ error: err.message });

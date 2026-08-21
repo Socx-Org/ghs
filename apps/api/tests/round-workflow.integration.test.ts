@@ -776,3 +776,69 @@ test("a player-created round is unaffected by the auto-approval fast path -- sti
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("a player taking over an admin-drafted round cannot bypass review by submitting it themselves (ghs#100 review fix, PR #141)", async () => {
+  // Real hole metadata for exactly one hole -- same pattern as the
+  // auto-approval test above.
+  const coursesRepo = createCoursesRepository(pool);
+  const course = await coursesRepo.create({
+    name: "Escalation Test Course", country: "ES",
+    teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 68.0, slopeRating: 113, holes: [{ holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 1 }] }],
+  });
+  const teeConfigurationId = course.teeConfigurations[0]!.id;
+  const { app, roundsRepo, players, adminUsersService, authService, roundsService } = buildWorkflowApp();
+  const { server, baseUrl } = await startServer(app);
+
+  try {
+    await adminUsersService.adminCreateUser({
+      email: "escalation-admin@example.com", password: "admin-pw-1", role: "admin",
+      firstName: "Escalation", lastName: "Admin", autoActivate: true,
+    });
+    // A real login-linked player record (same pattern as
+    // rounds.integration.test.ts's own player HTTP tests) -- so the
+    // player's own submission below is a genuine authorized action on
+    // their own round, not merely testing an authorization-boundary
+    // rejection.
+    const playerUser = await adminUsersService.adminCreateUser({
+      email: "escalation-player@example.com", password: "player-pw-1", role: "player",
+      firstName: "Escalation", lastName: "PlayerAccount", autoActivate: true,
+    });
+    const player = await players.findByUserId(playerUser.userId);
+
+    const adminLogin = await authService.login("escalation-admin@example.com", "admin-pw-1");
+    const playerLogin = await authService.login("escalation-player@example.com", "player-pw-1");
+    if (adminLogin.status !== "authenticated" || playerLogin.status !== "authenticated") throw new Error("unreachable");
+    const asAdmin = { "Content-Type": "application/json", Authorization: `Bearer ${adminLogin.tokens.accessToken}` };
+    const asPlayer = { "Content-Type": "application/json", Authorization: `Bearer ${playerLogin.tokens.accessToken}` };
+
+    // Admin drafts the round on the player's behalf -- createdByRole is
+    // 'admin' -- but never submits it themselves.
+    const createResponse = await fetch(`${baseUrl}/api/v1/rounds`, {
+      method: "POST", headers: asAdmin,
+      body: JSON.stringify({ playerId: player!.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" }),
+    });
+    assert.equal(createResponse.status, 201);
+    const round = await createResponse.json() as { id: string };
+
+    // The player themselves takes over -- records the hole score and
+    // submits it as their own action. Before the review fix, this would
+    // have auto-approved purely because createdByRole was 'admin',
+    // silently bypassing review for what is now genuinely the player's
+    // own submission.
+    const holeResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/holes`, {
+      method: "POST", headers: asPlayer, body: JSON.stringify({ holeNumber: 1, strokes: 6 }),
+    });
+    assert.equal(holeResponse.status, 200);
+
+    const submitResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/submit`, { method: "POST", headers: asPlayer });
+    assert.equal(submitResponse.status, 200);
+
+    const reloaded = await roundsRepo.get(round.id);
+    assert.equal(reloaded!.status, "pending", "a player's own submission must still require review, regardless of who originally drafted the round");
+
+    const queue = await roundsService.listPendingQueue();
+    assert.ok(queue.some((item) => item.id === round.id), "visible in the pending queue -- the fast path never applied to this submission");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
