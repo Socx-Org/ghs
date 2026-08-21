@@ -13,11 +13,13 @@ import type { LoginRequest } from "../lib/api";
 // per the approved direction -- not a literal copy of its content.
 // Deliberately dropped from that reference, because none of it is real
 // for GHS: "Or continue with Google/GitHub" (no OAuth provider exists
-// anywhere in the backend), "Forgot password?" (no reset UI yet --
-// explicitly Wave 2, ghs#64's own non-scope), "Remember me" (the
-// refresh token already persists the session for 30 days regardless;
-// a checkbox with no backend effect would be decorative, not functional),
-// and the marketing "Start a free trial" copy (GHS has no such flow).
+// anywhere in the backend), "Remember me" (the refresh token already
+// persists the session for 30 days regardless; a checkbox with no
+// backend effect would be decorative, not functional), and the
+// marketing "Start a free trial" copy (GHS has no such flow).
+// ("Forgot password?" was dropped for the same reason at the time --
+// no reset UI existed yet -- but that's no longer true; see the real
+// "Forgot my password?" link below, ghs#107.)
 // The right-hand panel uses a solid brand-colour field with a short
 // tagline instead of a stock photo -- no photography asset exists
 // anywhere in this app, and sourcing one for this alone would be a real
@@ -94,6 +96,10 @@ function CredentialsForm({
       <FormField label="Password" error={errors.password?.message}>
         <Input type="password" autoComplete="current-password" {...register("password")} />
       </FormField>
+
+      <Link to="/forgot-password" className="-mt-3 self-end text-sm font-medium text-primary hover:underline">
+        Forgot my password?
+      </Link>
 
       <Button type="submit" isLoading={isSubmitting} className="w-full">
         Sign in
