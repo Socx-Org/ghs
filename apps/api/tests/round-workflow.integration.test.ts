@@ -551,3 +551,228 @@ test("listPendingQueue (ghs#61): returns only genuinely pending rounds, across a
   assert.ok(first.teeConfigurationName);
   assert.equal(first.playedAt, "2026-05-03T09:00:00.000Z");
 });
+
+// ---------------------------------------------------------------------
+// ghs#100: GET /admin/rounds (general all-rounds browser, filter/
+// paginate) and the admin-created-round auto-approval fast path.
+// ---------------------------------------------------------------------
+
+function buildWorkflowApp() {
+  const authConfig: AuthConfig = {
+    jwtSecret: "round-workflow-100-test-secret",
+    jwtAccessExpiresInSeconds: 900,
+    jwtRefreshExpiresInSeconds: 2_592_000,
+    mfaPendingExpiresInSeconds: 300,
+    mfaEncryptionKey: randomBytes(32),
+  };
+
+  const users = createUsersRepository(pool);
+  const players = createPlayersRepository(pool);
+  const activationTokens = createActivationTokenRepository(pool);
+  const passwordResetTokens = createPasswordResetTokenRepository(pool);
+  const refreshTokens = createRefreshTokensRepository(pool);
+  const mfaRepo = createMfaRepository(pool);
+  const clubsRepo = createClubsRepository(pool);
+  const coursesRepo = createCoursesRepository(pool);
+  const settingsRepo = createSystemSettingsRepository(pool);
+  const { roundsRepo, roundsService, notificationsRepository } = buildServices();
+
+  const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
+  const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
+  const systemSettingsService = createSystemSettingsService(settingsRepo);
+  const authService = createAuthService({
+    pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+  });
+  const clubsService = createClubsService(clubsRepo, logger);
+  const coursesService = createCoursesService(coursesRepo, logger);
+  const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
+  const pccService = createPccService(createPccRepository(pool));
+  const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
+  const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
+
+  const app = createApp({
+    logger, clubsService, coursesService, authService, mfaService,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, playersRepository: players, authProvider,
+  });
+
+  return { app, roundsRepo, roundsService, players, adminUsersService, authService };
+}
+
+async function startServer(app: ReturnType<typeof buildWorkflowApp>["app"]) {
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once("listening", resolve));
+  const { port } = server.address() as { port: number };
+  return { server, baseUrl: `http://127.0.0.1:${port}` };
+}
+
+test("GET /admin/rounds (ghs#100): returns rounds across every status, filterable by status/playerId, paginated, and 403 for a player", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const { app, roundsRepo, players, adminUsersService, authService } = buildWorkflowApp();
+  const { server, baseUrl } = await startServer(app);
+
+  try {
+    const playerA = await players.create({ firstName: "Admin", lastName: "BrowseA" });
+    const playerB = await players.create({ firstName: "Admin", lastName: "BrowseB" });
+
+    // A spread of rounds across different statuses and both players.
+    const draft = await roundsRepo.create({ playerId: playerA.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+    const pending = await roundsRepo.create({ playerId: playerA.id, teeConfigurationId, playedAt: "2026-05-02T09:00:00.000Z" });
+    await roundsRepo.setStatus(pending.id, "pending");
+    const approved = await roundsRepo.create({ playerId: playerB.id, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
+    await roundsRepo.setStatus(approved.id, "approved");
+
+    const admin = await adminUsersService.adminCreateUser({
+      email: "browse-admin@example.com", password: "admin-pw-1", role: "admin",
+      firstName: "Browse", lastName: "Admin", autoActivate: true,
+    });
+    const playerUser = await adminUsersService.adminCreateUser({
+      email: "browse-player@example.com", password: "player-pw-1", role: "player",
+      firstName: "Browse", lastName: "Player", autoActivate: true,
+    });
+    const adminLogin = await authService.login("browse-admin@example.com", "admin-pw-1");
+    const playerLogin = await authService.login("browse-player@example.com", "player-pw-1");
+    if (adminLogin.status !== "authenticated" || playerLogin.status !== "authenticated") throw new Error("unreachable");
+    const asAdmin = { Authorization: `Bearer ${adminLogin.tokens.accessToken}` };
+    const asPlayer = { Authorization: `Bearer ${playerLogin.tokens.accessToken}` };
+
+    // A player is rejected outright -- this is an admin-only browser.
+    const playerAttempt = await fetch(`${baseUrl}/api/v1/admin/rounds`, { headers: asPlayer });
+    assert.equal(playerAttempt.status, 403);
+
+    // No filter -- all three rounds, regardless of status.
+    const allResponse = await fetch(`${baseUrl}/api/v1/admin/rounds`, { headers: asAdmin });
+    assert.equal(allResponse.status, 200);
+    const all = await allResponse.json() as { items: Array<{ id: string; status: string }>; total: number };
+    assert.equal(all.total, 3);
+    assert.deepEqual(new Set(all.items.map((i) => i.id)), new Set([draft.id, pending.id, approved.id]));
+
+    // status filter.
+    const pendingOnlyResponse = await fetch(`${baseUrl}/api/v1/admin/rounds?status=pending`, { headers: asAdmin });
+    const pendingOnly = await pendingOnlyResponse.json() as { items: Array<{ id: string }>; total: number };
+    assert.equal(pendingOnly.total, 1);
+    assert.equal(pendingOnly.items[0]!.id, pending.id);
+
+    // playerId filter.
+    const playerBOnlyResponse = await fetch(`${baseUrl}/api/v1/admin/rounds?playerId=${playerB.id}`, { headers: asAdmin });
+    const playerBOnly = await playerBOnlyResponse.json() as { items: Array<{ id: string }>; total: number };
+    assert.equal(playerBOnly.total, 1);
+    assert.equal(playerBOnly.items[0]!.id, approved.id);
+
+    // Pagination: limit=1 still reports the real total across all rounds.
+    const pagedResponse = await fetch(`${baseUrl}/api/v1/admin/rounds?limit=1&offset=0`, { headers: asAdmin });
+    const paged = await pagedResponse.json() as { items: Array<{ id: string }>; total: number };
+    assert.equal(paged.items.length, 1);
+    assert.equal(paged.total, 3, "total reflects the full filtered set, not just this page's length");
+
+    // An invalid status value is a 400, not a silently-ignored filter.
+    const invalidStatus = await fetch(`${baseUrl}/api/v1/admin/rounds?status=bogus`, { headers: asAdmin });
+    assert.equal(invalidStatus.status, 400);
+
+    void playerUser;
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("admin-created round auto-approval (ghs#100): submitting a round created by an admin/super_admin lands directly in 'approved' with a real recalculation, bypassing the pending queue", async () => {
+  // Real metadata for exactly one hole -- same pattern as
+  // rounds.integration.test.ts's "Completeness Test Course": the
+  // completeness check (and the HTTP route's hole-metadata lookup) is
+  // driven by teeConfiguration.holes.length, not the nominal holeCount,
+  // so a single recorded hole is enough to make the round submittable.
+  const coursesRepo = createCoursesRepository(pool);
+  const course = await coursesRepo.create({
+    name: "Auto-Approval Test Course", country: "ES",
+    teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 68.0, slopeRating: 113, holes: [{ holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 1 }] }],
+  });
+  const teeConfigurationId = course.teeConfigurations[0]!.id;
+  const { app, roundsRepo, players, adminUsersService, authService, roundsService } = buildWorkflowApp();
+  const { server, baseUrl } = await startServer(app);
+
+  try {
+    const player = await players.create({ firstName: "AutoApprove", lastName: "Target" });
+
+    await adminUsersService.adminCreateUser({
+      email: "auto-approve-admin@example.com", password: "admin-pw-1", role: "admin",
+      firstName: "AutoApprove", lastName: "Admin", autoActivate: true,
+    });
+    const adminLogin = await authService.login("auto-approve-admin@example.com", "admin-pw-1");
+    if (adminLogin.status !== "authenticated") throw new Error("unreachable");
+    const asAdmin = { "Content-Type": "application/json", Authorization: `Bearer ${adminLogin.tokens.accessToken}` };
+
+    // Admin creates the round on the player's behalf via the real HTTP
+    // route -- createdByRole is captured from the caller's own JWT
+    // identity, not a client-supplied field.
+    const createResponse = await fetch(`${baseUrl}/api/v1/rounds`, {
+      method: "POST", headers: asAdmin,
+      body: JSON.stringify({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" }),
+    });
+    assert.equal(createResponse.status, 201);
+    const round = await createResponse.json() as { id: string };
+
+    const holeResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/holes`, {
+      method: "POST", headers: asAdmin, body: JSON.stringify({ holeNumber: 1, strokes: 6, putts: 2, gir: true }),
+    });
+    assert.equal(holeResponse.status, 200);
+
+    const submitResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/submit`, { method: "POST", headers: asAdmin });
+    assert.equal(submitResponse.status, 200);
+
+    // Lands directly in 'approved' -- never visible in the pending queue.
+    const reloaded = await roundsRepo.get(round.id);
+    assert.equal(reloaded!.status, "approved", "an admin-created round is auto-approved on submit, not routed to pending");
+    assert.ok(reloaded!.scoreDifferential !== null, "a real recalculation ran, not just a status flip");
+
+    const queue = await roundsService.listPendingQueue();
+    assert.equal(queue.find((item) => item.id === round.id), undefined, "the auto-approved round never appears in the pending queue");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("a player-created round is unaffected by the auto-approval fast path -- still lands in 'pending' on submit (ghs#100 regression)", async () => {
+  const course = await (async () => {
+    const coursesRepo = createCoursesRepository(pool);
+    return coursesRepo.create({
+      name: "Player Regression Course", country: "ES",
+      teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 68.0, slopeRating: 113, holes: [{ holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 1 }] }],
+    });
+  })();
+  const teeConfigurationId = course.teeConfigurations[0]!.id;
+  const { app, roundsRepo, players, adminUsersService, authService, roundsService } = buildWorkflowApp();
+  const { server, baseUrl } = await startServer(app);
+
+  try {
+    const playerUser = await adminUsersService.adminCreateUser({
+      email: "regression-player@example.com", password: "player-pw-1", role: "player",
+      firstName: "Regression", lastName: "Player", autoActivate: true,
+    });
+    const playerRecord = await players.findByUserId(playerUser.userId);
+    const login = await authService.login("regression-player@example.com", "player-pw-1");
+    if (login.status !== "authenticated") throw new Error("unreachable");
+    const asPlayer = { "Content-Type": "application/json", Authorization: `Bearer ${login.tokens.accessToken}` };
+
+    const createResponse = await fetch(`${baseUrl}/api/v1/rounds`, {
+      method: "POST", headers: asPlayer,
+      body: JSON.stringify({ playerId: playerRecord!.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" }),
+    });
+    const round = await createResponse.json() as { id: string };
+
+    const holeResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/holes`, {
+      method: "POST", headers: asPlayer, body: JSON.stringify({ holeNumber: 1, strokes: 5 }),
+    });
+    assert.equal(holeResponse.status, 200);
+
+    const submitResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/submit`, { method: "POST", headers: asPlayer });
+    assert.equal(submitResponse.status, 200);
+
+    const reloaded = await roundsRepo.get(round.id);
+    assert.equal(reloaded!.status, "pending", "a player-created round still requires admin review -- the fast path must not apply here");
+
+    const queue = await roundsService.listPendingQueue();
+    assert.ok(queue.some((item) => item.id === round.id), "still visible in the pending queue, unaffected by ghs#100's fast path");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

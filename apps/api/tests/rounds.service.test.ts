@@ -231,6 +231,10 @@ function roundsService(
 function fakeRepository(): RoundsRepository & { getCallCount: number } {
   const rounds = new Map<string, Round>();
   const deleted = new Set<string>();
+  // ghs#100: tracked separately from the public Round type above (which
+  // deliberately never exposes createdByRole over HTTP) -- this fake's
+  // own internal bookkeeping for submitForReview's fast-path routing.
+  const createdByRoleById = new Map<string, "player" | "admin" | "super_admin" | null>();
   let nextRoundId = 1;
   let nextHoleId = 1;
   const state = { getCallCount: 0 };
@@ -271,6 +275,7 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
         })),
       };
       rounds.set(round.id, round);
+      createdByRoleById.set(round.id, input.createdByRole ?? null);
       return round;
     },
     async addHoleScore(roundId: string, input: CreateHoleScoreInput) {
@@ -323,6 +328,10 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
         .map(({ id, playerId: p, teeConfigurationId, playedAt, status }) => ({ id, playerId: p, teeConfigurationId, playedAt, status }));
     },
     async listPendingQueue() { throw new Error("not used by these tests"); },
+    async listAdminRounds() { throw new Error("not used by these tests"); },
+    async getCreatedByRole(id: string) {
+      return createdByRoleById.get(id) ?? null;
+    },
     async listApprovedDifferentialsForPlayer(playerId: string) {
       return [...rounds.values()]
         .filter((r) => r.playerId === playerId && r.status === "approved" && r.scoreDifferential !== null && !deleted.has(r.id))
@@ -345,6 +354,7 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
         status: round.status,
         scoreDifferential: round.scoreDifferential,
         is9Hole: round.is9Hole,
+        createdByRole: createdByRoleById.get(id) ?? null,
       };
     },
     async softDelete(id: string) {

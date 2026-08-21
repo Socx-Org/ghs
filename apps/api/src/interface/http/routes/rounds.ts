@@ -10,6 +10,13 @@ import { HoleMetadataNotFoundError } from "../../../application/scoring.service.
 
 const FAIRWAY_RESULTS: FairwayResult[] = ["hit", "missed_left", "missed_right"];
 
+// ghs#100/#113. Same validation/pagination convention as GET
+// /admin/users (admin-users.ts) -- one established pattern for
+// query-param-filtered admin lists, not a second one invented here.
+const VALID_ROUND_STATUSES = ["draft", "pending", "approved", "rejected", "amending"] as const;
+const DEFAULT_ADMIN_ROUNDS_LIMIT = 50;
+const MAX_ADMIN_ROUNDS_LIMIT = 200;
+
 // Request/response shape and input validation live here, not in the
 // application layer (ADR-060).
 //
@@ -58,6 +65,14 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         playingHandicap: typeof playingHandicap === "number" ? playingHandicap : undefined,
         isTournament: isTournament === true,
         is9Hole: is9Hole === true,
+        // ghs#100: captured at creation time for submitForReview's own
+        // later auto-approval decision (migration 014's own doc
+        // comment explains why). Cast, not re-validated -- ghsRole is a
+        // verified JWT claim by the time requireAuth populates
+        // req.identity, itself only ever set from users.role's own
+        // CHECK-constrained column, so it's already a trusted value
+        // here, not raw external input needing its own guard.
+        createdByRole: identity.ghsRole as "player" | "admin" | "super_admin",
       });
       res.status(201).json(round);
     } catch (err) {
@@ -240,6 +255,45 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
   router.get("/admin/rounds/pending", ...requireAdmin, async (_req, res, next) => {
     try {
       res.status(200).json(await service.listPendingQueue());
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ghs#100/#113: the general admin all-rounds browser -- filterable by
+  // status/player, paginated. A separate endpoint from the pending
+  // queue above, not a generalisation of it -- that one stays
+  // purpose-built and deliberately narrow.
+  router.get("/admin/rounds", ...requireAdmin, async (req, res, next) => {
+    try {
+      const { status, playerId, limit, offset } = req.query;
+
+      let resolvedStatus: (typeof VALID_ROUND_STATUSES)[number] | undefined;
+      if (status !== undefined) {
+        if (typeof status !== "string" || !VALID_ROUND_STATUSES.includes(status as (typeof VALID_ROUND_STATUSES)[number])) {
+          res.status(400).json({ error: "status must be one of: draft, pending, approved, rejected, amending" });
+          return;
+        }
+        resolvedStatus = status as (typeof VALID_ROUND_STATUSES)[number];
+      }
+
+      let resolvedPlayerId: string | undefined;
+      if (playerId !== undefined) {
+        if (typeof playerId !== "string") {
+          res.status(400).json({ error: "playerId must be a string" });
+          return;
+        }
+        resolvedPlayerId = playerId;
+      }
+
+      const parsedLimit = typeof limit === "string" ? Number.parseInt(limit, 10) : NaN;
+      const resolvedLimit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, MAX_ADMIN_ROUNDS_LIMIT) : DEFAULT_ADMIN_ROUNDS_LIMIT;
+
+      const parsedOffset = typeof offset === "string" ? Number.parseInt(offset, 10) : NaN;
+      const resolvedOffset = Number.isInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
+
+      const result = await service.listAdminRounds({ status: resolvedStatus, playerId: resolvedPlayerId, limit: resolvedLimit, offset: resolvedOffset });
+      res.status(200).json(result);
     } catch (err) {
       next(err);
     }

@@ -3,6 +3,8 @@ import type {
   CreateHoleScoreInput,
   CreateRoundInput,
   HoleScore,
+  ListAdminRoundsFilter,
+  ListAdminRoundsResult,
   PendingRoundQueueItem,
   Round,
   RoundForUpdate,
@@ -62,6 +64,9 @@ export interface RoundsService {
   // so no wrapping beyond the interface/application layering ADR-060
   // already requires of every route.
   listPendingQueue(): Promise<PendingRoundQueueItem[]>;
+  // ghs#100/#113: the general admin all-rounds browser -- same thin
+  // pass-through reasoning as listPendingQueue above.
+  listAdminRounds(filter: ListAdminRoundsFilter): Promise<ListAdminRoundsResult>;
 
   // draft|rejected|amending -> pending (ghs#58). The explicit moment a
   // round actually becomes visible to the admin pending-queue -- never
@@ -218,6 +223,58 @@ export function createRoundsService(
     }
   }
 
+  // ghs#100: an admin-created round (created_by_role, captured at
+  // creation time -- migration 014) skips the pending queue entirely on
+  // submit -- the admin themselves is the person of record entering
+  // it, and an admin reviewing their own entry makes no sense. Mirrors
+  // approveRound's own two-phase pattern exactly, for the same reason:
+  // ScoringService.recomputeRoundAggregates has no client parameter --
+  // it always runs its own UPDATE against rounds on the shared pool --
+  // so calling it from inside runWorkflowTransition's already-locked
+  // transaction would deadlock against that same UPDATE targeting the
+  // row this function itself holds FOR UPDATE. Rescoring runs first, in
+  // its own transaction; the real transition below re-validates
+  // everything under its own lock, same discipline as every other
+  // workflow transition here.
+  async function submitAdminCreatedRound(id: string): Promise<RoundWorkflowResult> {
+    const existing = await repository.get(id);
+    if (!existing) throw new RoundNotFoundError(`round ${id} not found`);
+    if (!isEditableStatus(existing.status)) {
+      throw new InvalidRoundTransitionError(`cannot submit a round in status '${existing.status}' for review`);
+    }
+
+    // Same completeness rule as the ordinary path below -- an
+    // admin-created round must satisfy it too before being allowed to
+    // skip straight to 'approved' with real, complete data.
+    const teeConfiguration = await courses.getTeeConfiguration(existing.teeConfigurationId);
+    if (!teeConfiguration) throw new Error("tee configuration not found");
+    const recordedCount = await repository.countHoleScores(id);
+    const requiredCount = existing.is9Hole ? 9 : teeConfiguration.holes.length;
+    if (recordedCount < requiredCount) {
+      throw new IncompleteRoundError(`round has ${recordedCount} of ${requiredCount} required hole scores recorded`);
+    }
+
+    await rescoreBeforeApproval(id);
+
+    const { roundApproved } = await systemSettings.getNotificationSettings();
+
+    return runWorkflowTransition(
+      id,
+      (existing) => {
+        if (!isEditableStatus(existing.status)) {
+          throw new InvalidRoundTransitionError(`cannot submit a round in status '${existing.status}' for review`);
+        }
+      },
+      async (client, existing) => {
+        await repository.setStatus(id, "approved", undefined, client);
+        await notifyPlayer(existing.playerId, "round_approved", { roundId: id, trigger: "round_approved" }, client, { enqueue: roundApproved });
+        const result = await recalculation.recalculatePlayerHandicap(existing.playerId, "round_approved", client);
+        logger.info("round auto-approved on submit (admin-created)", { roundId: id, playerId: existing.playerId, recalculationStatus: result.status });
+        return result;
+      },
+    );
+  }
+
   return {
     async createRound(input) {
       let holeScores = input.holeScores ?? [];
@@ -325,7 +382,23 @@ export function createRoundsService(
       return repository.listPendingQueue();
     },
 
+    async listAdminRounds(filter) {
+      return repository.listAdminRounds(filter);
+    },
+
     async submitForReview(id) {
+      // ghs#100: a lightweight, lock-free read used only to decide
+      // which path applies, before any transaction opens -- not a
+      // substitute for either path's own getForUpdate/get read, which
+      // still re-validates everything for real. A nonexistent round
+      // (createdByRole comes back null either way) is still caught
+      // correctly by whichever path runs next, so this doesn't need its
+      // own not-found handling.
+      const createdByRole = await repository.getCreatedByRole(id);
+      if (createdByRole === "admin" || createdByRole === "super_admin") {
+        return submitAdminCreatedRound(id);
+      }
+
       const { roundSubmitted } = await systemSettings.getNotificationSettings();
 
       return runWorkflowTransition(
