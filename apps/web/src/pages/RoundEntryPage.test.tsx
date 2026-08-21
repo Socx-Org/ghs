@@ -160,6 +160,35 @@ describe("RoundEntryPage", () => {
 
     // Navigated back to "/" -- the player dashboard renders for a player.
     await waitFor(() => expect(screen.getByText("Recent rounds")).toBeInTheDocument());
+    // ghs#114: a normal (still-pending) submission gets its own real
+    // confirmation, distinct from the auto-approval message below --
+    // there was no confirmation message at all here before this issue.
+    expect(screen.getByRole("status")).toHaveTextContent("Submitted for review.");
+  });
+
+  // ghs#114: an admin-created round auto-approves on submit (#100)
+  // instead of entering the pending queue -- RoundEntryPage is reused
+  // unchanged for this (design doc's own "reuse established round-
+  // entry components" principle), but the confirmation message must
+  // reflect the real outcome the backend actually reports (round.status
+  // in the /submit response), not assume "submitted for review" always.
+  it("shows a distinct confirmation when the backend reports the round as auto-approved, not the ordinary submitted-for-review message", async () => {
+    mock.onGet("/rounds/round-1").reply(200, makeRound({
+      holeScores: [
+        { id: "hs-1", holeNumber: 1, strokes: 4, putts: null, gir: false, fairwayResult: null, inSand: false, penalties: 0, netDoubleBogeyAdjusted: 4 },
+        { id: "hs-2", holeNumber: 2, strokes: 3, putts: null, gir: false, fairwayResult: null, inSand: false, penalties: 0, netDoubleBogeyAdjusted: 3 },
+      ],
+    }));
+    mock.onPost("/rounds/round-1/submit").reply(200, { round: makeRound({ status: "approved" }), recalculation: { playerId: "player-1", trigger: "round_approved", status: "eligible", handicapIndex: 12.3 } });
+    mock.onGet("/players/me").reply(200, { id: "player-1", clubId: null, firstName: "A", lastName: "B", country: "GB", createdAt: "2026-01-01T00:00:00.000Z", handicapIndex: null, lowHandicapIndex: null });
+    mock.onGet("/players/player-1/rounds").reply(200, []);
+
+    renderEntry();
+    await screen.findByText("White");
+    await userEvent.click(screen.getByRole("button", { name: "Submit for review" }));
+
+    await waitFor(() => expect(screen.getByText("Recent rounds")).toBeInTheDocument());
+    expect(screen.getByRole("status")).toHaveTextContent("Round approved automatically.");
   });
 
   it("surfaces the real 409 message if submit is rejected as incomplete", async () => {

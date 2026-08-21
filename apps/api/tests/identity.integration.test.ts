@@ -492,11 +492,14 @@ test("listUsers: composes firstName/lastName from the linked player row for a pl
   assert.ok(playerItem);
   assert.equal(playerItem!.firstName, "List");
   assert.equal(playerItem!.lastName, "Player");
+  assert.ok(playerItem!.playerId, "ghs#114: the real players.id, needed by admin round creation's player-lookup -- not the same value as the users.id already in .id");
+  assert.notEqual(playerItem!.playerId, playerItem!.id, "playerId is the players table's own id, distinct from the users table id already exposed as .id");
 
   const adminItem = items.find((i) => i.email === "list-admin@example.com");
   assert.ok(adminItem);
   assert.equal(adminItem!.firstName, null, "an admin account has no players row -- firstName must be null, not a leftover/fabricated value");
   assert.equal(adminItem!.lastName, null);
+  assert.equal(adminItem!.playerId, null, "an admin account has no players row -- playerId must be null too, same reasoning as firstName/lastName");
 
   // The response DTO must never carry a password hash, under any field name.
   assert.equal("passwordHash" in playerItem!, false);

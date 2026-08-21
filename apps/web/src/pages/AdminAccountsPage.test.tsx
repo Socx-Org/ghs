@@ -32,11 +32,11 @@ const PLAYER_TOKENS = {
 };
 
 const ACCOUNTS: AdminUserListItem[] = [
-  { id: "user-1", email: "admin@example.com", role: "admin", status: "active", createdAt: "2026-08-01T00:00:00.000Z", firstName: null, lastName: null },
-  { id: "user-2", email: "alice@example.com", role: "player", status: "active", createdAt: "2026-08-02T00:00:00.000Z", firstName: "Alice", lastName: "Whitfield" },
-  { id: "user-3", email: "ben@example.com", role: "player", status: "disabled", createdAt: "2026-08-03T00:00:00.000Z", firstName: "Ben", lastName: "Okafor" },
-  { id: "user-4", email: "gone@example.com", role: "player", status: "deleted", createdAt: "2026-08-04T00:00:00.000Z", firstName: "Gone", lastName: "User" },
-  { id: "user-5", email: "pending@example.com", role: "player", status: "pending_verification", createdAt: "2026-08-05T00:00:00.000Z", firstName: "Pending", lastName: "User" },
+  { id: "user-1", email: "admin@example.com", role: "admin", status: "active", createdAt: "2026-08-01T00:00:00.000Z", firstName: null, lastName: null, playerId: null },
+  { id: "user-2", email: "alice@example.com", role: "player", status: "active", createdAt: "2026-08-02T00:00:00.000Z", firstName: "Alice", lastName: "Whitfield", playerId: "player-2" },
+  { id: "user-3", email: "ben@example.com", role: "player", status: "disabled", createdAt: "2026-08-03T00:00:00.000Z", firstName: "Ben", lastName: "Okafor", playerId: "player-3" },
+  { id: "user-4", email: "gone@example.com", role: "player", status: "deleted", createdAt: "2026-08-04T00:00:00.000Z", firstName: "Gone", lastName: "User", playerId: "player-4" },
+  { id: "user-5", email: "pending@example.com", role: "player", status: "pending_verification", createdAt: "2026-08-05T00:00:00.000Z", firstName: "Pending", lastName: "User", playerId: "player-5" },
 ];
 
 let mock: MockAdapter;

@@ -24,6 +24,11 @@ export interface AdminUserListItem {
   createdAt: string;
   firstName: string | null;
   lastName: string | null;
+  // ghs#114: the players table's own id, distinct from `id` above (a
+  // users table id) -- needed to create a round on this account's
+  // behalf (POST /rounds' playerId), same null-for-non-player reasoning
+  // as firstName/lastName.
+  playerId: string | null;
 }
 
 // Mirrors apps/api/src/application/auth.service.ts's AccountProfile

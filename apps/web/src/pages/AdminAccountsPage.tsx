@@ -47,7 +47,7 @@ export default function AdminAccountsPage() {
   const queryClient = useQueryClient();
   const [deleteTarget, setDeleteTarget] = useState<AdminUserListItem | null>(null);
 
-  const usersQuery = useQuery({ queryKey: ["admin", "users"], queryFn: listUsers });
+  const usersQuery = useQuery({ queryKey: ["admin", "users"], queryFn: () => listUsers() });
 
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: "active" | "disabled" }) => setUserStatus(id, status),

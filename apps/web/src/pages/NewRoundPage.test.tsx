@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import MockAdapter from "axios-mock-adapter";
 import AppRoutes from "../AppRoutes";
+import { ToastProvider } from "../components";
 import { api } from "../lib/api";
 import { setTokens } from "../lib/auth-store";
 
@@ -19,6 +20,20 @@ const PLAYER_TOKENS = {
   accessToken: makeAccessToken({ sub: "user-1", email: "player@example.com", ghs_role: "player" }),
   refreshToken: "refresh-1",
   expiresIn: 900,
+};
+
+const ADMIN_TOKENS = {
+  accessToken: makeAccessToken({ sub: "admin-1", email: "admin@example.com", ghs_role: "admin" }),
+  refreshToken: "refresh-2",
+  expiresIn: 900,
+};
+
+const PLAYERS_RESULT = {
+  items: [
+    { id: "user-2", email: "alice@example.com", role: "player", status: "active", createdAt: "2026-08-01T00:00:00.000Z", firstName: "Alice", lastName: "Whitfield", playerId: "player-2" },
+    { id: "user-3", email: "bob@example.com", role: "player", status: "active", createdAt: "2026-08-02T00:00:00.000Z", firstName: "Bob", lastName: "Carver", playerId: "player-3" },
+  ],
+  total: 2,
 };
 
 const PROFILE = {
@@ -62,9 +77,11 @@ function renderNewRound() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/rounds/new"]}>
-        <AppRoutes />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={["/rounds/new"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
@@ -156,5 +173,63 @@ describe("NewRoundPage", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/Still loading your profile/);
     expect(mock.history.post?.filter((r) => r.url === "/rounds")).toHaveLength(0);
+  });
+
+  // ghs#114: an admin/super_admin caller gains a player-selection step
+  // -- POST /rounds already accepted an arbitrary playerId, only the
+  // frontend never offered a way to choose one.
+  describe("admin creating a round on behalf of a player", () => {
+    beforeEach(() => {
+      setTokens(ADMIN_TOKENS);
+      mock.onGet("/admin/users", { params: { role: "player" } }).reply(200, PLAYERS_RESULT);
+    });
+
+    it("shows a Player select instead of relying on the caller's own profile", async () => {
+      renderNewRound();
+      await screen.findByRole("option", { name: "Test Links" });
+
+      expect(await screen.findByRole("option", { name: "Alice Whitfield" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "Bob Carver" })).toBeInTheDocument();
+      // GET /players/me is never called for an admin caller -- it would
+      // always 404 (no players row exists for an admin/super_admin
+      // account, IAM-020's strict separation).
+      expect(mock.history.get?.some((r) => r.url === "/players/me")).toBe(false);
+    });
+
+    it("creates the round with the selected player's id, not the caller's own", async () => {
+      const createdRound = {
+        id: "round-1", playerId: "player-3", teeConfigurationId: "tee-1", playedAt: "2026-05-01T00:00:00.000Z",
+        playingHandicap: null, grossScore: null, adjustedGrossScore: null, scoreDifferential: null, pcc: null,
+        totalPutts: null, totalGir: null, totalFairwaysHit: null, totalPenalties: null,
+        isTournament: false, is9Hole: false, status: "draft", rejectionReason: null, holeScores: [],
+      };
+      mock.onPost("/rounds").reply(201, createdRound);
+      mock.onGet("/rounds/round-1").reply(200, createdRound);
+      mock.onGet("/tee-configurations/tee-1").reply(200, COURSE.teeConfigurations[0]);
+
+      renderNewRound();
+      await screen.findByRole("option", { name: "Alice Whitfield" });
+      await userEvent.selectOptions(screen.getByLabelText("Player"), "player-3");
+      await userEvent.selectOptions(screen.getByLabelText("Course"), "course-1");
+      await waitFor(() => expect(screen.getByLabelText("Tee")).not.toBeDisabled());
+      await userEvent.selectOptions(screen.getByLabelText("Tee"), "tee-1");
+      await userEvent.click(screen.getByRole("button", { name: "Start round" }));
+
+      await waitFor(() => expect(mock.history.post?.some((r) => r.url === "/rounds")).toBe(true));
+      const body = JSON.parse(mock.history.post!.find((r) => r.url === "/rounds")!.data);
+      expect(body).toMatchObject({ playerId: "player-3", teeConfigurationId: "tee-1" });
+    });
+
+    it("shows real feedback, not a silent no-op, when submitted without choosing a player", async () => {
+      renderNewRound();
+      await screen.findByRole("option", { name: "Alice Whitfield" });
+      await userEvent.selectOptions(screen.getByLabelText("Course"), "course-1");
+      await waitFor(() => expect(screen.getByLabelText("Tee")).not.toBeDisabled());
+      await userEvent.selectOptions(screen.getByLabelText("Tee"), "tee-1");
+      await userEvent.click(screen.getByRole("button", { name: "Start round" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Choose a player.");
+      expect(mock.history.post?.filter((r) => r.url === "/rounds")).toHaveLength(0);
+    });
   });
 });
