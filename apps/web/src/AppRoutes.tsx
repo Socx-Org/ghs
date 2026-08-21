@@ -5,7 +5,9 @@ import { useAuth } from "./hooks/useAuth";
 import ActivationPage from "./pages/ActivationPage";
 import AdminAccountsPage from "./pages/AdminAccountsPage";
 import AdminCreateUserPage from "./pages/AdminCreateUserPage";
+import CourseDetailPage from "./pages/CourseDetailPage";
 import CourseListPage from "./pages/CourseListPage";
+import CreateCoursePage from "./pages/CreateCoursePage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import LoginPage from "./pages/LoginPage";
@@ -85,11 +87,18 @@ export default function AppRoutes() {
           <Route path="/" element={<HomeRoute />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/courses" element={<CourseListPage />} />
+          <Route path="/courses/:id" element={<CourseDetailPage />} />
           <Route path="/rounds/new" element={<NewRoundPage />} />
           <Route path="/rounds/:id" element={<RoundEntryPage />} />
           <Route element={<RequireAdmin />}>
             <Route path="/admin/users" element={<AdminAccountsPage />} />
             <Route path="/admin/users/new" element={<AdminCreateUserPage />} />
+            {/* ghs#110: admin-only at the route level, unlike
+                /courses/:id (open to every role, matching GET
+                /courses/:id having no backend role restriction) --
+                there's no legitimate read-only experience of a create
+                form the way there is for a detail view. */}
+            <Route path="/courses/new" element={<CreateCoursePage />} />
           </Route>
         </Route>
       </Route>

@@ -332,6 +332,36 @@ export async function getCourse(id: string): Promise<Course> {
   return data;
 }
 
+export interface CreateCourseRequest {
+  name: string;
+  city?: string;
+  country?: string;
+}
+
+// ghs#110. POST /courses already existed (ghs#94's tee-configuration
+// lookups needed it); this is its first real create-a-course caller.
+export async function createCourse(input: CreateCourseRequest): Promise<Course> {
+  const { data } = await api.post<Course>("/courses", input);
+  return data;
+}
+
+// ghs#110/#99. Partial update -- undefined/omitted means "leave this
+// field alone" (matching the backend's own PATCH /courses/:id
+// semantics), null explicitly clears city/country. Every field is
+// still sent on every real submission from CourseEditForm (see that
+// component) -- there's no dirty-field tracking here, just the type
+// distinguishing "not part of this request" from "clear it".
+export interface UpdateCourseRequest {
+  name?: string;
+  city?: string | null;
+  country?: string | null;
+}
+
+export async function updateCourse(id: string, input: UpdateCourseRequest): Promise<Course> {
+  const { data } = await api.patch<Course>(`/courses/${id}`, input);
+  return data;
+}
+
 export interface CreateRoundInput {
   playerId: string;
   teeConfigurationId: string;

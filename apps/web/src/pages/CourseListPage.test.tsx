@@ -94,4 +94,26 @@ describe("CourseListPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Courses" })).toBeInTheDocument();
   });
+
+  // ghs#110
+  it("links each course name to its detail page", async () => {
+    mock.onGet("/courses").reply(200, COURSES);
+    renderAsRole("player");
+
+    const link = await screen.findByRole("link", { name: "Pebble Beach" });
+    expect(link).toHaveAttribute("href", "/courses/course-1");
+  });
+
+  it("shows a Create course button for an admin, not for a player", async () => {
+    mock.onGet("/courses").reply(200, COURSES);
+    renderAsRole("admin");
+    await screen.findByText("Pebble Beach");
+    expect(screen.getByRole("button", { name: "Create course" })).toBeInTheDocument();
+
+    cleanup();
+    mock.onGet("/courses").reply(200, COURSES);
+    renderAsRole("player");
+    await screen.findByText("Pebble Beach");
+    expect(screen.queryByRole("button", { name: "Create course" })).not.toBeInTheDocument();
+  });
 });

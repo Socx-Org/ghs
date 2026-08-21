@@ -135,6 +135,38 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("heading", { name: "Courses" })).toBeInTheDocument();
   });
 
+  it("redirects /courses/new to /login when unauthenticated (ghs#110)", () => {
+    renderAt("/courses/new");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("redirects /courses/new to / for an authenticated non-admin (ghs#110)", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/courses/new");
+    expect(screen.queryByRole("heading", { name: "Create course" })).not.toBeInTheDocument();
+    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
+  });
+
+  it("renders the create-course form at /courses/new for an admin (ghs#110)", () => {
+    setTokens(ADMIN_TOKENS);
+    renderAt("/courses/new");
+    expect(screen.getByRole("heading", { name: "Create course" })).toBeInTheDocument();
+  });
+
+  it("redirects /courses/:id to /login when unauthenticated (ghs#110)", () => {
+    renderAt("/courses/some-course-id");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("renders the course detail screen at /courses/:id for an authenticated player, ghs#110 -- no role restriction on viewing", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/courses/some-course-id");
+    // "Course details" is static JSX, rendered regardless of how the
+    // (unmocked, in this routing-focused file) course query resolves --
+    // a deterministic marker that CourseDetailPage rendered.
+    expect(screen.getByText("Course details")).toBeInTheDocument();
+  });
+
   it("redirects /admin/users/new to /login when unauthenticated (ghs#86)", () => {
     renderAt("/admin/users/new");
     expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
