@@ -10,7 +10,7 @@ import type { Round, TeeConfiguration } from "../types/domain";
 // submitted round's result is a later epic item, not this one.
 //
 // ghs#68: edit/resubmit for a rejected/amending round already worked
-// via EDITABLE_STATUSES above -- the real gap this issue closes is
+// via EDITABLE_STATUSES below -- the real gap this issue closes is
 // that a rejected round's rejectionReason was never actually shown to
 // the player anywhere (confirmed by direct code inspection: it went
 // straight into the same generic entry form a draft round does, with
