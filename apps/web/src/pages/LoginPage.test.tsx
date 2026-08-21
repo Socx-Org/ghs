@@ -68,6 +68,12 @@ describe("LoginPage", () => {
     expect(await screen.findByRole("heading", { name: "Create an account" })).toBeInTheDocument();
   });
 
+  it("Forgot my password? navigates to the real request-reset page (ghs#107)", async () => {
+    renderLogin();
+    await userEvent.click(screen.getByRole("link", { name: "Forgot my password?" }));
+    expect(await screen.findByRole("heading", { name: "Reset your password" })).toBeInTheDocument();
+  });
+
   it("keeps the Create an account link visible through a background refetch failure (review finding, PR #123)", async () => {
     mock.onGet("/auth/self-registration-enabled").reply(200, { enabled: true });
     const { queryClient } = renderLogin();

@@ -17,6 +17,9 @@ import {
   ActivationTokenExpiredError,
   ActivationTokenNotFoundError,
   createAuthService,
+  PasswordResetTokenAlreadyUsedError,
+  PasswordResetTokenExpiredError,
+  PasswordResetTokenNotFoundError,
 } from "../src/application/auth.service.ts";
 import { createMfaService } from "../src/application/mfa.service.ts";
 import { createAdminUsersService } from "../src/application/admin-users.service.ts";
@@ -290,12 +293,66 @@ test("password reset invalidates every other outstanding token for the user", as
   // Use the second (newer) token successfully.
   await authService.resetPassword(secondToken!, "brand-new-password");
 
-  // The first, older, still-unused token must now be invalid too.
-  await assert.rejects(() => authService.resetPassword(firstToken!, "another-password"));
+  // The first, older, still-unused token must now be invalid too --
+  // specifically "already used" (invalidated by the newer reset's own
+  // markUsedAndInvalidateOthers), not a generic rejection.
+  await assert.rejects(() => authService.resetPassword(firstToken!, "another-password"), PasswordResetTokenAlreadyUsedError);
 
   // New password actually works.
   const loginResult = await authService.login("reset-me@example.com", "brand-new-password");
   assert.equal(loginResult.status, "authenticated");
+});
+
+// ---------------------------------------------------------------------
+// ghs#107: resetPassword distinguishes expired/already-used/invalid --
+// the identical gap #106 found and fixed for activateAccount also
+// existed here, confirmed by direct comparison rather than assumed
+// fixed already. Each verified against a real token's real state in
+// Postgres.
+// ---------------------------------------------------------------------
+
+test("resetPassword rejects an unknown/never-issued token with PasswordResetTokenNotFoundError", async () => {
+  const s = buildServices();
+  await assert.rejects(() => s.authService.resetPassword("this-token-was-never-issued", "brand-new-password"), PasswordResetTokenNotFoundError);
+});
+
+test("resetPassword rejects an already-used token with PasswordResetTokenAlreadyUsedError, and does not change the password again", async () => {
+  const s = buildServices();
+  await s.adminUsersService.adminCreateUser({
+    email: "reset-already-used@example.com", password: "original-password", role: "player",
+    firstName: "Reset", lastName: "AlreadyUsed", autoActivate: true,
+  });
+  await s.authService.requestPasswordReset("reset-already-used@example.com");
+  const user = await s.users.findByEmail("reset-already-used@example.com");
+  const [resetPayload] = await outboxPayloads(user!.id, "password_reset");
+  const token = resetPayload!.token as string;
+
+  await s.authService.resetPassword(token, "first-new-password");
+  await assert.rejects(() => s.authService.resetPassword(token, "second-new-password"), PasswordResetTokenAlreadyUsedError);
+
+  const loginResult = await s.authService.login("reset-already-used@example.com", "first-new-password");
+  assert.equal(loginResult.status, "authenticated", "the first successful reset's password must still be the real one");
+});
+
+test("resetPassword rejects an expired token with PasswordResetTokenExpiredError -- real token state manipulated directly in Postgres, not assumed", async () => {
+  const s = buildServices();
+  await s.adminUsersService.adminCreateUser({
+    email: "reset-expired@example.com", password: "original-password", role: "player",
+    firstName: "Reset", lastName: "Expired", autoActivate: true,
+  });
+  await s.authService.requestPasswordReset("reset-expired@example.com");
+  const user = await s.users.findByEmail("reset-expired@example.com");
+  const [resetPayload] = await outboxPayloads(user!.id, "password_reset");
+  const token = resetPayload!.token as string;
+
+  // The 30-minute TTL can't be waited out in a test -- back-date the
+  // real row instead.
+  await pool.query("UPDATE password_reset_tokens SET expires_at = now() - interval '1 hour' WHERE user_id = $1", [user!.id]);
+
+  await assert.rejects(() => s.authService.resetPassword(token, "brand-new-password"), PasswordResetTokenExpiredError);
+
+  const loginResult = await s.authService.login("reset-expired@example.com", "original-password");
+  assert.equal(loginResult.status, "authenticated", "the original password must still work -- the rejected attempt made no change");
 });
 
 test("resend-activation and password-reset-request respond the same way for a non-existent email (no enumeration)", async () => {

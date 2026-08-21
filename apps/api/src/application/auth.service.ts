@@ -35,6 +35,16 @@ export class ActivationTokenNotFoundError extends Error {}
 export class ActivationTokenExpiredError extends Error {}
 export class ActivationTokenAlreadyUsedError extends Error {}
 
+// ghs#107: the identical gap found in the sibling flow -- resetPassword
+// had the exact same collapsed-into-one-generic-Error shape
+// activateAccount did before #106's fix. Confirmed by direct comparison
+// against password-reset-tokens.repository.ts, not assumed to already
+// be different just because this issue's own text was less explicit
+// about it than #106's was.
+export class PasswordResetTokenNotFoundError extends Error {}
+export class PasswordResetTokenExpiredError extends Error {}
+export class PasswordResetTokenAlreadyUsedError extends Error {}
+
 export type LoginResult =
   | { status: "authenticated"; tokens: TokenPair }
   | { status: "mfa_required"; mfaPendingToken: string };
@@ -267,8 +277,10 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     },
 
     async resetPassword(rawToken, newPassword) {
-      const record = await passwordResetTokens.findValidByHash(hashToken(rawToken));
-      if (!record) throw new Error("invalid or expired reset token");
+      const record = await passwordResetTokens.findByHash(hashToken(rawToken));
+      if (!record) throw new PasswordResetTokenNotFoundError("invalid reset token");
+      if (record.usedAt) throw new PasswordResetTokenAlreadyUsedError("reset token already used");
+      if (record.expiresAt <= new Date()) throw new PasswordResetTokenExpiredError("reset token expired");
 
       const passwordHash = await hashPassword(newPassword);
       await users.setPasswordHash(record.userId, passwordHash);

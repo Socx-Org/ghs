@@ -6,11 +6,13 @@ import ActivationPage from "./pages/ActivationPage";
 import AdminAccountsPage from "./pages/AdminAccountsPage";
 import AdminCreateUserPage from "./pages/AdminCreateUserPage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import LoginPage from "./pages/LoginPage";
 import NewRoundPage from "./pages/NewRoundPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import PlayerDashboardPage from "./pages/PlayerDashboardPage";
 import RegisterPage from "./pages/RegisterPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import RoundEntryPage from "./pages/RoundEntryPage";
 import { RedirectIfAuthenticated } from "./routes/RedirectIfAuthenticated";
 import { RequireAdmin } from "./routes/RequireAdmin";
@@ -59,14 +61,17 @@ export default function AppRoutes() {
       <Route element={<RedirectIfAuthenticated />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       </Route>
-      {/* ghs#106: deliberately NOT inside RedirectIfAuthenticated -- the
-          backend's own POST /auth/activate is completely unauthenticated
-          and stateless, unrelated to the caller's own session. Redirecting
-          an already-logged-in visitor away would break the legitimate
-          case of activating a second account (or an admin testing a real
-          link) without first logging out of an unrelated session. */}
+      {/* ghs#106/#107: deliberately NOT inside RedirectIfAuthenticated --
+          the backend's own POST /auth/activate and POST /auth/password-
+          reset/confirm are both completely unauthenticated and stateless,
+          unrelated to the caller's own session. Redirecting an already-
+          logged-in visitor away would break the legitimate case of
+          activating a second account, or resetting a password, without
+          first logging out of an unrelated session. */}
       <Route path="/activate" element={<ActivationPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route element={<RequireAuth />}>
         {/* ghs#96: the real application shell, applied once at the
             route level -- every authenticated page below is now pure
