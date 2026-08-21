@@ -8,6 +8,16 @@ import type { Round, TeeConfiguration } from "../types/domain";
 // ghs#94: the hole-by-hole entry (and resume-in-progress) screen.
 // Editable statuses only (draft/rejected/amending) -- viewing a
 // submitted round's result is a later epic item, not this one.
+//
+// ghs#68: edit/resubmit for a rejected/amending round already worked
+// via EDITABLE_STATUSES above -- the real gap this issue closes is
+// that a rejected round's rejectionReason was never actually shown to
+// the player anywhere (confirmed by direct code inspection: it went
+// straight into the same generic entry form a draft round does, with
+// no visible indication it had been rejected at all, let alone why).
+// 'amending' has no equivalent reason to show -- confirmed directly in
+// rounds.service.ts's reopenForAmendment, whose own reason parameter is
+// only ever logged, never persisted on the round row itself.
 
 function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -52,15 +62,24 @@ function HoleEntryForm({
   return (
     <>
       <Card>
-        <CardHeader>
-          <h1 className="text-lg font-semibold text-text">{teeConfiguration.name}</h1>
-          <p className="text-sm text-text-muted">{formatPlayedAt(round.playedAt)}</p>
+        <CardHeader className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-semibold text-text">{teeConfiguration.name}</h1>
+            <p className="text-sm text-text-muted">{formatPlayedAt(round.playedAt)}</p>
+          </div>
+          <RoundStatusBadge status={round.status} />
         </CardHeader>
         <CardBody className="flex gap-8">
           <Stat label="Holes recorded" value={`${recordedCount} / ${requiredCount}`} />
           <Stat label="Gross so far" value={runningGross} />
         </CardBody>
       </Card>
+
+      {round.status === "rejected" && round.rejectionReason && (
+        <Alert variant="error" title="This round was rejected">
+          {round.rejectionReason}
+        </Alert>
+      )}
 
       <div className="flex flex-col gap-3">
         {teeConfiguration.holes.map((hole) => (
