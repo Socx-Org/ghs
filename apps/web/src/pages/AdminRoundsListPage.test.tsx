@@ -40,7 +40,7 @@ afterEach(() => {
 function renderAsRole(role: "player" | "admin" = "admin") {
   setTokens(tokensFor(role));
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <MemoryRouter initialEntries={["/admin/rounds"]}>
@@ -49,6 +49,7 @@ function renderAsRole(role: "player" | "admin" = "admin") {
       </ToastProvider>
     </QueryClientProvider>,
   );
+  return { ...result, queryClient };
 }
 
 const ROUNDS = {
@@ -121,9 +122,19 @@ describe("AdminRoundsListPage", () => {
 
   // ghs#115: a per-row delete action, real confirmation Modal.
   describe("delete", () => {
-    it("deletes the round, shows a toast reflecting the real recalculation outcome, and refreshes the list", async () => {
-      mock.onGet("/admin/rounds").reply(200, ROUNDS);
-      mock.onDelete("/rounds/round-1").reply(200, { round: null, recalculation: { playerId: "player-1", trigger: "round_deleted", status: "eligible", handicapIndex: 11.9 } });
+    it("deletes the round, shows a toast reflecting the real recalculation outcome, and genuinely refetches the list (the deleted round disappears)", async () => {
+      // A real, mutable mock reply, not a single fixed one -- proves
+      // the list genuinely refetches after delete (review finding, PR
+      // #145), not just that the toast/modal state changed locally.
+      // Before the deletion, the reply includes round-1; after, it
+      // doesn't -- if invalidateQueries never actually re-ran the
+      // query, the stale first reply's row would still be showing.
+      let deleted = false;
+      mock.onGet("/admin/rounds").reply(() => [200, deleted ? { items: ROUNDS.items.slice(1), total: 1 } : ROUNDS]);
+      mock.onDelete("/rounds/round-1").reply(() => {
+        deleted = true;
+        return [200, { round: null, recalculation: { playerId: "player-1", trigger: "round_deleted", status: "eligible", handicapIndex: 11.9 } }];
+      });
 
       renderAsRole("admin");
       await screen.findByText("Alice Whitfield");
@@ -136,6 +147,38 @@ describe("AdminRoundsListPage", () => {
 
       await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("The player's handicap has been recalculated."));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      // The list genuinely refetched -- round-1's own row (Alice
+      // Whitfield) is gone, round-2's (Bob Carver) is still there.
+      await waitFor(() => expect(screen.queryByText("Alice Whitfield")).not.toBeInTheDocument());
+      expect(screen.getByText("Bob Carver")).toBeInTheDocument();
+      expect(mock.history.get?.filter((r) => r.url === "/admin/rounds").length).toBeGreaterThanOrEqual(2);
+    });
+
+    // Review finding, PR #145: the app-wide QueryClient (App.tsx) caches
+    // across routes -- deleting a round here must not leave its own
+    // ["rounds", id] entry cached and stale (e.g. from an earlier visit
+    // to its review screen), or navigating back to it later could
+    // briefly show stale "still exists" data before the 404 refetch.
+    it("removes the deleted round's own cached query, not just the list", async () => {
+      mock.onGet("/admin/rounds").reply(200, ROUNDS);
+      mock.onDelete("/rounds/round-1").reply(200, { round: null, recalculation: null });
+
+      const { queryClient } = renderAsRole("admin");
+      // Simulates the admin having viewed this round's own detail
+      // screen at some earlier point -- populates exactly the cache
+      // entry deleteMutation must clear.
+      queryClient.setQueryData(["rounds", "round-1"], { id: "round-1", status: "approved" });
+      expect(queryClient.getQueryData(["rounds", "round-1"])).toBeDefined();
+
+      await screen.findByText("Alice Whitfield");
+      const [firstDeleteButton] = await screen.findAllByRole("button", { name: "Delete" });
+      await userEvent.click(firstDeleteButton!);
+      const dialog = await screen.findByRole("dialog", { name: "Delete round" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Delete round" }));
+
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Round deleted."));
+      expect(queryClient.getQueryData(["rounds", "round-1"])).toBeUndefined();
     });
 
     it("shows a plain 'Round deleted.' toast when the round never had a recorded score, no recalculation claimed", async () => {

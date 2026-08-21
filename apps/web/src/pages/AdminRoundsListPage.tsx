@@ -39,7 +39,16 @@ export default function AdminRoundsListPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteRound(id),
-    onSuccess: (result) => {
+    onSuccess: (result, id) => {
+      // Review finding, PR #145: the app-wide QueryClient (App.tsx)
+      // caches across routes -- if this round's own ["rounds", id]
+      // query was ever populated (e.g. the admin had visited its
+      // review screen before returning here), it would otherwise stay
+      // cached and stale until its own background refetch eventually
+      // discovers the 404. Removed outright, same as
+      // AdminRoundReviewPage's own delete handling, rather than left to
+      // go stale.
+      queryClient.removeQueries({ queryKey: ["rounds", id] });
       queryClient.invalidateQueries({ queryKey: ["admin", "rounds"] });
       setDeleteTarget(null);
       show({
