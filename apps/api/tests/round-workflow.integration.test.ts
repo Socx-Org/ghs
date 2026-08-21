@@ -842,3 +842,47 @@ test("a player taking over an admin-drafted round cannot bypass review by submit
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("the admin-created-round auto-approval fast path genuinely locks the round row before its completeness check -- a concurrent holder blocks it until released (ghs#100 review fix, PR #141)", async () => {
+  // Real hole metadata for exactly one hole, same pattern as the other
+  // ghs#100 tests above -- one recorded score is enough to satisfy
+  // completeness.
+  const coursesRepo = createCoursesRepository(pool);
+  const course = await coursesRepo.create({
+    name: "Lock Race Test Course", country: "ES",
+    teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 68.0, slopeRating: 113, holes: [{ holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 1 }] }],
+  });
+  const teeConfigurationId = course.teeConfigurations[0]!.id;
+  const { roundsRepo, players, roundsService } = buildServices();
+
+  const player = await players.create({ firstName: "Lock", lastName: "Race" });
+  const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z", createdByRole: "admin" });
+  await roundsRepo.addHoleScore(round.id, { holeNumber: 1, strokes: 5 });
+
+  // Manually hold exactly the row lock submitAdminCreatedRound's own
+  // quiet pending-transition needs -- the same real SQL
+  // runWorkflowTransition's getForUpdate runs internally.
+  const holdingClient = await pool.connect();
+  await holdingClient.query("BEGIN");
+  await holdingClient.query("SELECT id FROM rounds WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", [round.id]);
+
+  let completed = false;
+  const submitPromise = roundsService
+    .submitForReview(round.id, "admin")
+    .then((result) => {
+      completed = true;
+      return result;
+    });
+
+  // Give it every real chance to run if the completeness check/rescore
+  // were (wrongly) still happening outside any lock -- the pre-fix
+  // implementation would have raced straight through this window.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(completed, false, "still blocked -- the quiet pending transition genuinely takes the row lock immediately, not after an unlocked completeness check");
+
+  await holdingClient.query("COMMIT");
+  holdingClient.release();
+
+  const result = await submitPromise;
+  assert.equal(result.round!.status, "approved", "proceeds correctly, using a fresh locked read, once the held lock is released");
+});
