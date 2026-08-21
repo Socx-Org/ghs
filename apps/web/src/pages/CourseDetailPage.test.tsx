@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import MockAdapter from "axios-mock-adapter";
 import AppRoutes from "../AppRoutes";
+import { ToastProvider } from "../components";
 import { api } from "../lib/api";
 import { setTokens } from "../lib/auth-store";
 
@@ -41,9 +42,11 @@ function renderAsRole(role: "player" | "admin" = "admin", courseId = "course-1")
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/courses/${courseId}`]}>
-        <AppRoutes />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter initialEntries={[`/courses/${courseId}`]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
@@ -150,5 +153,84 @@ describe("CourseDetailPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("a course with this name and country already exists");
+  });
+
+  // ghs#111
+  describe("delete", () => {
+    it("shows a Danger zone with a Delete course button for an admin, not for a player", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      renderAsRole("admin");
+      await screen.findByText("Danger zone");
+      expect(screen.getByRole("button", { name: "Delete course" })).toBeInTheDocument();
+
+      cleanup();
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      renderAsRole("player");
+      await screen.findByRole("heading", { name: "Pebble Beach" });
+      expect(screen.queryByText("Danger zone")).not.toBeInTheDocument();
+    });
+
+    it("opens a real Modal confirmation, not window.confirm, and does nothing on Cancel", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      renderAsRole("admin");
+      await screen.findByText("Danger zone");
+
+      await userEvent.click(screen.getByRole("button", { name: "Delete course" }));
+      expect(await screen.findByRole("dialog", { name: "Delete course" })).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(mock.history.delete ?? []).toHaveLength(0);
+    });
+
+    it("deletes the course, shows a success toast, and navigates to /courses", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      mock.onDelete("/courses/course-1").reply(200, { message: "Course deleted." });
+      mock.onGet("/courses").reply(200, []);
+
+      renderAsRole("admin");
+      await screen.findByText("Danger zone");
+      await userEvent.click(screen.getByRole("button", { name: "Delete course" }));
+      await screen.findByRole("dialog", { name: "Delete course" });
+      // Two "Delete course" buttons exist once the modal is open (the
+      // page's own trigger, and the modal's own confirm action) --
+      // the confirm action is the one inside the dialog.
+      await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete course" }));
+
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Course deleted."));
+      await waitFor(() => expect(screen.getByRole("heading", { name: "Courses" })).toBeInTheDocument());
+    });
+
+    it("shows a clear explanation, not a raw error code, for a course_has_rounds conflict -- modal stays open", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      mock.onDelete("/courses/course-1").reply(409, { error: "course_has_rounds" });
+
+      renderAsRole("admin");
+      await screen.findByText("Danger zone");
+      await userEvent.click(screen.getByRole("button", { name: "Delete course" }));
+      await screen.findByRole("dialog", { name: "Delete course" });
+      await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete course" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "This course can't be deleted because it has rounds recorded against it.",
+      );
+      // Deliberately still open -- same convention as account deletion
+      // (#104): an error doesn't bounce the admin out of the
+      // confirmation.
+      expect(screen.getByRole("dialog", { name: "Delete course" })).toBeInTheDocument();
+    });
+
+    it("shows a generic error message for a non-conflict delete failure", async () => {
+      mock.onGet("/courses/course-1").reply(200, COURSE);
+      mock.onDelete("/courses/course-1").reply(500, { error: "unexpected failure" });
+
+      renderAsRole("admin");
+      await screen.findByText("Danger zone");
+      await userEvent.click(screen.getByRole("button", { name: "Delete course" }));
+      await screen.findByRole("dialog", { name: "Delete course" });
+      await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete course" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("unexpected failure");
+    });
   });
 });
