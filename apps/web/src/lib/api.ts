@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { AccountProfile, AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PlayerProfile, Round, RoundSummary, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
+import type { AccountProfile, AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PendingRoundQueueItem, PlayerProfile, Round, RoundSummary, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -317,6 +317,16 @@ export async function getPlayerRounds(playerId: string): Promise<RoundSummary[]>
   return data;
 }
 
+// ghs#67. GET /players/:id -- same response shape as GET /players/me
+// (toPlayerProfileResponse), authorized for admin/super_admin (or the
+// owning player) by the backend itself. Used to show the real player's
+// name on the round-review screen, which only ever gets a bare
+// playerId from GET /rounds/:id.
+export async function getPlayer(id: string): Promise<PlayerProfile> {
+  const { data } = await api.get<PlayerProfile>(`/players/${id}`);
+  return data;
+}
+
 // ghs#94. GET /courses and GET /courses/:id are unauthenticated on the
 // backend (public reference data), but routed through `api` anyway for
 // a single consistent client -- the request interceptor attaching a
@@ -436,6 +446,25 @@ export async function addHoleScore(roundId: string, input: AddHoleScoreInput): P
 export async function submitRound(roundId: string): Promise<Round> {
   const { data } = await api.post<{ round: Round }>(`/rounds/${roundId}/submit`);
   return data.round;
+}
+
+// ghs#67. Deliberately narrow -- no pagination/filtering/sorting query
+// params, matching the backend's own approved scope (rounds.ts's own
+// comment). Not a generic admin rounds browser -- that's #113,
+// GET /admin/rounds, a separate endpoint entirely.
+export async function listPendingRounds(): Promise<PendingRoundQueueItem[]> {
+  const { data } = await api.get<PendingRoundQueueItem[]>("/admin/rounds/pending");
+  return data;
+}
+
+export async function approveRound(id: string): Promise<Round> {
+  const { data } = await api.patch<Round>(`/rounds/${id}/status`, { status: "approved" });
+  return data;
+}
+
+export async function rejectRound(id: string, rejectionReason: string): Promise<Round> {
+  const { data } = await api.patch<Round>(`/rounds/${id}/status`, { status: "rejected", rejectionReason });
+  return data;
 }
 
 // Always clears local state, regardless of whether the network call

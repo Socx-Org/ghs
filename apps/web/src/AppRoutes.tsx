@@ -5,6 +5,8 @@ import { useAuth } from "./hooks/useAuth";
 import ActivationPage from "./pages/ActivationPage";
 import AdminAccountsPage from "./pages/AdminAccountsPage";
 import AdminCreateUserPage from "./pages/AdminCreateUserPage";
+import AdminPendingQueuePage from "./pages/AdminPendingQueuePage";
+import AdminRoundReviewPage from "./pages/AdminRoundReviewPage";
 import CourseDetailPage from "./pages/CourseDetailPage";
 import CourseListPage from "./pages/CourseListPage";
 import CreateCoursePage from "./pages/CreateCoursePage";
@@ -99,6 +101,13 @@ export default function AppRoutes() {
                 there's no legitimate read-only experience of a create
                 form the way there is for a detail view. */}
             <Route path="/courses/new" element={<CreateCoursePage />} />
+            {/* ghs#67: the admin pending-review queue and its round-
+                detail/approve/reject screen -- both admin-only, no
+                read-only experience for a non-admin the way /courses/:id
+                has (matches PATCH /rounds/:id/status and GET /admin/
+                rounds/pending both being admin-gated on the backend). */}
+            <Route path="/admin/rounds/pending" element={<AdminPendingQueuePage />} />
+            <Route path="/admin/rounds/:id" element={<AdminRoundReviewPage />} />
           </Route>
         </Route>
       </Route>
