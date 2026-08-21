@@ -62,6 +62,19 @@ describe("CreateCoursePage", () => {
     expect(mock.history.post ?? []).toHaveLength(0);
   });
 
+  // Review finding, PR #132: name's schema previously only checked
+  // min(1) on the raw value, so a whitespace-only name passed client
+  // validation and only failed once trimmed at submit time (either
+  // silently, or with a confusing server-side rejection).
+  it("rejects a whitespace-only name, without calling the API", async () => {
+    renderAsRole("admin");
+    await userEvent.type(screen.getByLabelText("Course name"), "   ");
+    await userEvent.click(screen.getByRole("button", { name: "Create course" }));
+
+    expect(await screen.findByText("Course name is required")).toBeInTheDocument();
+    expect(mock.history.post ?? []).toHaveLength(0);
+  });
+
   it("rejects a country that isn't a 2-letter code, without calling the API", async () => {
     renderAsRole("admin");
     await userEvent.type(screen.getByLabelText("Course name"), "Test Course");

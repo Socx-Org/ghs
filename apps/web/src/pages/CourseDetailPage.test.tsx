@@ -80,6 +80,23 @@ describe("CourseDetailPage", () => {
     expect(screen.getByLabelText("Country")).toHaveValue("US");
   });
 
+  // Review finding, PR #132: same whitespace-only-name gap as
+  // CreateCoursePage -- name's schema only checked min(1) on the raw
+  // value, so a whitespace-only name passed client validation and only
+  // failed once trimmed at submit time.
+  it("rejects a whitespace-only name, without calling the API", async () => {
+    mock.onGet("/courses/course-1").reply(200, COURSE);
+    renderAsRole("admin");
+
+    const nameInput = await screen.findByLabelText("Course name");
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "   ");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByText("Course name is required")).toBeInTheDocument();
+    expect(mock.history.patch ?? []).toHaveLength(0);
+  });
+
   it("shows a not-found message for a 404, distinct from a generic error", async () => {
     mock.onGet("/courses/course-1").reply(404, { error: "course not found" });
     renderAsRole("admin");

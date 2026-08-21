@@ -22,7 +22,11 @@ import { ApiError, createCourse } from "../lib/api";
 // added afterward via #112's screen.
 
 const createCourseSchema = z.object({
-  name: z.string().min(1, "Course name is required"),
+  // .trim() before .min() -- a whitespace-only value must fail client-
+  // side validation with the same message an empty one does, not pass
+  // here and then trim down to "" at submit time, which the backend
+  // would reject anyway (review finding, PR #132).
+  name: z.string().trim().min(1, "Course name is required"),
   city: z.string().optional(),
   country: z
     .string()
@@ -48,7 +52,7 @@ export default function CreateCoursePage() {
     setFeedback(null);
     try {
       const course = await createCourse({
-        name: values.name.trim(),
+        name: values.name,
         city: values.city?.trim() || undefined,
         country: values.country ? values.country.toUpperCase() : undefined,
       });
