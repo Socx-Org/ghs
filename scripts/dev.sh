@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 # ghs#80: `npm run dev` entry point -- idempotent local bootstrap (never
 # touches an existing .env, never drops/recreates an existing database,
-# never prints a secret value), then starts the API and web dev servers
-# together. One script, not a setup script chained via `&&` into a
-# separate launch step -- env vars exported by `source .env` below need
+# never prints a secret value), then starts the API, web, and worker dev
+# servers together. One script, not a setup script chained via `&&` into
+# a separate launch step -- env vars exported by `source .env` below need
 # to reach the final `exec concurrently`, and a var exported in a nested
 # script process does not propagate back to its parent once that script
 # exits, so the sourcing and the launch have to happen in this same
 # process.
+#
+# ghs#127: apps/worker joined the workspace under Phase 4 (#5, the real
+# notification-delivery worker) after this script was first written, and
+# was never added here -- confirmed directly: without it, nothing ever
+# consumes notification_outbox in local dev, so activation/password-reset
+# emails never actually reach the locally-configured Mailpit instance
+# even though EMAIL_PROVIDER=mailpit is correctly set. It needs no env
+# vars beyond what's already sourced below (WorkerConfig reuses apps/api's
+# own loadDatabaseConfig()/loadEmailConfig(), and APP_BASE_URL has a
+# working local-dev default of its own).
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -94,6 +104,7 @@ else
   createdb -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" "$DB_NAME"
 fi
 
-exec npx concurrently --kill-others --names api,web -c "blue,green" \
+exec npx concurrently --kill-others --names api,web,worker -c "blue,green,magenta" \
   "npm run dev --workspace apps/api" \
-  "npm run dev --workspace apps/web"
+  "npm run dev --workspace apps/web" \
+  "npm run dev --workspace apps/worker"
