@@ -122,13 +122,16 @@ export interface RoundsService {
   // rejectRound uses).
   //
   // callerRole (ghs#147, platform-owner decision): admin/super_admin
-  // may delete a round in any status, unchanged. A player may only
-  // delete their own round while it's still editable
-  // (draft/rejected/amending) -- never one that's already
-  // pending/approved, since an approved round has genuinely
-  // contributed to real handicap history and quietly erasing it is a
-  // handicap-integrity question, not a UI detail. The route layer
-  // handles the ownership check (identity.sub === round.playerId);
+  // may delete a round in any status, unchanged. Anyone else -- a
+  // "player", or any other value -- may only delete their own round
+  // while it's still editable (draft/rejected/amending), never one
+  // that's already pending/approved, since an approved round has
+  // genuinely contributed to real handicap history and quietly
+  // erasing it is a handicap-integrity question, not a UI detail.
+  // Deliberately checked as "is this positively an admin?" rather than
+  // "is this positively a player?" (review finding, PR #148) -- fails
+  // closed (restricted) for any unexpected value, not open. The route
+  // layer handles the ownership check (identity.sub === round.playerId);
   // this status restriction is enforced here, under the same lock as
   // every other authoritative status check in this file.
   deleteRound(id: string, callerRole: "player" | "admin" | "super_admin"): Promise<RoundWorkflowResult>;
@@ -567,11 +570,16 @@ export function createRoundsService(
         id,
         (existing) => {
           // ghs#147: the authoritative check, under the same lock as
-          // every other status-sensitive transition in this file --
-          // an admin/super_admin caller is unrestricted, matching the
-          // pre-existing behaviour; a player caller may only delete
-          // their own round while it's still editable.
-          if (callerRole === "player" && !isEditableStatus(existing.status)) {
+          // every other status-sensitive transition in this file.
+          // Fail-closed, not fail-open (review finding, PR #148): only
+          // a caller *positively confirmed* as admin/super_admin gets
+          // the unrestricted behaviour; anything else -- "player", or
+          // any unexpected/malformed value -- is treated as restricted.
+          // The previous `callerRole === "player"` check inverted this:
+          // an anomalous role value would silently fall through as
+          // unrestricted instead of restricted.
+          const isAdminCaller = callerRole === "admin" || callerRole === "super_admin";
+          if (!isAdminCaller && !isEditableStatus(existing.status)) {
             throw new InvalidRoundTransitionError(`cannot delete a round in status '${existing.status}'`);
           }
         },

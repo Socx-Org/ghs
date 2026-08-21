@@ -52,6 +52,12 @@ let mock: MockAdapter;
 beforeEach(() => {
   mock = new MockAdapter(api);
   mock.onGet("/tee-configurations/tee-1").reply(200, TEE_CONFIGURATION);
+  // Supplementary to every test below (review finding, PR #148: the
+  // course name comes from here, not GET /rounds/:id or
+  // GET /tee-configurations/:id, neither of which has it).
+  mock.onGet("/players/player-1/rounds").reply(200, [
+    { id: "round-1", playerId: "player-1", courseId: "course-1", courseName: "Pebble Beach Golf Links", teeConfigurationId: "tee-1", teeConfigurationName: "Blue", playedAt: "2026-05-01T00:00:00.000Z", status: "approved" },
+  ]);
 });
 
 afterEach(() => {
@@ -76,11 +82,15 @@ function renderAsRole(role: "player" | "admin" = "player", roundId = "round-1") 
 }
 
 describe("RoundDetailsPage", () => {
-  it("shows the real tee configuration, status, and hole-by-hole scores for an approved round", async () => {
+  it("shows the real course, tee configuration, status, and hole-by-hole scores for an approved round", async () => {
     mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "approved", grossScore: 88, scoreDifferential: 14.2 }));
     renderAsRole("player");
 
-    expect(await screen.findByText("Blue")).toBeInTheDocument();
+    // Course name (review finding, PR #148) -- sourced from
+    // GET /players/:playerId/rounds, not GET /rounds/:id or
+    // GET /tee-configurations/:id, neither of which has it.
+    expect(await screen.findByRole("heading", { name: "Pebble Beach Golf Links" })).toBeInTheDocument();
+    expect(screen.getByText("Blue")).toBeInTheDocument();
     expect(screen.getByText("Approved")).toBeInTheDocument();
     expect(screen.getByText("88")).toBeInTheDocument();
     expect(screen.getByText("14.2")).toBeInTheDocument();
@@ -127,7 +137,6 @@ describe("RoundDetailsPage", () => {
 
   it("Back navigates to My Rounds", async () => {
     mock.onGet("/rounds/round-1").reply(200, makeRound());
-    mock.onGet("/players/player-1/rounds").reply(200, []);
     mock.onGet("/players/me").reply(200, { id: "player-1", clubId: null, firstName: "A", lastName: "B", country: "GB", createdAt: "2026-01-01T00:00:00.000Z", handicapIndex: null, lowHandicapIndex: null });
 
     renderAsRole("player");

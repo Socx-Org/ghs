@@ -312,6 +312,25 @@ test("deleteRound (ghs#147): a player caller cannot delete their own round once 
   assert.ok(await roundsRepo.get(approvedId));
 });
 
+// Review finding, PR #148: the check must fail closed (restricted) for
+// any caller role that isn't positively confirmed as admin/super_admin
+// -- not fail open (unrestricted) for anything that merely isn't
+// exactly "player". An anomalous/unexpected role value must never be
+// treated as admin-equivalent.
+test("deleteRound (ghs#147 review fix): an unexpected/malformed callerRole value is still treated as restricted, not unrestricted", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "SelfDelete", lastName: "Anomalous" });
+  const { roundsRepo, roundsService } = buildServices();
+
+  const approvedId = await createApprovedRound(player.id, teeConfigurationId, "2026-05-01T09:00:00.000Z", 12.0);
+  // @ts-expect-error -- deliberately an unexpected value, proving the
+  // runtime fail-closed behaviour, not just the type system.
+  await assert.rejects(() => roundsService.deleteRound(approvedId, "not-a-real-role"), /cannot delete a round in status 'approved'/);
+
+  assert.ok(await roundsRepo.get(approvedId), "genuinely untouched -- the anomalous role must not have been treated as admin-equivalent");
+});
+
 test("HTTP DELETE /rounds/:id (ghs#147): a player deletes their own draft round directly (200), the same route admin uses", async () => {
   const authConfig: AuthConfig = {
     jwtSecret: "round-workflow-147-test-secret",

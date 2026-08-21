@@ -19,6 +19,11 @@ export interface HolesTableProps {
 }
 
 export function HolesTable({ holes, holeScores }: HolesTableProps) {
+  // Review finding, PR #148: pre-indexed once, not a linear .find()
+  // re-scanning holeScores on every row -- O(holes + scores) instead of
+  // O(holes × scores).
+  const scoresByHoleNumber = new Map(holeScores.map((score) => [score.holeNumber, score]));
+
   return (
     <Table>
       <TableHead>
@@ -35,7 +40,7 @@ export function HolesTable({ holes, holeScores }: HolesTableProps) {
       </TableHead>
       <TableBody>
         {holes.map((hole) => {
-          const score = holeScores.find((s) => s.holeNumber === hole.holeNumber);
+          const score = scoresByHoleNumber.get(hole.holeNumber);
           return (
             <TableRow key={hole.id}>
               <TableCell className="font-medium">{hole.holeNumber}</TableCell>
