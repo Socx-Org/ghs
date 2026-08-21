@@ -227,4 +227,74 @@ describe("AdminRoundReviewPage", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("round is not in a state that allows approval"));
     expect(screen.getByRole("heading", { name: "Review round" })).toBeInTheDocument();
   });
+
+  // ghs#115: delete is always available, regardless of status -- unlike
+  // Approve/Reject, which only appear while pending.
+  describe("delete", () => {
+    it("shows a Delete round button for a non-pending round too, where Approve/Reject are hidden", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "approved" }));
+      renderAsRole("admin");
+
+      await screen.findByText("Alice Whitfield");
+      expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Delete round" })).toBeInTheDocument();
+    });
+
+    it("mentions handicap recalculation in the confirmation when the round has a recorded score", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "approved", scoreDifferential: 14.2 }));
+      renderAsRole("admin");
+
+      await userEvent.click(await screen.findByRole("button", { name: "Delete round" }));
+      const dialog = await screen.findByRole("dialog", { name: "Delete round" });
+      expect(dialog).toHaveTextContent(/handicap will be recalculated/);
+    });
+
+    it("says nothing about recalculation when the round never had a recorded score", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "draft", scoreDifferential: null }));
+      renderAsRole("admin");
+
+      await userEvent.click(await screen.findByRole("button", { name: "Delete round" }));
+      const dialog = await screen.findByRole("dialog", { name: "Delete round" });
+      expect(dialog).not.toHaveTextContent(/recalculated/);
+    });
+
+    it("deletes the round, shows a toast reflecting the real recalculation outcome, and navigates to the all-rounds list", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "approved" }));
+      mock.onDelete("/rounds/round-1").reply(200, { round: null, recalculation: { playerId: "player-1", trigger: "round_deleted", status: "eligible", handicapIndex: 11.9 } });
+
+      renderAsRole("admin");
+      await userEvent.click(await screen.findByRole("button", { name: "Delete round" }));
+      const dialog = await screen.findByRole("dialog", { name: "Delete round" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Delete round" }));
+
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("The player's handicap has been recalculated."));
+      await waitFor(() => expect(screen.getByRole("heading", { name: "All rounds" })).toBeInTheDocument());
+    });
+
+    it("shows a plain 'Round deleted.' toast when the round never had a recorded score, no recalculation claimed", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "draft" }));
+      mock.onDelete("/rounds/round-1").reply(200, { round: null, recalculation: null });
+
+      renderAsRole("admin");
+      await userEvent.click(await screen.findByRole("button", { name: "Delete round" }));
+      const dialog = await screen.findByRole("dialog", { name: "Delete round" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Delete round" }));
+
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Round deleted."));
+      expect(screen.getByRole("status")).not.toHaveTextContent(/recalculated/);
+    });
+
+    it("shows the server's error message on a failed delete, keeping the confirmation open", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "approved" }));
+      mock.onDelete("/rounds/round-1").reply(500, { error: "unexpected failure" });
+
+      renderAsRole("admin");
+      await userEvent.click(await screen.findByRole("button", { name: "Delete round" }));
+      const dialog = await screen.findByRole("dialog", { name: "Delete round" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Delete round" }));
+
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("unexpected failure"));
+      expect(screen.getByRole("dialog", { name: "Delete round" })).toBeInTheDocument();
+    });
+  });
 });

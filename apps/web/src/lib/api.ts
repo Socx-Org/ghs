@@ -474,6 +474,23 @@ export async function rejectRound(id: string, rejectionReason: string): Promise<
   return data;
 }
 
+export interface DeleteRoundResult {
+  // ghs#115: whether the deletion actually triggered a real handicap
+  // recalculation -- rounds.service.ts's deleteRound only recalculates
+  // when the round had a real scoreDifferential (an approved round with
+  // a differential); a draft/pending/rejected round never did, so
+  // deleting one is a no-op for the player's handicap. The full
+  // RecalculationOutcome isn't otherwise modelled on this side (nothing
+  // else needs it) -- reduced to just the one boolean the confirmation
+  // messaging actually needs, not exposed wholesale.
+  recalculated: boolean;
+}
+
+export async function deleteRound(id: string): Promise<DeleteRoundResult> {
+  const { data } = await api.delete<{ recalculation: unknown | null }>(`/rounds/${id}`);
+  return { recalculated: data.recalculation !== null };
+}
+
 export interface ListAdminRoundsResult {
   items: AdminRoundListItem[];
   total: number;

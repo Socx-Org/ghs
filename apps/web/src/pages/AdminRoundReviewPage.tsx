@@ -20,7 +20,7 @@ import {
   Textarea,
   useToast,
 } from "../components";
-import { ApiError, approveRound, getPlayer, getRound, getTeeConfiguration, rejectRound } from "../lib/api";
+import { ApiError, approveRound, deleteRound, getPlayer, getRound, getTeeConfiguration, rejectRound } from "../lib/api";
 import type { FairwayResult, HoleScore } from "../types/domain";
 
 // ghs#67: the admin's round-review screen -- reached from the pending
@@ -30,6 +30,11 @@ import type { FairwayResult, HoleScore } from "../types/domain";
 // PATCH /rounds/:id/status transition endpoints (ghs#9/#23/#24) -- no
 // client-side status simulation. Reject requires a real, non-empty
 // reason via a styled Modal, never window.confirm().
+//
+// ghs#115: delete is a separate, always-available action -- unlike
+// Approve/Reject (only meaningful while pending), rounds.service.ts's
+// deleteRound allows deletion from any status, so its button isn't
+// gated by isPending below.
 
 function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -89,6 +94,7 @@ export default function AdminRoundReviewPage() {
   const { show } = useToast();
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const roundQuery = useQuery({ queryKey: ["rounds", id], queryFn: () => getRound(id!), enabled: Boolean(id) });
   const playerId = roundQuery.data?.playerId;
@@ -102,7 +108,14 @@ export default function AdminRoundReviewPage() {
 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ["rounds", id] });
-    queryClient.invalidateQueries({ queryKey: ["admin", "rounds", "pending"] });
+    // ghs#115: ["admin", "rounds"] alone (TanStack's default partial-key
+    // matching) covers both #113's all-rounds list AND #67's
+    // ["admin", "rounds", "pending"] queue as a prefix match -- this
+    // screen is now reachable from either, so both need to stay fresh
+    // regardless of which one the admin returns to, not just the
+    // pending queue (the only entry point that existed when this
+    // helper was first written).
+    queryClient.invalidateQueries({ queryKey: ["admin", "rounds"] });
   }
 
   const approveMutation = useMutation({
@@ -139,6 +152,39 @@ export default function AdminRoundReviewPage() {
       // course/tee-configuration delete (#111/#112): the admin can see
       // the toast and retry from the still-open confirmation.
       show({ variant: "error", message: describeError(error, "Couldn't reject this round. Try again.") });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteRound(id!),
+    onSuccess: (result) => {
+      // Not invalidate() -- the round itself is gone (soft-deleted), so
+      // refetching its own ["rounds", id] query would just 404 for no
+      // reason (we're navigating away below regardless). Only the
+      // admin list caches need a fresh read, so the deleted round
+      // disappears from whichever one the admin returns to.
+      queryClient.removeQueries({ queryKey: ["rounds", id] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "rounds"] });
+      setDeleteOpen(false);
+      // ghs#115: clear messaging about the real outcome, not a generic
+      // "deleted" regardless of whether a recalculation actually
+      // happened -- matches rounds.service.ts's own real behaviour
+      // (only recalculates when the round had a scoreDifferential).
+      show({
+        variant: "success",
+        message: result.recalculated ? "Round deleted. The player's handicap has been recalculated." : "Round deleted.",
+        duration: 3000,
+      });
+      // "/admin/rounds" (the general all-rounds list, #113), not
+      // "/admin/rounds/pending" -- unlike Approve/Reject (only ever
+      // reachable from the pending queue), Delete is available
+      // regardless of which admin round view this screen was reached
+      // from, so it shouldn't assume the pending queue is "where the
+      // admin came from."
+      navigate("/admin/rounds");
+    },
+    onError: (error) => {
+      show({ variant: "error", message: describeError(error, "Couldn't delete this round. Try again.") });
     },
   });
 
@@ -210,6 +256,16 @@ export default function AdminRoundReviewPage() {
           ) : (
             <Alert variant="info">This round is no longer pending -- its status may have changed since the queue was last loaded.</Alert>
           )}
+
+          {/* ghs#115: always available, regardless of status -- unlike
+              Approve/Reject above. */}
+          <Card>
+            <CardBody className="flex justify-end">
+              <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
+                Delete round
+              </Button>
+            </CardBody>
+          </Card>
         </>
       )}
 
@@ -242,6 +298,29 @@ export default function AdminRoundReviewPage() {
               placeholder="Explain what needs correcting…"
             />
           </label>
+        </Modal>
+      )}
+
+      {round && (
+        <Modal
+          open={deleteOpen}
+          onClose={() => setDeleteOpen(false)}
+          title="Delete round"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setDeleteOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" isLoading={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>
+                Delete round
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-text">
+            Delete this round permanently? This can't be undone.{" "}
+            {round.scoreDifferential !== null && "This round has a recorded score -- the player's handicap will be recalculated."}
+          </p>
         </Modal>
       )}
     </div>
