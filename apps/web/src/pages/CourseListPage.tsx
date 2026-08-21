@@ -1,15 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Card, CardBody, EmptyState, ListView, Skeleton, TableCell, TableHeaderCell } from "../components";
+import { Link, useNavigate } from "react-router-dom";
+import { Alert, Button, Card, CardBody, EmptyState, ListView, Skeleton, TableCell, TableHeaderCell } from "../components";
 import { ApiError, listCourses } from "../lib/api";
+import { useAuth } from "../hooks/useAuth";
 import type { CourseSummary } from "../types/domain";
 
 // ghs#109: course list screen -- design doc section 6.1. First real
 // consumer of ListView (#103) outside Accounts. No role restriction on
 // viewing (matches GET /courses, unauthenticated on the backend) -- the
-// nav entry and route are open to every authenticated role. No actions
-// column and no filtering/sorting beyond what GET /courses supports
-// today (name-ordered only) -- both explicit non-scope; edit/delete are
-// separate issues (#110/#111), not assumed here.
+// nav entry and route are open to every authenticated role. No
+// filtering/sorting beyond what GET /courses supports today (name-
+// ordered only) -- explicit non-scope.
+//
+// ghs#110: rows now link to /courses/:id, and a "Create course" button
+// is shown for admin/super_admin -- the only real action this list
+// gains from that issue (edit/delete themselves live on the detail
+// screen, not here).
 
 function locationLine(item: CourseSummary): string | null {
   if (item.city && item.country) return `${item.city}, ${item.country}`;
@@ -21,13 +27,19 @@ function describeQueryError(error: unknown, fallback: string): string {
 }
 
 export default function CourseListPage() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
   const coursesQuery = useQuery({ queryKey: ["courses"], queryFn: listCourses });
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
-      <div>
-        <h1 className="mt-4 text-2xl font-semibold text-text">Courses</h1>
-        <p className="mt-2 text-sm text-text-muted">Golf courses available for round entry.</p>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="mt-4 text-2xl font-semibold text-text">Courses</h1>
+          <p className="mt-2 text-sm text-text-muted">Golf courses available for round entry.</p>
+        </div>
+        {isAdmin && <Button onClick={() => navigate("/courses/new")}>Create course</Button>}
       </div>
 
       <Card className="mt-8">
@@ -53,14 +65,20 @@ export default function CourseListPage() {
               }
               renderTableRow={(item) => (
                 <>
-                  <TableCell>{item.name}</TableCell>
+                  <TableCell>
+                    <Link to={`/courses/${item.id}`} className="font-medium text-primary hover:underline">
+                      {item.name}
+                    </Link>
+                  </TableCell>
                   <TableCell>{locationLine(item) ?? "—"}</TableCell>
                 </>
               )}
               renderCard={(item) => (
                 <Card>
                   <CardBody className="flex flex-col gap-1">
-                    <p className="text-sm font-medium text-text">{item.name}</p>
+                    <Link to={`/courses/${item.id}`} className="text-sm font-medium text-primary hover:underline">
+                      {item.name}
+                    </Link>
                     <p className="text-xs text-text-muted">{locationLine(item) ?? "—"}</p>
                   </CardBody>
                 </Card>
