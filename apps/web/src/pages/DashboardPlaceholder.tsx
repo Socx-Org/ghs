@@ -7,8 +7,10 @@ import { useAuth } from "../hooks/useAuth";
 //
 // ghs#96: no header/logo/Admin-nav/sign-out here any more -- AppShell's
 // Sidebar and AccountMenu now provide all of that uniformly (the
-// Sidebar's own Admin -> Create Account entry already covers what this
-// page's NavItem used to).
+// Sidebar's own Admin -> Accounts entry already covers what this
+// page's NavItem used to; ghs#142 later removed the Sidebar's separate
+// Create Account entry once AdminAccountsPage grew its own button to
+// the same route).
 export default function DashboardPlaceholder() {
   const { user } = useAuth();
 

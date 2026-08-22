@@ -39,12 +39,6 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /Dashboard/ })).toBeInTheDocument();
   });
 
-  it("shows Create Account only for admin/super_admin", () => {
-    setTokens(tokensFor("admin"));
-    renderSidebar();
-    expect(screen.getByRole("link", { name: /Create Account/ })).toBeInTheDocument();
-  });
-
   it("shows My Rounds only for a player (ghs#147)", () => {
     setTokens(tokensFor("player"));
     renderSidebar();
