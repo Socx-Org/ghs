@@ -108,6 +108,87 @@ async function applyAndRecord(client: PoolClient, filename: string, sql: string,
 // disk during a test run. Same "optional override, defaults to real
 // production behaviour" shape already established for
 // AppDeps.rateLimitOverrides (ghs#49).
+export interface MigrationDriftReport {
+  pendingFiles: string[];
+  // Set only when the check itself couldn't run at all (e.g. an
+  // unreadable migrations directory) -- pendingFiles is always [] in
+  // that case, and callers must not read that as "up to date". Distinct
+  // from the "schema_migrations doesn't exist" case below, which IS a
+  // real, computable answer (every file really is pending), not a
+  // failed check.
+  checkError?: string;
+}
+
+// ghs#154: a read-only diagnostic, never DDL -- reports migration files
+// present on disk that schema_migrations has no record of applying yet.
+// migrate.ts's own doc comment already establishes that migrations are
+// deliberately manual, not folded into the automatic deploy path
+// (deploy-release.sh only extracts the release and restarts services);
+// that gap between "new code is live" and "someone ran `npm run
+// migrate`" is expected, by design, not a bug to close here. What WAS a
+// real gap: that drift was completely invisible until a request
+// happened to hit a code path depending on the missing column/table,
+// surfacing only as an unexplained 500 (ghs#154's own root cause --
+// migration 012 added tee_configurations.deleted_at, GET /courses/:id
+// depends on it, and production hadn't had the manual step run yet).
+// This makes the same drift visible in every boot's own logs instead,
+// without ever gating startup or the deploy health check on it -- doing
+// that would break every legitimate deploy that ships a new migration,
+// since the manual step is expected to lag the automatic code deploy by
+// design.
+//
+// Postgres error code for "relation does not exist" -- the one specific,
+// expected failure mode (schema_migrations itself was never created)
+// that legitimately means "every file is pending", not "the check
+// failed". Same `err as { code?: string }` pattern already established
+// in auth.ts for distinguishing a real Postgres error code (review
+// finding, PR #156 -- see this function's own doc comment below).
+const UNDEFINED_TABLE = "42P01";
+
+// Never throws or rejects: both the directory read and the query are
+// each in their own try/catch (review finding, PR #156 -- the directory
+// read originally sat outside any catch, so an unreadable
+// migrationsDir would reject the returned promise despite this
+// function's own "never throws" contract, silently depending on every
+// caller remembering its own outer catch). An unreadable directory
+// degrades to checkError set (a real "couldn't check" signal, never
+// silently reported as "all clear").
+//
+// The query catch distinguishes its one truly expected failure --
+// schema_migrations doesn't exist yet (a database that's never had
+// migrate.ts run against it at all), Postgres code 42P01 -- from every
+// other failure (review finding, PR #156: a DB connectivity/auth error
+// was originally indistinguishable from "no ledger yet", so a real
+// outage could log a misleading "pending migrations" warning instead of
+// "couldn't check", silently dropping the actual error). Only 42P01
+// degrades to "every file is pending"; anything else sets checkError
+// with the real reason, same as the directory-read failure above.
+export async function checkMigrationDrift(
+  pool: Pool,
+  migrationsDir: string = DEFAULT_MIGRATIONS_DIR,
+): Promise<MigrationDriftReport> {
+  let files: string[];
+  try {
+    files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { pendingFiles: [], checkError: `could not read migrations directory '${migrationsDir}': ${message}` };
+  }
+
+  try {
+    const { rows } = await pool.query<{ filename: string }>("SELECT filename FROM schema_migrations");
+    const applied = new Set(rows.map((row) => row.filename));
+    return { pendingFiles: files.filter((f) => !applied.has(f)) };
+  } catch (err) {
+    const pgErr = err as { code?: string };
+    if (pgErr.code === UNDEFINED_TABLE) {
+      return { pendingFiles: files };
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return { pendingFiles: [], checkError: `could not query schema_migrations: ${message}` };
+  }
+}
+
 export async function applyMigrations(pool: Pool, migrationsDir: string = DEFAULT_MIGRATIONS_DIR): Promise<void> {
   const client = await pool.connect();
   try {

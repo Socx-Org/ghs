@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { Pool } from "pg";
-import { applyMigrations } from "../src/data/migrations/apply.ts";
+import { applyMigrations, checkMigrationDrift } from "../src/data/migrations/apply.ts";
 
 // ghs#71 -- Migration Runner: Introduce Migration Ledger and Apply-Once
 // Semantics. Every test here is behavioural against a real Postgres and
@@ -213,5 +213,89 @@ test("a previously-applied migration file whose on-disk contents change after be
     await pool.query("DROP TABLE IF EXISTS _ghs_test_checksum_marker");
     rmSync(dir, { recursive: true, force: true });
     await cleanupLedgerRow(filename);
+  }
+});
+
+// ---------------------------------------------------------------------
+// checkMigrationDrift (ghs#154) -- read-only, never DDL, never throws
+// ---------------------------------------------------------------------
+
+test("reports no pending files once every real migration has actually been applied", async () => {
+  await applyMigrations(pool); // this file's own before() already did this; explicit here for clarity
+  const report = await checkMigrationDrift(pool);
+  assert.deepEqual(report.pendingFiles, []);
+});
+
+test("reports a file on disk that hasn't been applied yet as pending, and nothing else", async () => {
+  const appliedFilename = "test-drift-applied.sql";
+  const pendingFilename = "test-drift-pending.sql";
+  const dir = makeFixtureDir({
+    [appliedFilename]: "CREATE TABLE IF NOT EXISTS _ghs_test_drift_marker (id INT);",
+  });
+
+  try {
+    await applyMigrations(pool, dir);
+    assert.ok(await ledgerRow(appliedFilename), "the applied fixture must actually be recorded");
+
+    // Added to disk AFTER applyMigrations already ran against this
+    // directory -- simulates exactly ghs#154's real scenario: new code
+    // (and its migration file) is live, but the manual `npm run
+    // migrate` step covering it hasn't run yet.
+    writeFileSync(join(dir, pendingFilename), "CREATE TABLE IF NOT EXISTS _ghs_test_drift_marker_2 (id INT);", "utf8");
+
+    const report = await checkMigrationDrift(pool, dir);
+    assert.deepEqual(report.pendingFiles, [pendingFilename], "only the never-applied file is reported, not the already-applied one");
+  } finally {
+    await pool.query("DROP TABLE IF EXISTS _ghs_test_drift_marker");
+    await pool.query("DROP TABLE IF EXISTS _ghs_test_drift_marker_2");
+    rmSync(dir, { recursive: true, force: true });
+    await cleanupLedgerRow(appliedFilename);
+  }
+});
+
+test("reports every real migration file as pending, without throwing, when schema_migrations itself doesn't exist yet", async () => {
+  const realFiles = [...checksumAllRealMigrations().keys()];
+
+  // Simulates a database that has never had migrate.ts run against it
+  // at all -- not just missing the newest migration.
+  await pool.query("DROP TABLE IF EXISTS schema_migrations");
+  try {
+    const report = await checkMigrationDrift(pool);
+    assert.deepEqual(report.pendingFiles.sort(), realFiles.sort(), "every real migration file is reported pending, not just the most recent");
+  } finally {
+    // Restore the ledger before any later test in this file (or another
+    // file, given --test-concurrency=1) runs -- same restore-in-place
+    // convention as the bootstrap test above.
+    await applyMigrations(pool);
+  }
+});
+
+test("reports checkError (never throws) when the migrations directory itself can't be read -- review finding, PR #156", async () => {
+  const nonExistentDir = join(tmpdir(), "ghs-migrations-test-does-not-exist", "also-does-not-exist");
+
+  // Behavioural, not a spy: the promise resolves, not rejects, and
+  // pendingFiles is [] (never silently reported as "genuinely up to
+  // date", nor mixed in with real pending filenames).
+  const report = await checkMigrationDrift(pool, nonExistentDir);
+  assert.deepEqual(report.pendingFiles, []);
+  assert.ok(report.checkError, "checkError must be set -- this is a failed check, not a clean 'nothing pending' result");
+  assert.match(report.checkError, /could not read migrations directory/);
+});
+
+test("sets checkError (not 'every file pending') on a real query failure that isn't 'schema_migrations doesn't exist' -- review finding, PR #156", async () => {
+  // A real, unreachable Postgres target -- not a mock -- so the query
+  // fails with a genuine connection error (a Postgres error code other
+  // than 42P01, or no code at all), distinct from the "relation does
+  // not exist" case the other test above covers. Confirms the fix
+  // actually inspects the error rather than treating every query
+  // failure as "no ledger yet".
+  const brokenPool = new Pool({ host: "127.0.0.1", port: 1, database: "does-not-matter", connectionTimeoutMillis: 2000 });
+  try {
+    const report = await checkMigrationDrift(brokenPool);
+    assert.deepEqual(report.pendingFiles, [], "must not guess a pendingFiles list from an unrelated failure");
+    assert.ok(report.checkError, "a genuine connection failure must surface as checkError, not silently become 'all pending'");
+    assert.match(report.checkError, /could not query schema_migrations/);
+  } finally {
+    await brokenPool.end();
   }
 });
