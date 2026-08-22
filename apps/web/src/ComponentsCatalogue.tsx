@@ -55,6 +55,7 @@ import {
   ToggleGroup,
 } from "./components";
 import { useToast } from "./components/useToast";
+import { ROUND_STATUS_OPTIONS } from "./lib/domain-labels";
 import type { RoundStatus, UserRole } from "./types/domain";
 
 // ghs#78/#82: the living visual reference for GHS. Every component
@@ -668,11 +669,14 @@ export default function ComponentsCatalogue() {
             </List>
           </Example>
 
-          <Example label="ListView -- one data source, table/grid toggle (ghs#103)">
+          <Example label="ListView -- one data source, table/grid toggle, search + filter (ghs#103, ghs#137)">
             <ListView
               id="catalogue-rounds"
               items={SAMPLE_ROUNDS}
               getKey={(r) => r.id}
+              searchPlaceholder="Search by course…"
+              getSearchText={(r) => r.course}
+              filters={[{ id: "status", label: "Status", getValue: (r) => r.status, options: ROUND_STATUS_OPTIONS }]}
               tableHead={
                 <>
                   <TableHeaderCell>Course</TableHeaderCell>

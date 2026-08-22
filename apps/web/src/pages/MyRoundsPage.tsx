@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, useToast } from "../components";
 import { ApiError, deleteRound, getMyPlayerProfile, getPlayerRounds } from "../lib/api";
+import { ROUND_STATUS_OPTIONS } from "../lib/domain-labels";
 import { EDITABLE_ROUND_STATUSES } from "../types/domain";
 import type { PlayerRoundListItem } from "../types/domain";
 
@@ -116,6 +117,9 @@ export default function MyRoundsPage() {
               id="my-rounds"
               items={roundsQuery.data}
               getKey={(item) => item.id}
+              searchPlaceholder="Search by course or tee…"
+              getSearchText={(item) => `${item.courseName} ${item.teeConfigurationName}`}
+              filters={[{ id: "status", label: "Status", getValue: (item) => item.status, options: ROUND_STATUS_OPTIONS }]}
               tableHead={
                 <>
                   <TableHeaderCell>Course</TableHeaderCell>

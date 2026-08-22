@@ -17,13 +17,19 @@ import {
   useToast,
 } from "../components";
 import { ApiError, deleteUser, listUsers, setUserStatus } from "../lib/api";
+import { ACCOUNT_STATUS_OPTIONS, ROLE_OPTIONS } from "../lib/domain-labels";
 import { useAuth } from "../hooks/useAuth";
 import type { AdminUserListItem } from "../types/domain";
 
 // ghs#104: admin account list -- design doc sections 5.6-5.8. First
-// real consumer of ListView (#103). Filtering/pagination UI is
-// explicit non-scope (the issue's own text) -- listUsers() calls the
-// backend with no params, relying entirely on its defaults.
+// real consumer of ListView (#103). listUsers() calls the backend with
+// no params, relying entirely on its defaults -- narrowing the result
+// happens client-side, via ListView's own search/filter (ghs#137).
+//
+// ghs#137 review fix: Role/Status filter options are sourced from
+// RoleBadge/AccountStatusBadge's own exported option lists, not
+// redefined here -- a second copy of those labels would drift from the
+// badge's the moment either changed independently.
 
 function formatCreatedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -136,6 +142,12 @@ export default function AdminAccountsPage() {
               id="accounts"
               items={usersQuery.data.items}
               getKey={(item) => item.id}
+              searchPlaceholder="Search by email or name…"
+              getSearchText={(item) => `${item.email} ${accountName(item)}`}
+              filters={[
+                { id: "role", label: "Role", getValue: (item) => item.role, options: ROLE_OPTIONS },
+                { id: "status", label: "Status", getValue: (item) => item.status, options: ACCOUNT_STATUS_OPTIONS },
+              ]}
               tableHead={
                 <>
                   <TableHeaderCell>Email</TableHeaderCell>
