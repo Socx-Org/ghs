@@ -3,18 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, useToast } from "../components";
 import { ApiError, deleteRound, getMyPlayerProfile, getPlayerRounds } from "../lib/api";
+import { ROUND_STATUS_OPTIONS } from "../lib/domain-labels";
 import { EDITABLE_ROUND_STATUSES } from "../types/domain";
-import type { PlayerRoundListItem, RoundStatus } from "../types/domain";
-
-// ghs#137: mirrors RoundStatusBadge's own labels, so the filter dropdown
-// reads the same as what it's filtering by.
-const STATUS_FILTER_OPTIONS: Array<{ value: RoundStatus; label: string }> = [
-  { value: "draft", label: "Draft" },
-  { value: "pending", label: "Pending" },
-  { value: "approved", label: "Approved" },
-  { value: "rejected", label: "Rejected" },
-  { value: "amending", label: "Amending" },
-];
+import type { PlayerRoundListItem } from "../types/domain";
 
 // ghs#147: the player's own "My Rounds" screen -- a real, browsable
 // list of every round they've played, distinct from PlayerDashboardPage's
@@ -128,7 +119,7 @@ export default function MyRoundsPage() {
               getKey={(item) => item.id}
               searchPlaceholder="Search by course or tee…"
               getSearchText={(item) => `${item.courseName} ${item.teeConfigurationName}`}
-              filters={[{ id: "status", label: "Status", getValue: (item) => item.status, options: STATUS_FILTER_OPTIONS }]}
+              filters={[{ id: "status", label: "Status", getValue: (item) => item.status, options: ROUND_STATUS_OPTIONS }]}
               tableHead={
                 <>
                   <TableHeaderCell>Course</TableHeaderCell>

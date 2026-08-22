@@ -17,26 +17,19 @@ import {
   useToast,
 } from "../components";
 import { ApiError, deleteUser, listUsers, setUserStatus } from "../lib/api";
+import { ACCOUNT_STATUS_OPTIONS, ROLE_OPTIONS } from "../lib/domain-labels";
 import { useAuth } from "../hooks/useAuth";
-import type { AdminUserListItem, UserRole, UserStatus } from "../types/domain";
+import type { AdminUserListItem } from "../types/domain";
 
 // ghs#104: admin account list -- design doc sections 5.6-5.8. First
 // real consumer of ListView (#103). listUsers() calls the backend with
 // no params, relying entirely on its defaults -- narrowing the result
 // happens client-side, via ListView's own search/filter (ghs#137).
-
-const ROLE_FILTER_OPTIONS: Array<{ value: UserRole; label: string }> = [
-  { value: "player", label: "Player" },
-  { value: "admin", label: "Admin" },
-  { value: "super_admin", label: "Super Admin" },
-];
-
-const STATUS_FILTER_OPTIONS: Array<{ value: UserStatus; label: string }> = [
-  { value: "pending_verification", label: "Pending" },
-  { value: "active", label: "Active" },
-  { value: "disabled", label: "Disabled" },
-  { value: "deleted", label: "Deleted" },
-];
+//
+// ghs#137 review fix: Role/Status filter options are sourced from
+// RoleBadge/AccountStatusBadge's own exported option lists, not
+// redefined here -- a second copy of those labels would drift from the
+// badge's the moment either changed independently.
 
 function formatCreatedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -152,8 +145,8 @@ export default function AdminAccountsPage() {
               searchPlaceholder="Search by email or name…"
               getSearchText={(item) => `${item.email} ${accountName(item)}`}
               filters={[
-                { id: "role", label: "Role", getValue: (item) => item.role, options: ROLE_FILTER_OPTIONS },
-                { id: "status", label: "Status", getValue: (item) => item.status, options: STATUS_FILTER_OPTIONS },
+                { id: "role", label: "Role", getValue: (item) => item.role, options: ROLE_OPTIONS },
+                { id: "status", label: "Status", getValue: (item) => item.status, options: ACCOUNT_STATUS_OPTIONS },
               ]}
               tableHead={
                 <>

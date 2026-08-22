@@ -55,6 +55,7 @@ import {
   ToggleGroup,
 } from "./components";
 import { useToast } from "./components/useToast";
+import { ROUND_STATUS_OPTIONS } from "./lib/domain-labels";
 import type { RoundStatus, UserRole } from "./types/domain";
 
 // ghs#78/#82: the living visual reference for GHS. Every component
@@ -675,20 +676,7 @@ export default function ComponentsCatalogue() {
               getKey={(r) => r.id}
               searchPlaceholder="Search by course…"
               getSearchText={(r) => r.course}
-              filters={[
-                {
-                  id: "status",
-                  label: "Status",
-                  getValue: (r) => r.status,
-                  options: [
-                    { value: "draft", label: "Draft" },
-                    { value: "pending", label: "Pending" },
-                    { value: "approved", label: "Approved" },
-                    { value: "rejected", label: "Rejected" },
-                    { value: "amending", label: "Amending" },
-                  ],
-                },
-              ]}
+              filters={[{ id: "status", label: "Status", getValue: (r) => r.status, options: ROUND_STATUS_OPTIONS }]}
               tableHead={
                 <>
                   <TableHeaderCell>Course</TableHeaderCell>
