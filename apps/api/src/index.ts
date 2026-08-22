@@ -100,14 +100,19 @@ const server = app.listen(config.port, () => {
 
 // ghs#154: never awaited before listen -- a diagnostic, not a startup
 // dependency (see checkMigrationDrift's own doc comment for why this
-// must never gate startup or the deploy health check). The outer catch
-// is a second safety net on top of the function's own internal one, for
-// anything that could throw before its try block even runs (e.g.
-// readdirSync itself failing against an unexpected packaged-build
-// layout) -- this must never be able to crash the process.
+// must never gate startup or the deploy health check). checkError is
+// handled distinctly from pendingFiles.length === 0 -- "couldn't check"
+// and "checked, genuinely up to date" must never be logged identically,
+// or a real check failure would masquerade as a clean bill of health.
+// The outer catch is a second safety net on top of the function's own
+// internal ones (it doesn't throw/reject itself, but nothing here
+// depends on that never changing) -- this must never be able to crash
+// the process.
 void checkMigrationDrift(pool)
   .then((report) => {
-    if (report.pendingFiles.length > 0) {
+    if (report.checkError) {
+      logger.warn("could not check migration drift", { error: report.checkError });
+    } else if (report.pendingFiles.length > 0) {
       logger.warn("pending database migrations detected -- schema may not match running code", {
         pendingFiles: report.pendingFiles,
       });

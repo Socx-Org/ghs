@@ -110,6 +110,13 @@ async function applyAndRecord(client: PoolClient, filename: string, sql: string,
 // AppDeps.rateLimitOverrides (ghs#49).
 export interface MigrationDriftReport {
   pendingFiles: string[];
+  // Set only when the check itself couldn't run at all (e.g. an
+  // unreadable migrations directory) -- pendingFiles is always [] in
+  // that case, and callers must not read that as "up to date". Distinct
+  // from the "schema_migrations doesn't exist" case below, which IS a
+  // real, computable answer (every file really is pending), not a
+  // failed check.
+  checkError?: string;
 }
 
 // ghs#154: a read-only diagnostic, never DDL -- reports migration files
@@ -130,23 +137,35 @@ export interface MigrationDriftReport {
 // since the manual step is expected to lag the automatic code deploy by
 // design.
 //
-// Never throws: an unreadable migrations directory or an unexpected
-// query failure degrades to "treat every file as pending" rather than
-// crashing a diagnostic-only check -- the worst case is a false
+// Never throws or rejects: both the directory read and the query are
+// each in their own try/catch (review finding, PR #156 -- the directory
+// read originally sat outside any catch, so an unreadable
+// migrationsDir would reject the returned promise despite this
+// function's own "never throws" contract, silently depending on every
+// caller remembering its own outer catch). An unreadable directory
+// degrades to checkError set (a real "couldn't check" signal, never
+// silently reported as "all clear"); an unexpected query failure
+// degrades to "treat every file as pending" (most likely cause:
+// schema_migrations doesn't exist yet, a database that's never had
+// migrate.ts run against it at all) -- the worst case there is a false
 // "pending" warning, never a false "all clear" that hides real drift.
 export async function checkMigrationDrift(
   pool: Pool,
   migrationsDir: string = DEFAULT_MIGRATIONS_DIR,
 ): Promise<MigrationDriftReport> {
-  const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
+  let files: string[];
+  try {
+    files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { pendingFiles: [], checkError: `could not read migrations directory '${migrationsDir}': ${message}` };
+  }
+
   try {
     const { rows } = await pool.query<{ filename: string }>("SELECT filename FROM schema_migrations");
     const applied = new Set(rows.map((row) => row.filename));
     return { pendingFiles: files.filter((f) => !applied.has(f)) };
   } catch {
-    // Most likely cause: schema_migrations itself doesn't exist yet (a
-    // database that has never had migrate.ts run against it at all) --
-    // every file is pending, not just the newest one.
     return { pendingFiles: files };
   }
 }

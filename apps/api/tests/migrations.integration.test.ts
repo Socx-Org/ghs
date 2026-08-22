@@ -269,3 +269,15 @@ test("reports every real migration file as pending, without throwing, when schem
     await applyMigrations(pool);
   }
 });
+
+test("reports checkError (never throws) when the migrations directory itself can't be read -- review finding, PR #156", async () => {
+  const nonExistentDir = join(tmpdir(), "ghs-migrations-test-does-not-exist", "also-does-not-exist");
+
+  // Behavioural, not a spy: the promise resolves, not rejects, and
+  // pendingFiles is [] (never silently reported as "genuinely up to
+  // date", nor mixed in with real pending filenames).
+  const report = await checkMigrationDrift(pool, nonExistentDir);
+  assert.deepEqual(report.pendingFiles, []);
+  assert.ok(report.checkError, "checkError must be set -- this is a failed check, not a clean 'nothing pending' result");
+  assert.match(report.checkError, /could not read migrations directory/);
+});
