@@ -94,8 +94,11 @@ describe("AdminRoundsListPage", () => {
 
     expect(await screen.findByText("Alice Whitfield")).toBeInTheDocument();
     expect(screen.getByText("Bob Carver")).toBeInTheDocument();
-    expect(screen.getByText("Approved")).toBeInTheDocument();
-    expect(screen.getByText("Pending")).toBeInTheDocument();
+    // Scoped to the table -- ghs#137's Status filter dropdown renders its
+    // own "Approved"/"Pending" option text, which would otherwise collide.
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("Approved")).toBeInTheDocument();
+    expect(within(table).getByText("Pending")).toBeInTheDocument();
   });
 
   it("links each row to its round-review screen", async () => {

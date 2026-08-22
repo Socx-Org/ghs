@@ -8,9 +8,12 @@ import type { CourseSummary } from "../types/domain";
 // ghs#109: course list screen -- design doc section 6.1. First real
 // consumer of ListView (#103) outside Accounts. No role restriction on
 // viewing (matches GET /courses, unauthenticated on the backend) -- the
-// nav entry and route are open to every authenticated role. No
-// filtering/sorting beyond what GET /courses supports today (name-
-// ordered only) -- explicit non-scope.
+// nav entry and route are open to every authenticated role. Sort order
+// itself is still whatever GET /courses returns (name-ordered) --
+// narrowing the result client-side, via ListView's own search (ghs#137),
+// is a separate concern from sort order and doesn't change it. No
+// column filters here -- name/location are free text, not the
+// enum-like data ListView's column-filter opt-in is meant for.
 //
 // ghs#110: rows now link to /courses/:id, and a "Create course" button
 // is shown for admin/super_admin -- the only real action this list
@@ -57,6 +60,8 @@ export default function CourseListPage() {
               id="courses"
               items={coursesQuery.data}
               getKey={(item) => item.id}
+              searchPlaceholder="Search by name, city, or country…"
+              getSearchText={(item) => `${item.name} ${item.city ?? ""} ${item.country ?? ""}`}
               tableHead={
                 <>
                   <TableHeaderCell>Name</TableHeaderCell>

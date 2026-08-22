@@ -3,15 +3,25 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, useToast } from "../components";
 import { ApiError, deleteRound, listAdminRounds } from "../lib/api";
-import type { AdminRoundListItem } from "../types/domain";
+import type { AdminRoundListItem, RoundStatus } from "../types/domain";
 
 // ghs#113: the general admin all-rounds browser -- distinct from the
 // existing pending-only queue (#67, AdminPendingQueuePage), which stays
 // deliberately narrow. This one spans every status, backed by GET
-// /admin/rounds (#100). No filter/pagination UI here -- listAdminRounds()
-// relies entirely on the backend's own defaults, same reasoning as
-// AdminAccountsPage (#104): a UI for that is #138, a separate, still-open
-// issue, not this one's scope.
+// /admin/rounds (#100). listAdminRounds() itself still relies entirely
+// on the backend's own defaults (no server-side filter/pagination
+// params) -- narrowing the result happens client-side, via ListView's
+// own search/filter (ghs#137); pagination is #138, a separate, still-open
+// issue, not yet added here.
+
+// ghs#137: mirrors RoundStatusBadge's own labels.
+const STATUS_FILTER_OPTIONS: Array<{ value: RoundStatus; label: string }> = [
+  { value: "draft", label: "Draft" },
+  { value: "pending", label: "Pending" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+  { value: "amending", label: "Amending" },
+];
 //
 // ghs#115: a per-row delete action, admin-only, real confirmation Modal
 // (never window.confirm()). Unlike AdminRoundReviewPage's own delete
@@ -96,6 +106,9 @@ export default function AdminRoundsListPage() {
               id="admin-rounds"
               items={roundsQuery.data.items}
               getKey={(item) => item.id}
+              searchPlaceholder="Search by player, course, or tee…"
+              getSearchText={(item) => `${item.playerFirstName} ${item.playerLastName} ${item.courseName} ${item.teeConfigurationName}`}
+              filters={[{ id: "status", label: "Status", getValue: (item) => item.status, options: STATUS_FILTER_OPTIONS }]}
               tableHead={
                 <>
                   <TableHeaderCell>Player</TableHeaderCell>

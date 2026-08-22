@@ -668,11 +668,27 @@ export default function ComponentsCatalogue() {
             </List>
           </Example>
 
-          <Example label="ListView -- one data source, table/grid toggle (ghs#103)">
+          <Example label="ListView -- one data source, table/grid toggle, search + filter (ghs#103, ghs#137)">
             <ListView
               id="catalogue-rounds"
               items={SAMPLE_ROUNDS}
               getKey={(r) => r.id}
+              searchPlaceholder="Search by course…"
+              getSearchText={(r) => r.course}
+              filters={[
+                {
+                  id: "status",
+                  label: "Status",
+                  getValue: (r) => r.status,
+                  options: [
+                    { value: "draft", label: "Draft" },
+                    { value: "pending", label: "Pending" },
+                    { value: "approved", label: "Approved" },
+                    { value: "rejected", label: "Rejected" },
+                    { value: "amending", label: "Amending" },
+                  ],
+                },
+              ]}
               tableHead={
                 <>
                   <TableHeaderCell>Course</TableHeaderCell>

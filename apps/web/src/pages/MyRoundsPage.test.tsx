@@ -76,8 +76,11 @@ describe("MyRoundsPage", () => {
 
     expect(await screen.findByText("Pebble Beach Golf Links")).toBeInTheDocument();
     expect(screen.getByText("Blue")).toBeInTheDocument();
-    expect(screen.getByText("Approved")).toBeInTheDocument();
-    expect(screen.getByText("Draft")).toBeInTheDocument();
+    // Scoped to the table -- ghs#137's Status filter dropdown renders its
+    // own "Approved"/"Draft" option text, which would otherwise collide.
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("Approved")).toBeInTheDocument();
+    expect(within(table).getByText("Draft")).toBeInTheDocument();
   });
 
   it("links each row to its own RoundDetailsPage, not the edit screen", async () => {
@@ -118,14 +121,17 @@ describe("MyRoundsPage", () => {
     });
 
     renderAsRole("player");
-    await screen.findByText("Draft");
+    // Scoped to the table, not the Status filter's own "Draft" option
+    // (ghs#137), which persists in the DOM regardless of what's deleted.
+    const table = await screen.findByRole("table");
+    await within(table).findByText("Draft");
     await userEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Delete round" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Delete round" }));
 
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Round deleted."));
-    await waitFor(() => expect(screen.queryByText("Draft")).not.toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByRole("table")).queryByText("Draft")).not.toBeInTheDocument());
   });
 
   it("shows an empty state when there are no rounds yet", async () => {

@@ -18,12 +18,25 @@ import {
 } from "../components";
 import { ApiError, deleteUser, listUsers, setUserStatus } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
-import type { AdminUserListItem } from "../types/domain";
+import type { AdminUserListItem, UserRole, UserStatus } from "../types/domain";
 
 // ghs#104: admin account list -- design doc sections 5.6-5.8. First
-// real consumer of ListView (#103). Filtering/pagination UI is
-// explicit non-scope (the issue's own text) -- listUsers() calls the
-// backend with no params, relying entirely on its defaults.
+// real consumer of ListView (#103). listUsers() calls the backend with
+// no params, relying entirely on its defaults -- narrowing the result
+// happens client-side, via ListView's own search/filter (ghs#137).
+
+const ROLE_FILTER_OPTIONS: Array<{ value: UserRole; label: string }> = [
+  { value: "player", label: "Player" },
+  { value: "admin", label: "Admin" },
+  { value: "super_admin", label: "Super Admin" },
+];
+
+const STATUS_FILTER_OPTIONS: Array<{ value: UserStatus; label: string }> = [
+  { value: "pending_verification", label: "Pending" },
+  { value: "active", label: "Active" },
+  { value: "disabled", label: "Disabled" },
+  { value: "deleted", label: "Deleted" },
+];
 
 function formatCreatedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -136,6 +149,12 @@ export default function AdminAccountsPage() {
               id="accounts"
               items={usersQuery.data.items}
               getKey={(item) => item.id}
+              searchPlaceholder="Search by email or name…"
+              getSearchText={(item) => `${item.email} ${accountName(item)}`}
+              filters={[
+                { id: "role", label: "Role", getValue: (item) => item.role, options: ROLE_FILTER_OPTIONS },
+                { id: "status", label: "Status", getValue: (item) => item.status, options: STATUS_FILTER_OPTIONS },
+              ]}
               tableHead={
                 <>
                   <TableHeaderCell>Email</TableHeaderCell>
