@@ -353,6 +353,13 @@ export interface CreateCourseRequest {
   name: string;
   city?: string;
   country?: string;
+  // ghs#155: POST /courses already accepted this nested array (ghs#94's
+  // tee-configuration lookups needed it on the backend); the CSV import
+  // path is this request type's first real caller to actually populate
+  // it -- manual entry (CreateCoursePage's own form) still never does,
+  // by ghs#110's own design (tee configurations are added afterward, via
+  // CourseDetailPage).
+  teeConfigurations?: TeeConfigurationInput[];
 }
 
 // ghs#110. POST /courses already existed (ghs#94's tee-configuration

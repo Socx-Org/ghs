@@ -1,13 +1,14 @@
 import { useEffect } from "react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { Alert } from "../Alert";
 import { Button } from "../Button";
 import { FormField } from "../FormField";
 import { Input } from "../Input";
 import { Select } from "../Select";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "../Table";
+import { emptyHole, teeConfigurationSchema, toTeeConfigurationInput } from "../../lib/tee-configuration-schema";
+import type { TeeConfigurationFormInput, TeeConfigurationFormOutput } from "../../lib/tee-configuration-schema";
 import type { TeeConfiguration, TeeConfigurationInput } from "../../types/domain";
 
 // ghs#112: the one real tee-configuration create/edit form this app
@@ -18,49 +19,14 @@ import type { TeeConfiguration, TeeConfigurationInput } from "../../types/domain
 // (already quoted in this issue) -- there is deliberately no second
 // copy of this anywhere (ghs#110's create-course form has no tee-
 // configuration fields at all, by design -- see that issue's own PR).
-
-// Same NaN-from-empty-input coercion as HoleEntryCard's own preprocess
-// pattern (ghs#94) -- register(..., { valueAsNumber: true }) turns an
-// empty numeric input into NaN, not undefined, so z.number()'s own
-// base check must be preceded by this or every empty field fails with
-// zod's generic "expected number, received nan" instead of a real
-// message.
-function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isNaN(value) ? undefined : (value as number | undefined);
-}
-
-const holeSchema = z.object({
-  distanceYards: z.preprocess(numberOrUndefined, z.number({ error: "Enter a distance" }).min(1, "Enter a distance")),
-  par: z.preprocess(numberOrUndefined, z.number({ error: "Enter a par" }).min(3, "Par must be 3-6").max(6, "Par must be 3-6")),
-  strokeIndex: z.preprocess(
-    numberOrUndefined,
-    z.number({ error: "Enter a stroke index" }).min(1, "Stroke index must be 1-18").max(18, "Stroke index must be 1-18"),
-  ),
-});
-
-const teeConfigurationSchema = z.object({
-  name: z.string().trim().min(1, "Name is required"),
-  holeCount: z.enum(["9", "18"]),
-  courseRating: z.preprocess(numberOrUndefined, z.number({ error: "Enter a course rating" }).min(0.1, "Enter a course rating")),
-  slopeRating: z.preprocess(
-    numberOrUndefined,
-    z.number({ error: "Enter a slope rating" }).min(55, "Slope rating must be 55-155").max(155, "Slope rating must be 55-155"),
-  ),
-  holes: z.array(holeSchema),
-});
-
-// 3-generic useForm, same reasoning as HoleEntryCard's own equivalent
-// comment: z.preprocess makes the schema's input type (raw, pre-
-// coercion -- what register/defaultValues deal in) diverge from its
-// output type (fully numeric, what handleSubmit's callback receives
-// once zodResolver has actually run). A single TFieldValues generic
-// can't express both.
-type TeeConfigurationFormInput = z.input<typeof teeConfigurationSchema>;
-type TeeConfigurationFormOutput = z.output<typeof teeConfigurationSchema>;
-
-function emptyHole(): TeeConfigurationFormInput["holes"][number] {
-  return { distanceYards: undefined, par: undefined, strokeIndex: undefined };
-}
+//
+// ghs#155: the actual validation schema/conversion (teeConfigurationSchema,
+// toTeeConfigurationInput) now lives in lib/tee-configuration-schema.ts,
+// not here -- so the Create Course CSV importer (lib/course-csv.ts) can
+// validate a CSV-parsed tee configuration through the exact same rules a
+// manual entry goes through, without a component file needing to export a
+// plain schema/function alongside its component (which breaks Fast
+// Refresh).
 
 function toDefaultValues(initialValues: TeeConfiguration | undefined): TeeConfigurationFormInput {
   if (!initialValues) {
@@ -77,16 +43,6 @@ function toDefaultValues(initialValues: TeeConfiguration | undefined): TeeConfig
         ? { distanceYards: hole.distanceYards, par: hole.par, strokeIndex: hole.strokeIndex }
         : emptyHole();
     }),
-  };
-}
-
-function toInput(values: TeeConfigurationFormOutput): TeeConfigurationInput {
-  return {
-    name: values.name,
-    holeCount: Number(values.holeCount) as 9 | 18,
-    courseRating: values.courseRating,
-    slopeRating: values.slopeRating,
-    holes: values.holes.map((hole, index) => ({ holeNumber: index + 1, ...hole })),
   };
 }
 
@@ -135,7 +91,7 @@ export function TeeConfigurationForm({ initialValues, onSubmit, onCancel, submit
   }, [holeCount]);
 
   async function submit(values: TeeConfigurationFormOutput) {
-    await onSubmit(toInput(values));
+    await onSubmit(toTeeConfigurationInput(values));
   }
 
   const holesHaveErrors = Boolean(errors.holes);
