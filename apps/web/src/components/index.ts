@@ -37,3 +37,4 @@ export * from "./domain/RequireRole";
 export * from "./domain/HoleEntryCard";
 export * from "./domain/HolesTable";
 export * from "./domain/TeeConfigurationForm";
+export * from "./domain/CourseCsvImportForm";
