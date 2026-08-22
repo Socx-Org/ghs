@@ -281,3 +281,21 @@ test("reports checkError (never throws) when the migrations directory itself can
   assert.ok(report.checkError, "checkError must be set -- this is a failed check, not a clean 'nothing pending' result");
   assert.match(report.checkError, /could not read migrations directory/);
 });
+
+test("sets checkError (not 'every file pending') on a real query failure that isn't 'schema_migrations doesn't exist' -- review finding, PR #156", async () => {
+  // A real, unreachable Postgres target -- not a mock -- so the query
+  // fails with a genuine connection error (a Postgres error code other
+  // than 42P01, or no code at all), distinct from the "relation does
+  // not exist" case the other test above covers. Confirms the fix
+  // actually inspects the error rather than treating every query
+  // failure as "no ledger yet".
+  const brokenPool = new Pool({ host: "127.0.0.1", port: 1, database: "does-not-matter", connectionTimeoutMillis: 2000 });
+  try {
+    const report = await checkMigrationDrift(brokenPool);
+    assert.deepEqual(report.pendingFiles, [], "must not guess a pendingFiles list from an unrelated failure");
+    assert.ok(report.checkError, "a genuine connection failure must surface as checkError, not silently become 'all pending'");
+    assert.match(report.checkError, /could not query schema_migrations/);
+  } finally {
+    await brokenPool.end();
+  }
+});

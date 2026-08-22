@@ -137,6 +137,14 @@ export interface MigrationDriftReport {
 // since the manual step is expected to lag the automatic code deploy by
 // design.
 //
+// Postgres error code for "relation does not exist" -- the one specific,
+// expected failure mode (schema_migrations itself was never created)
+// that legitimately means "every file is pending", not "the check
+// failed". Same `err as { code?: string }` pattern already established
+// in auth.ts for distinguishing a real Postgres error code (review
+// finding, PR #156 -- see this function's own doc comment below).
+const UNDEFINED_TABLE = "42P01";
+
 // Never throws or rejects: both the directory read and the query are
 // each in their own try/catch (review finding, PR #156 -- the directory
 // read originally sat outside any catch, so an unreadable
@@ -144,11 +152,17 @@ export interface MigrationDriftReport {
 // function's own "never throws" contract, silently depending on every
 // caller remembering its own outer catch). An unreadable directory
 // degrades to checkError set (a real "couldn't check" signal, never
-// silently reported as "all clear"); an unexpected query failure
-// degrades to "treat every file as pending" (most likely cause:
-// schema_migrations doesn't exist yet, a database that's never had
-// migrate.ts run against it at all) -- the worst case there is a false
-// "pending" warning, never a false "all clear" that hides real drift.
+// silently reported as "all clear").
+//
+// The query catch distinguishes its one truly expected failure --
+// schema_migrations doesn't exist yet (a database that's never had
+// migrate.ts run against it at all), Postgres code 42P01 -- from every
+// other failure (review finding, PR #156: a DB connectivity/auth error
+// was originally indistinguishable from "no ledger yet", so a real
+// outage could log a misleading "pending migrations" warning instead of
+// "couldn't check", silently dropping the actual error). Only 42P01
+// degrades to "every file is pending"; anything else sets checkError
+// with the real reason, same as the directory-read failure above.
 export async function checkMigrationDrift(
   pool: Pool,
   migrationsDir: string = DEFAULT_MIGRATIONS_DIR,
@@ -165,8 +179,13 @@ export async function checkMigrationDrift(
     const { rows } = await pool.query<{ filename: string }>("SELECT filename FROM schema_migrations");
     const applied = new Set(rows.map((row) => row.filename));
     return { pendingFiles: files.filter((f) => !applied.has(f)) };
-  } catch {
-    return { pendingFiles: files };
+  } catch (err) {
+    const pgErr = err as { code?: string };
+    if (pgErr.code === UNDEFINED_TABLE) {
+      return { pendingFiles: files };
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return { pendingFiles: [], checkError: `could not query schema_migrations: ${message}` };
   }
 }
 
