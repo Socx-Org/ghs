@@ -160,4 +160,25 @@ describe("parseCourseCsv", () => {
     ].join("\n");
     expect(() => parseCourseCsv(noConfigId)).toThrow(/configuration_id/);
   });
+
+  // Review finding, PR #158: hole_count=9 with 18 hole rows present had
+  // no duplicates and no gap in 1-9, so it previously passed straight
+  // through with 18 holes in a supposedly-9-hole configuration.
+  it("skips a tee configuration whose hole_number is out of range for its declared hole_count, rather than silently accepting extra holes", () => {
+    const rows = ["course_id,course_name,course_city,course_country,configuration_id,configuration_name,tee_colour,hole_count,course_rating,slope_rating,hole_number,distance_yards,par,stroke_index"];
+    for (let hole = 1; hole <= 18; hole++) {
+      rows.push(`c1,Acme,City,US,cfg1,Blue,Blue,9,68.0,120,${hole},300,4,1`);
+    }
+    const result = parseCourseCsv(rows.join("\n"));
+    expect(result.teeConfigurations[0]!.valid).toBe(false);
+    expect(result.teeConfigurations[0]!.reason).toMatch(/invalid hole number '10' \(must be an integer from 1 to 9\)/);
+  });
+
+  it("uppercases course_country, matching the manual form's own submit-time normalisation", () => {
+    const lowercaseCountry = [
+      "course_id,course_name,course_city,course_country,configuration_id,configuration_name,tee_colour,hole_count,course_rating,slope_rating,hole_number,distance_yards,par,stroke_index",
+      "c1,Acme,City,us,cfg1,Blue,Blue,9,68.0,120,1,300,4,1",
+    ].join("\n");
+    expect(parseCourseCsv(lowercaseCountry).country).toBe("US");
+  });
 });

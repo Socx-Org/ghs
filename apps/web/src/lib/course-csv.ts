@@ -93,6 +93,7 @@ function combineName(configurationName: string, teeColour: string | undefined): 
 }
 
 interface HoleRow {
+  holeNumberRaw: string;
   holeNumber: number;
   distanceYards: number | undefined;
   par: number | undefined;
@@ -104,22 +105,42 @@ function parseTeeConfigurationGroup(configurationId: string, rows: RawRow[]): Pa
   const name = combineName((first.configuration_name ?? "").trim(), first.tee_colour?.trim());
   const holeCountRaw = (first.hole_count ?? "").trim();
 
-  const holeRows: HoleRow[] = rows.map((row) => ({
-    holeNumber: Number((row.hole_number ?? "").trim()),
-    distanceYards: csvNumberOrUndefined(row.distance_yards),
-    par: csvNumberOrUndefined(row.par),
-    strokeIndex: csvNumberOrUndefined(row.stroke_index),
-  }));
+  const holeRows: HoleRow[] = rows.map((row) => {
+    const holeNumberRaw = (row.hole_number ?? "").trim();
+    return {
+      holeNumberRaw,
+      holeNumber: Number(holeNumberRaw),
+      distanceYards: csvNumberOrUndefined(row.distance_yards),
+      par: csvNumberOrUndefined(row.par),
+      strokeIndex: csvNumberOrUndefined(row.stroke_index),
+    };
+  });
 
   // Hole-count/hole-number completeness is checked before handing off to
   // teeConfigurationSchema -- that schema (shared with manual entry, which
-  // can never produce a gap or duplicate via its own UI) has no length/
-  // completeness check of its own, so a malformed CSV needs its own,
-  // clearer message here instead of a confusing per-index zod error.
+  // can never produce a gap, duplicate, or out-of-range hole via its own
+  // UI) has no length/completeness check of its own, so a malformed CSV
+  // needs its own, clearer message here instead of a confusing per-index
+  // zod error, or worse, silently passing through (review finding, PR
+  // #158: hole_count=9 with holes 1-18 present had no duplicates and no
+  // gap in 1-9, so it previously passed straight through with 18 holes
+  // in a supposedly-9-hole configuration). Every hole_number is now
+  // checked against the valid 1..expectedCount range, not just checked
+  // for internal duplicates/gaps -- out-of-range values (too many holes,
+  // or a stray non-numeric value) are caught here, in range-check order,
+  // before duplicates/gaps are even considered.
   const expectedCount = holeCountRaw === "9" ? 9 : holeCountRaw === "18" ? 18 : undefined;
   if (expectedCount !== undefined) {
     const seen = new Set<number>();
     for (const hole of holeRows) {
+      if (!Number.isInteger(hole.holeNumber) || hole.holeNumber < 1 || hole.holeNumber > expectedCount) {
+        return {
+          configurationId,
+          name,
+          valid: false,
+          reason: `invalid hole number '${hole.holeNumberRaw}' (must be an integer from 1 to ${expectedCount})`,
+        };
+      }
       if (seen.has(hole.holeNumber)) {
         return { configurationId, name, valid: false, reason: `duplicate hole number ${hole.holeNumber}` };
       }
@@ -201,7 +222,12 @@ export function parseCourseCsv(csvText: string): ParsedCourseCsv {
   return {
     name: courseName,
     city: rows[0]!.course_city?.trim() || undefined,
-    country: rows[0]!.course_country?.trim() || undefined,
+    // Uppercased to match the manual form's own submit-time normalisation
+    // (CreateCoursePage's values.country.toUpperCase()) -- both entry
+    // modes must send the backend the same shape for the same input, not
+    // let a lowercase CSV value ("us") slip through only through this
+    // path (review finding, PR #158).
+    country: rows[0]!.course_country?.trim().toUpperCase() || undefined,
     teeConfigurations,
   };
 }
