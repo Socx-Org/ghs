@@ -7,6 +7,14 @@
 // a bug to fix, not an intentional frontend-only variation.
 export type RoundStatus = "draft" | "pending" | "approved" | "rejected" | "amending";
 
+// ghs#147: a single shared source for "which statuses can still be
+// edited" -- previously redefined independently as EDITABLE_STATUSES
+// (RoundEntryPage) and RESUMABLE_STATUSES (PlayerDashboardPage), both
+// identical; a third copy for MyRoundsPage's own Edit/Delete-button
+// gating was the point this stopped being a coincidence worth
+// tolerating. Mirrors rounds.service.ts's own isEditableStatus exactly.
+export const EDITABLE_ROUND_STATUSES = new Set<RoundStatus>(["draft", "rejected", "amending"]);
+
 export type UserRole = "player" | "admin" | "super_admin";
 
 export type UserStatus = "pending_verification" | "active" | "disabled" | "deleted";
@@ -60,12 +68,19 @@ export interface PlayerProfile {
   lowHandicapIndex: number | null;
 }
 
-// Mirrors apps/api/src/data/rounds.repository.ts's RoundSummary
-// (toRoundSummary) -- the shape GET /players/:playerId/rounds returns.
-export interface RoundSummary {
+// Mirrors apps/api/src/data/rounds.repository.ts's PlayerRoundListItem
+// exactly (ghs#147) -- the shape GET /players/:playerId/rounds returns,
+// enriched with course/tee names (same reasoning as AdminRoundListItem
+// below) for the "My Rounds" list to render without a per-row fetch.
+// Was RoundSummary (id/playerId/teeConfigurationId/playedAt/status
+// only) before ghs#147 enriched the backend query.
+export interface PlayerRoundListItem {
   id: string;
   playerId: string;
+  courseId: string;
+  courseName: string;
   teeConfigurationId: string;
+  teeConfigurationName: string;
   playedAt: string;
   status: RoundStatus;
 }
@@ -121,7 +136,8 @@ export interface HoleScore {
 
 // Mirrors apps/api/src/data/rounds.repository.ts's Round -- the full
 // shape GET /rounds/:id and POST /rounds return, including holeScores
-// (unlike RoundSummary above). grossScore/adjustedGrossScore/
+// (unlike PlayerRoundListItem above, a lighter list-row projection).
+// grossScore/adjustedGrossScore/
 // scoreDifferential/pcc/total* all stay null until admin approval
 // (ScoringService.recomputeRoundAggregates only runs then) -- the
 // frontend must never treat a null grossScore during entry as "zero,"

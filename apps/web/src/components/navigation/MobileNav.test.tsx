@@ -65,6 +65,7 @@ describe("MobileNav", () => {
     renderMobileNav();
     expect(screen.getByRole("link", { name: /Dashboard/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /New Round/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /My Rounds/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^Courses$/ })).toBeInTheDocument();
   });
 
@@ -93,6 +94,15 @@ describe("MobileNav", () => {
     cleanup();
     renderMobileNav({ role: "player" });
     expect(screen.queryByRole("link", { name: /All Rounds/ })).not.toBeInTheDocument();
+  });
+
+  it("shows My Rounds for a player, not for admin (ghs#147)", () => {
+    renderMobileNav({ role: "player" });
+    expect(screen.getByRole("link", { name: /My Rounds/ })).toBeInTheDocument();
+
+    cleanup();
+    renderMobileNav({ role: "admin" });
+    expect(screen.queryByRole("link", { name: /My Rounds/ })).not.toBeInTheDocument();
   });
 
   it("closes on selecting a nav item", async () => {

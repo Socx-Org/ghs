@@ -365,12 +365,33 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
     }
   });
 
-  router.delete("/rounds/:id", ...requireAdmin, async (req, res, next) => {
+  // ghs#147: no longer admin-only -- a player may now delete their own
+  // round too (the service layer enforces the editable-status
+  // restriction that applies only to a player caller; admin/super_admin
+  // keep the pre-existing unrestricted-status behaviour). Ownership
+  // checked here, same pattern as every other player-facing round route
+  // above, not a new authorization concept.
+  router.delete("/rounds/:id", auth, async (req, res, next) => {
     try {
-      res.status(200).json(await service.deleteRound(String(req.params.id)));
+      const roundId = String(req.params.id);
+      const round = await service.getRound(roundId);
+      if (!round) {
+        res.status(404).json({ error: "round not found" });
+        return;
+      }
+      const identity = req.identity!;
+      if (!(await authorizeForPlayer(identity.sub, identity.ghsRole, round.playerId))) {
+        res.status(403).json({ error: "cannot delete another player's round" });
+        return;
+      }
+      res.status(200).json(await service.deleteRound(roundId, identity.ghsRole as "player" | "admin" | "super_admin"));
     } catch (err) {
       if (err instanceof RoundNotFoundError) {
         res.status(404).json({ error: err.message });
+        return;
+      }
+      if (err instanceof InvalidRoundTransitionError) {
+        res.status(409).json({ error: err.message });
         return;
       }
       next(err);

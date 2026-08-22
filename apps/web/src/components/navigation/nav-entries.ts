@@ -1,4 +1,4 @@
-import { ClipboardCheck, Flag, History, LandPlot, LayoutDashboard, ShieldCheck, Users } from "lucide-react";
+import { ClipboardCheck, Flag, History, LandPlot, LayoutDashboard, ListOrdered, ShieldCheck, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { cn } from "../../lib/cn";
@@ -26,6 +26,10 @@ export function useNavEntries(): NavEntry[] {
   entries.push({ to: "/courses", label: "Courses", icon: LandPlot });
   if (user?.role === "player") {
     entries.push({ to: "/rounds/new", label: "New Round", icon: Flag });
+    // ghs#147: "My Rounds" -- a real, browsable list of every round the
+    // player has played, distinct from the dashboard's own narrow
+    // "Recent rounds" widget.
+    entries.push({ to: "/rounds", label: "My Rounds", icon: ListOrdered });
   }
   if (user?.role === "admin" || user?.role === "super_admin") {
     entries.push({ to: "/admin/users", label: "Accounts", icon: Users });

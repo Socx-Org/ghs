@@ -14,12 +14,14 @@ import CreateCoursePage from "./pages/CreateCoursePage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import LoginPage from "./pages/LoginPage";
+import MyRoundsPage from "./pages/MyRoundsPage";
 import NewRoundPage from "./pages/NewRoundPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import PlayerDashboardPage from "./pages/PlayerDashboardPage";
 import ProfilePage from "./pages/ProfilePage";
 import RegisterPage from "./pages/RegisterPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import RoundDetailsPage from "./pages/RoundDetailsPage";
 import RoundEntryPage from "./pages/RoundEntryPage";
 import { RedirectIfAuthenticated } from "./routes/RedirectIfAuthenticated";
 import { RequireAdmin } from "./routes/RequireAdmin";
@@ -91,8 +93,16 @@ export default function AppRoutes() {
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/courses" element={<CourseListPage />} />
           <Route path="/courses/:id" element={<CourseDetailPage />} />
+          {/* ghs#147: "My Rounds" -- a player-facing round list,
+              distinct from /admin/rounds (#113). "/rounds/new" and
+              "/rounds/:id" keep their existing, already-shipped
+              meaning (create and edit/resume respectively) -- the new
+              read-only detail view gets its own, non-colliding path
+              rather than repurposing either. */}
+          <Route path="/rounds" element={<MyRoundsPage />} />
           <Route path="/rounds/new" element={<NewRoundPage />} />
           <Route path="/rounds/:id" element={<RoundEntryPage />} />
+          <Route path="/rounds/:id/details" element={<RoundDetailsPage />} />
           <Route element={<RequireAdmin />}>
             <Route path="/admin/users" element={<AdminAccountsPage />} />
             <Route path="/admin/users/new" element={<AdminCreateUserPage />} />

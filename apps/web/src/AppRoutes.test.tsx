@@ -264,4 +264,30 @@ describe("AppRoutes", () => {
     // resolve -- a deterministic marker that RoundEntryPage rendered.
     expect(screen.getByRole("button", { name: "← Back" })).toBeInTheDocument();
   });
+
+  it("redirects /rounds to /login when unauthenticated (ghs#147)", () => {
+    renderAt("/rounds");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("renders My Rounds at /rounds for an authenticated player, not confused with /rounds/new (ghs#147)", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/rounds");
+    expect(screen.getByRole("heading", { name: "My Rounds" })).toBeInTheDocument();
+  });
+
+  it("redirects /rounds/:id/details to /login when unauthenticated (ghs#147)", () => {
+    renderAt("/rounds/some-round-id/details");
+    expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeInTheDocument();
+  });
+
+  it("renders RoundDetailsPage at /rounds/:id/details for an authenticated player, distinct from /rounds/:id (ghs#147)", () => {
+    setTokens(AUTHENTICATED_TOKENS);
+    renderAt("/rounds/some-round-id/details");
+    // "← Back to My Rounds" is static JSX, rendered regardless of how
+    // the (unmocked, in this routing-focused file) round query
+    // resolves -- a deterministic marker that RoundDetailsPage
+    // rendered, not RoundEntryPage (which renders "← Back" instead).
+    expect(screen.getByRole("button", { name: "← Back to My Rounds" })).toBeInTheDocument();
+  });
 });

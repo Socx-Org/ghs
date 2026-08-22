@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Card, CardBody, CardHeader, HoleEntryCard, RoundStatusBadge, Skeleton, Stat, useToast } from "../components";
 import { ApiError, getRound, getTeeConfiguration, submitRound } from "../lib/api";
+import { EDITABLE_ROUND_STATUSES } from "../types/domain";
 import type { Round, TeeConfiguration } from "../types/domain";
 
 // ghs#94: the hole-by-hole entry (and resume-in-progress) screen.
@@ -10,9 +11,9 @@ import type { Round, TeeConfiguration } from "../types/domain";
 // submitted round's result is a later epic item, not this one.
 //
 // ghs#68: edit/resubmit for a rejected/amending round already worked
-// via EDITABLE_STATUSES below -- the real gap this issue closes is
-// that a rejected round's rejectionReason was never actually shown to
-// the player anywhere (confirmed by direct code inspection: it went
+// via EDITABLE_ROUND_STATUSES below -- the real gap this issue closes
+// is that a rejected round's rejectionReason was never actually shown
+// to the player anywhere (confirmed by direct code inspection: it went
 // straight into the same generic entry form a draft round does, with
 // no visible indication it had been rejected at all, let alone why).
 // 'amending' has no equivalent reason to show -- confirmed directly in
@@ -22,8 +23,6 @@ import type { Round, TeeConfiguration } from "../types/domain";
 function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
-
-const EDITABLE_STATUSES = new Set(["draft", "rejected", "amending"]);
 
 function AlreadySubmitted({ round, onBack }: { round: Round; onBack: () => void }) {
   return (
@@ -186,7 +185,7 @@ export default function RoundEntryPage() {
         // `teeConfiguration` to defined below (caught by `tsc -b`,
         // stricter than this app's --noEmit typecheck).
         null
-      ) : !EDITABLE_STATUSES.has(round.status) ? (
+      ) : !EDITABLE_ROUND_STATUSES.has(round.status) ? (
         <AlreadySubmitted round={round} onBack={() => navigate("/")} />
       ) : (
         <HoleEntryForm
