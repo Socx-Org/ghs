@@ -64,7 +64,6 @@ describe("MobileNav", () => {
   it("shows the nav entries when open", () => {
     renderMobileNav();
     expect(screen.getByRole("link", { name: /Dashboard/ })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /New Round/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /My Rounds/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /^Courses$/ })).toBeInTheDocument();
   });
@@ -108,7 +107,7 @@ describe("MobileNav", () => {
   it("closes on selecting a nav item", async () => {
     const onClose = vi.fn();
     renderMobileNav({ onClose });
-    await userEvent.click(screen.getByRole("link", { name: /New Round/ }));
+    await userEvent.click(screen.getByRole("link", { name: /My Rounds/ }));
     expect(onClose).toHaveBeenCalled();
   });
 

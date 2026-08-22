@@ -39,21 +39,6 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /Dashboard/ })).toBeInTheDocument();
   });
 
-  it("shows New Round only for a player", () => {
-    setTokens(tokensFor("player"));
-    renderSidebar();
-    expect(screen.getByRole("link", { name: /New Round/ })).toBeInTheDocument();
-
-    // Review finding, PR #150: dropping the "Create Account" nav item
-    // removed this test's own negative case (admin does NOT see New
-    // Round) along with it -- restored here, independent of Create
-    // Account, which no longer exists as its own concern.
-    cleanup();
-    setTokens(tokensFor("admin"));
-    renderSidebar();
-    expect(screen.queryByRole("link", { name: /New Round/ })).not.toBeInTheDocument();
-  });
-
   it("shows My Rounds only for a player (ghs#147)", () => {
     setTokens(tokensFor("player"));
     renderSidebar();
@@ -111,14 +96,14 @@ describe("Sidebar", () => {
 
   it("marks the current route's link as active", () => {
     setTokens(tokensFor("player"));
-    renderSidebar("/rounds/new");
-    expect(screen.getByRole("link", { name: /New Round/ })).toHaveAttribute("aria-current", "page");
+    renderSidebar("/rounds");
+    expect(screen.getByRole("link", { name: /My Rounds/ })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: /Dashboard/ })).not.toHaveAttribute("aria-current");
   });
 
   it("marks Dashboard active only for an exact match, not every route (end prop)", () => {
     setTokens(tokensFor("player"));
-    renderSidebar("/rounds/new");
+    renderSidebar("/rounds");
     expect(screen.getByRole("link", { name: /Dashboard/ })).not.toHaveAttribute("aria-current", "page");
   });
 

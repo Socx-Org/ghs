@@ -1,4 +1,4 @@
-import { ClipboardCheck, Flag, History, LandPlot, LayoutDashboard, ListOrdered, Users } from "lucide-react";
+import { ClipboardCheck, History, LandPlot, LayoutDashboard, ListOrdered, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { cn } from "../../lib/cn";
@@ -24,7 +24,11 @@ export function useNavEntries(): NavEntry[] {
   // authenticated role gets this entry, unlike Accounts below.
   entries.push({ to: "/courses", label: "Courses", icon: LandPlot });
   if (user?.role === "player") {
-    entries.push({ to: "/rounds/new", label: "New Round", icon: Flag });
+    // ghs#146: "New Round" (/rounds/new) was removed as its own nav
+    // entry -- PlayerDashboardPage already has its own "New round"
+    // button to the same route, so the standalone top-level entry was
+    // redundant. The route itself is unchanged.
+    //
     // ghs#147: "My Rounds" -- a real, browsable list of every round the
     // player has played, distinct from the dashboard's own narrow
     // "Recent rounds" widget.
