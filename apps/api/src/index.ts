@@ -1,6 +1,7 @@
 import { loadConfig } from "./config.ts";
 import { createLogger } from "./logger.ts";
 import { createPool } from "./data/pool.ts";
+import { checkMigrationDrift } from "./data/migrations/apply.ts";
 import { createClubsRepository } from "./data/clubs.repository.ts";
 import { createCoursesRepository } from "./data/courses.repository.ts";
 import { createUsersRepository } from "./data/users.repository.ts";
@@ -96,6 +97,27 @@ const app = createApp({
 const server = app.listen(config.port, () => {
   logger.info("server started", { port: config.port, env: config.env });
 });
+
+// ghs#154: never awaited before listen -- a diagnostic, not a startup
+// dependency (see checkMigrationDrift's own doc comment for why this
+// must never gate startup or the deploy health check). The outer catch
+// is a second safety net on top of the function's own internal one, for
+// anything that could throw before its try block even runs (e.g.
+// readdirSync itself failing against an unexpected packaged-build
+// layout) -- this must never be able to crash the process.
+void checkMigrationDrift(pool)
+  .then((report) => {
+    if (report.pendingFiles.length > 0) {
+      logger.warn("pending database migrations detected -- schema may not match running code", {
+        pendingFiles: report.pendingFiles,
+      });
+    } else {
+      logger.info("database schema up to date with migrations on disk");
+    }
+  })
+  .catch((err) => {
+    logger.warn("could not check migration drift", { error: err instanceof Error ? err.message : String(err) });
+  });
 
 async function shutdown(signal: string): Promise<void> {
   logger.info("shutting down", { signal });

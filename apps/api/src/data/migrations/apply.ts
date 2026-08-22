@@ -108,6 +108,49 @@ async function applyAndRecord(client: PoolClient, filename: string, sql: string,
 // disk during a test run. Same "optional override, defaults to real
 // production behaviour" shape already established for
 // AppDeps.rateLimitOverrides (ghs#49).
+export interface MigrationDriftReport {
+  pendingFiles: string[];
+}
+
+// ghs#154: a read-only diagnostic, never DDL -- reports migration files
+// present on disk that schema_migrations has no record of applying yet.
+// migrate.ts's own doc comment already establishes that migrations are
+// deliberately manual, not folded into the automatic deploy path
+// (deploy-release.sh only extracts the release and restarts services);
+// that gap between "new code is live" and "someone ran `npm run
+// migrate`" is expected, by design, not a bug to close here. What WAS a
+// real gap: that drift was completely invisible until a request
+// happened to hit a code path depending on the missing column/table,
+// surfacing only as an unexplained 500 (ghs#154's own root cause --
+// migration 012 added tee_configurations.deleted_at, GET /courses/:id
+// depends on it, and production hadn't had the manual step run yet).
+// This makes the same drift visible in every boot's own logs instead,
+// without ever gating startup or the deploy health check on it -- doing
+// that would break every legitimate deploy that ships a new migration,
+// since the manual step is expected to lag the automatic code deploy by
+// design.
+//
+// Never throws: an unreadable migrations directory or an unexpected
+// query failure degrades to "treat every file as pending" rather than
+// crashing a diagnostic-only check -- the worst case is a false
+// "pending" warning, never a false "all clear" that hides real drift.
+export async function checkMigrationDrift(
+  pool: Pool,
+  migrationsDir: string = DEFAULT_MIGRATIONS_DIR,
+): Promise<MigrationDriftReport> {
+  const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
+  try {
+    const { rows } = await pool.query<{ filename: string }>("SELECT filename FROM schema_migrations");
+    const applied = new Set(rows.map((row) => row.filename));
+    return { pendingFiles: files.filter((f) => !applied.has(f)) };
+  } catch {
+    // Most likely cause: schema_migrations itself doesn't exist yet (a
+    // database that has never had migrate.ts run against it at all) --
+    // every file is pending, not just the newest one.
+    return { pendingFiles: files };
+  }
+}
+
 export async function applyMigrations(pool: Pool, migrationsDir: string = DEFAULT_MIGRATIONS_DIR): Promise<void> {
   const client = await pool.connect();
   try {
