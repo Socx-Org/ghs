@@ -43,6 +43,15 @@ describe("Sidebar", () => {
     setTokens(tokensFor("player"));
     renderSidebar();
     expect(screen.getByRole("link", { name: /New Round/ })).toBeInTheDocument();
+
+    // Review finding, PR #150: dropping the "Create Account" nav item
+    // removed this test's own negative case (admin does NOT see New
+    // Round) along with it -- restored here, independent of Create
+    // Account, which no longer exists as its own concern.
+    cleanup();
+    setTokens(tokensFor("admin"));
+    renderSidebar();
+    expect(screen.queryByRole("link", { name: /New Round/ })).not.toBeInTheDocument();
   });
 
   it("shows My Rounds only for a player (ghs#147)", () => {
