@@ -43,14 +43,6 @@ describe("Sidebar", () => {
     setTokens(tokensFor("player"));
     renderSidebar();
     expect(screen.getByRole("link", { name: /New Round/ })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Create Account/ })).not.toBeInTheDocument();
-  });
-
-  it("shows Create Account only for admin/super_admin, not New Round", () => {
-    setTokens(tokensFor("admin"));
-    renderSidebar();
-    expect(screen.getByRole("link", { name: /Create Account/ })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /New Round/ })).not.toBeInTheDocument();
   });
 
   it("shows My Rounds only for a player (ghs#147)", () => {

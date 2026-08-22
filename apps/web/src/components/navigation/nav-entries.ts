@@ -1,4 +1,4 @@
-import { ClipboardCheck, Flag, History, LandPlot, LayoutDashboard, ListOrdered, ShieldCheck, Users } from "lucide-react";
+import { ClipboardCheck, Flag, History, LandPlot, LayoutDashboard, ListOrdered, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { cn } from "../../lib/cn";
@@ -21,8 +21,7 @@ export function useNavEntries(): NavEntry[] {
   const entries: NavEntry[] = [{ to: "/", label: "Dashboard", icon: LayoutDashboard }];
   // ghs#109: GET /courses has no role restriction on the backend, and
   // this issue's own scope says the same on the frontend -- every
-  // authenticated role gets this entry, unlike Accounts/Create Account
-  // below.
+  // authenticated role gets this entry, unlike Accounts below.
   entries.push({ to: "/courses", label: "Courses", icon: LandPlot });
   if (user?.role === "player") {
     entries.push({ to: "/rounds/new", label: "New Round", icon: Flag });
@@ -32,8 +31,11 @@ export function useNavEntries(): NavEntry[] {
     entries.push({ to: "/rounds", label: "My Rounds", icon: ListOrdered });
   }
   if (user?.role === "admin" || user?.role === "super_admin") {
+    // ghs#142: "Create Account" (/admin/users/new) was removed as its
+    // own nav entry -- AdminAccountsPage already has its own "Create
+    // account" button to the same route, so the standalone top-level
+    // entry was redundant. The route itself is unchanged.
     entries.push({ to: "/admin/users", label: "Accounts", icon: Users });
-    entries.push({ to: "/admin/users/new", label: "Create Account", icon: ShieldCheck });
     // ghs#67
     entries.push({ to: "/admin/rounds/pending", label: "Pending Rounds", icon: ClipboardCheck });
     // ghs#113: a separate entry from Pending Rounds above -- this one
