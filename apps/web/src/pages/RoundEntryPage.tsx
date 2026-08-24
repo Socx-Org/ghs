@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Card, CardBody, CardHeader, HoleEntryCard, RoundStatusBadge, Skeleton, Stat, useToast } from "../components";
+import { Alert, Button, Card, CardBody, CardHeader, HoleEntryCard, RoundHoleCsvImportForm, RoundStatusBadge, Skeleton, Stat, ToggleGroup, useToast } from "../components";
 import { ApiError, getRound, getTeeConfiguration, submitRound } from "../lib/api";
 import { EDITABLE_ROUND_STATUSES } from "../types/domain";
 import type { Round, TeeConfiguration } from "../types/domain";
@@ -57,6 +57,11 @@ function HoleEntryForm({
   const recordedCount = round.holeScores.length;
   const runningGross = round.holeScores.reduce((sum, hole) => sum + hole.strokes, 0);
   const canSubmit = recordedCount >= requiredCount;
+  // ghs#160: available whenever manual entry is, not gated on zero holes
+  // recorded yet -- a CSV can bulk-fill some holes and leave the rest for
+  // manual entry, or re-import a corrected file, exactly like re-editing
+  // a single already-saved HoleEntryCard already works.
+  const [mode, setMode] = useState<"manual" | "csv">("manual");
 
   return (
     <>
@@ -80,19 +85,38 @@ function HoleEntryForm({
         </Alert>
       )}
 
-      <div className="flex flex-col gap-3">
-        {teeConfiguration.holes.map((hole) => (
-          <HoleEntryCard
-            key={hole.id}
-            roundId={round.id}
-            holeNumber={hole.holeNumber}
-            par={hole.par}
-            strokeIndex={hole.strokeIndex}
-            existingScore={round.holeScores.find((score) => score.holeNumber === hole.holeNumber)}
-            disabled={false}
-          />
-        ))}
-      </div>
+      <fieldset className="flex items-center gap-2 border-0 p-0">
+        <legend className="text-sm text-text-muted">How do you want to enter hole scores?</legend>
+        <ToggleGroup
+          name="round-entry-mode"
+          value={mode}
+          onChange={(next) => {
+            if (next === "manual" || next === "csv") setMode(next);
+          }}
+          options={[
+            { value: "manual", label: "Enter manually" },
+            { value: "csv", label: "Load from CSV" },
+          ]}
+        />
+      </fieldset>
+
+      {mode === "manual" ? (
+        <div className="flex flex-col gap-3">
+          {teeConfiguration.holes.map((hole) => (
+            <HoleEntryCard
+              key={hole.id}
+              roundId={round.id}
+              holeNumber={hole.holeNumber}
+              par={hole.par}
+              strokeIndex={hole.strokeIndex}
+              existingScore={round.holeScores.find((score) => score.holeNumber === hole.holeNumber)}
+              disabled={false}
+            />
+          ))}
+        </div>
+      ) : (
+        <RoundHoleCsvImportForm roundId={round.id} holeCount={teeConfiguration.holes.length} />
+      )}
 
       <Card>
         <CardBody className="flex flex-col gap-3">
