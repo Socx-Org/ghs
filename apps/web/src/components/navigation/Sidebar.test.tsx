@@ -83,6 +83,17 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /All Rounds/ })).toBeInTheDocument();
   });
 
+  it("shows Settings only for admin/super_admin (ghs#157)", () => {
+    setTokens(tokensFor("player"));
+    renderSidebar();
+    expect(screen.queryByRole("link", { name: /Settings/ })).not.toBeInTheDocument();
+
+    cleanup();
+    setTokens(tokensFor("admin"));
+    renderSidebar();
+    expect(screen.getByRole("link", { name: /Settings/ })).toBeInTheDocument();
+  });
+
   it("shows Courses for every role, ghs#109 -- no role restriction on viewing", () => {
     setTokens(tokensFor("player"));
     renderSidebar();

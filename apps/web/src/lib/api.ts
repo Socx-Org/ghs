@@ -513,6 +513,48 @@ export async function listAdminRounds(): Promise<ListAdminRoundsResult> {
   return data;
 }
 
+// ghs#157: admin/super_admin-gated system settings. Mirrors
+// apps/api/src/interface/http/routes/admin-settings.ts's own response
+// shape exactly -- GET /admin/settings already returns all three
+// together, so one AdminSettings type covers the whole screen's initial
+// fetch. notify_poll_interval_seconds has no HTTP route at all yet
+// (explicit non-scope, this issue's own text) -- not included here.
+export interface AdminSettings {
+  maintenanceMode: boolean;
+  selfRegistrationEnabled: boolean;
+  notifications: NotificationSettings;
+}
+
+export interface NotificationSettings {
+  roundSubmitted: boolean;
+  roundApproved: boolean;
+  maintenanceAlerts: boolean;
+}
+
+export async function getAdminSettings(): Promise<AdminSettings> {
+  const { data } = await api.get<AdminSettings>("/admin/settings");
+  return data;
+}
+
+export async function setMaintenanceMode(value: boolean): Promise<void> {
+  await api.put("/admin/settings/maintenance-mode", { value });
+}
+
+export async function setSelfRegistrationEnabled(value: boolean): Promise<void> {
+  await api.put("/admin/settings/self-registration-enabled", { value });
+}
+
+// Matches admin-settings.ts's own NOTIFICATION_KEYS route params exactly
+// (kebab-case in the URL; the response body's own key is camelCase and
+// varies by type, e.g. { roundSubmitted: true } -- not parsed here, same
+// "void, caller refetches for fresh state" convention as setUserStatus
+// above, rather than threading a dynamically-keyed response through).
+export type NotificationSettingType = "round-submitted" | "round-approved" | "maintenance-alerts";
+
+export async function setNotificationSetting(type: NotificationSettingType, value: boolean): Promise<void> {
+  await api.put(`/admin/settings/notifications/${type}`, { value });
+}
+
 // Always clears local state, regardless of whether the network call
 // itself succeeds -- matches the backend's own logout route, which is
 // deliberately idempotent and always returns 200 (verified directly,

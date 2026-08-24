@@ -8,6 +8,7 @@ import AdminCreateUserPage from "./pages/AdminCreateUserPage";
 import AdminPendingQueuePage from "./pages/AdminPendingQueuePage";
 import AdminRoundReviewPage from "./pages/AdminRoundReviewPage";
 import AdminRoundsListPage from "./pages/AdminRoundsListPage";
+import AdminSettingsPage from "./pages/AdminSettingsPage";
 import CourseDetailPage from "./pages/CourseDetailPage";
 import CourseListPage from "./pages/CourseListPage";
 import CreateCoursePage from "./pages/CreateCoursePage";
@@ -126,6 +127,10 @@ export default function AppRoutes() {
                 "/admin/rounds" match is a distinct route entirely. */}
             <Route path="/admin/rounds" element={<AdminRoundsListPage />} />
             <Route path="/admin/rounds/:id" element={<AdminRoundReviewPage />} />
+            {/* ghs#157: system settings -- admin-only, matching every
+                PUT/GET under admin-settings.ts being requireRole("admin",
+                "super_admin")-gated server-side too. */}
+            <Route path="/admin/settings" element={<AdminSettingsPage />} />
           </Route>
         </Route>
       </Route>

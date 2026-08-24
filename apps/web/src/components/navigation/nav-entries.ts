@@ -1,4 +1,4 @@
-import { ClipboardCheck, History, LandPlot, LayoutDashboard, ListOrdered, Users } from "lucide-react";
+import { ClipboardCheck, History, LandPlot, LayoutDashboard, ListOrdered, Settings, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { cn } from "../../lib/cn";
@@ -45,6 +45,9 @@ export function useNavEntries(): NavEntry[] {
     // ghs#113: a separate entry from Pending Rounds above -- this one
     // spans every status, not just the review queue.
     entries.push({ to: "/admin/rounds", label: "All Rounds", icon: History });
+    // ghs#157: system settings -- maintenance mode, self-registration,
+    // notification toggles.
+    entries.push({ to: "/admin/settings", label: "Settings", icon: Settings });
   }
   return entries;
 }
