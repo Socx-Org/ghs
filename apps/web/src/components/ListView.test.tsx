@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -62,11 +63,16 @@ describe("ListView", () => {
   // class of source-file corruption recurring, not just the pagination
   // behaviour it happened to be sitting in.
   it("ListView.tsx's own source contains no literal NUL bytes", () => {
-    // A plain path relative to the package root (vitest's own cwd when
-    // run via `npm test`), not import.meta.url -- under this project's
-    // jsdom test environment that isn't a real file:// URL, so
-    // fileURLToPath/readFileSync(URL) both reject it.
-    const source = readFileSync("src/components/ListView.tsx");
+    // import.meta.dirname, not import.meta.url -- confirmed directly
+    // (review finding, PR #161) that under this project's Vitest+jsdom
+    // setup, Vite's own browser-transform pipeline rewrites
+    // import.meta.url to a fake http://localhost dev-server origin
+    // (real, reproducible: `new URL("./x", import.meta.url).href`
+    // printed "http://localhost:3000/...", not a file:// path), so
+    // fileURLToPath/readFileSync(URL) built from it fail. dirname/
+    // filename are untouched by that rewrite and resolve to the real
+    // on-disk path regardless of the test runner's own cwd.
+    const source = readFileSync(join(import.meta.dirname, "ListView.tsx"));
     expect(source.includes(0)).toBe(false);
   });
 
