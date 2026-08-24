@@ -16,6 +16,15 @@ const ITEMS: Fixture[] = [
   { id: "2", name: "Bob", role: "admin" },
 ];
 
+// ghs#138: 25 items -- enough for 3 pages at the default pageSize (10),
+// with a non-full last page (5 items) to exercise a real "partial last
+// page" case, not just evenly-divisible counts.
+const MANY_ITEMS: Fixture[] = Array.from({ length: 25 }, (_, index) => ({
+  id: String(index + 1),
+  name: `Item ${String(index + 1).padStart(2, "0")}`,
+  role: index % 2 === 0 ? "player" : "admin",
+}));
+
 afterEach(() => {
   cleanup();
   localStorage.clear();
@@ -24,7 +33,7 @@ afterEach(() => {
 function renderList(
   items: Fixture[] = ITEMS,
   id = "fixtures",
-  options: { getSearchText?: (item: Fixture) => string; filters?: Array<ListViewFilter<Fixture>> } = {},
+  options: { getSearchText?: (item: Fixture) => string; filters?: Array<ListViewFilter<Fixture>>; pageSize?: number } = {},
 ) {
   return render(
     <ListView<Fixture>
@@ -34,6 +43,7 @@ function renderList(
       searchPlaceholder="Search…"
       getSearchText={options.getSearchText}
       filters={options.filters}
+      pageSize={options.pageSize}
       tableHead={<TableHeaderCell>Name</TableHeaderCell>}
       renderTableRow={(item) => <TableCell>{item.name}</TableCell>}
       renderCard={(item) => <div data-testid={`card-${item.id}`}>{item.name}</div>}
@@ -151,5 +161,88 @@ describe("ListView", () => {
 
     expect(screen.getByText("No matches")).toBeInTheDocument();
     expect(screen.queryByText("No fixtures yet.")).not.toBeInTheDocument();
+  });
+
+  // ghs#138
+  describe("pagination", () => {
+    it("renders no pagination controls when everything already fits on one page", () => {
+      renderList();
+      expect(screen.queryByRole("navigation", { name: "Pagination" })).not.toBeInTheDocument();
+    });
+
+    it("shows only the first page's worth of items, with a real Previous/Next control, once the result set exceeds the page size", () => {
+      renderList(MANY_ITEMS);
+
+      expect(screen.getByText("Item 01")).toBeInTheDocument();
+      expect(screen.getByText("Item 10")).toBeInTheDocument();
+      expect(screen.queryByText("Item 11")).not.toBeInTheDocument();
+      expect(screen.getByRole("navigation", { name: "Pagination" })).toBeInTheDocument();
+      expect(screen.getByText("Page 1 of 3 · 25 results")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+    });
+
+    it("Next/Previous navigate between pages, including a correctly-sized partial last page", async () => {
+      renderList(MANY_ITEMS);
+
+      await userEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(screen.getByText("Page 2 of 3 · 25 results")).toBeInTheDocument();
+      expect(screen.getByText("Item 11")).toBeInTheDocument();
+      expect(screen.getByText("Item 20")).toBeInTheDocument();
+      expect(screen.queryByText("Item 01")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();
+
+      await userEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(screen.getByText("Page 3 of 3 · 25 results")).toBeInTheDocument();
+      // Partial last page -- only 5 items (21-25), not a full 10.
+      expect(screen.getByText("Item 21")).toBeInTheDocument();
+      expect(screen.getByText("Item 25")).toBeInTheDocument();
+      expect(screen.queryByText("Item 20")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+
+      await userEvent.click(screen.getByRole("button", { name: "Previous" }));
+      expect(screen.getByText("Page 2 of 3 · 25 results")).toBeInTheDocument();
+    });
+
+    it("resets to page 1 when a search/filter narrows the result set (ghs#137 + #138 interaction)", async () => {
+      renderList(MANY_ITEMS, "fixtures", { getSearchText: (item) => item.name });
+      await userEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(screen.getByText("Page 2 of 3 · 25 results")).toBeInTheDocument();
+
+      // Narrows to 9 matches (Item 01..Item 09) -- fits on one page, so
+      // no pagination nav at all, and definitely not left on "page 2".
+      await userEvent.type(screen.getByRole("searchbox"), "Item 0");
+      expect(await screen.findByText("Item 01")).toBeInTheDocument();
+      expect(screen.queryByRole("navigation", { name: "Pagination" })).not.toBeInTheDocument();
+    });
+
+    it("clamps to the last real page rather than showing an empty page when the result set shrinks further still", async () => {
+      renderList(MANY_ITEMS, "fixtures", { getSearchText: (item) => item.name });
+      await userEvent.click(screen.getByRole("button", { name: "Next" }));
+      await userEvent.click(screen.getByRole("button", { name: "Next" }));
+      expect(screen.getByText("Page 3 of 3 · 25 results")).toBeInTheDocument();
+
+      // Narrows to exactly 1 match -- was on "page 3", must not render a
+      // now-nonexistent page.
+      await userEvent.type(screen.getByRole("searchbox"), "Item 07");
+      expect(screen.getByText("Item 07")).toBeInTheDocument();
+      expect(screen.queryByRole("navigation", { name: "Pagination" })).not.toBeInTheDocument();
+    });
+
+    it("respects a screen-provided pageSize override", () => {
+      renderList(MANY_ITEMS, "fixtures", { pageSize: 5 });
+      expect(screen.getByText("Page 1 of 5 · 25 results")).toBeInTheDocument();
+      expect(screen.getByText("Item 05")).toBeInTheDocument();
+      expect(screen.queryByText("Item 06")).not.toBeInTheDocument();
+    });
+
+    it("paginates the grid view the same way as the table view", async () => {
+      renderList(MANY_ITEMS);
+      await userEvent.click(screen.getByRole("radio", { name: "Grid" }));
+
+      expect(screen.getByTestId("card-1")).toBeInTheDocument();
+      expect(screen.queryByTestId("card-11")).not.toBeInTheDocument();
+      expect(screen.getByText("Page 1 of 3 · 25 results")).toBeInTheDocument();
+    });
   });
 });
