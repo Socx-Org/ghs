@@ -12,6 +12,7 @@ import { Input } from "../Input";
 import { ToggleGroup } from "../ToggleGroup";
 import { useToast } from "../useToast";
 import { ApiError, addHoleScore } from "../../lib/api";
+import { optionalNonNegative, requiredStrokes } from "../../lib/hole-score-schema";
 import type { HoleScore } from "../../types/domain";
 
 // ghs#94: one hole, one independent form -- the epic's own acceptance
@@ -24,22 +25,15 @@ import type { HoleScore } from "../../types/domain";
 // "leave whatever was already recorded alone," not "clear it" -- the
 // backend has no explicit-clear capability for these fields at all, so
 // this UI doesn't pretend to offer one either.
+//
+// ghs#160: requiredStrokes/optionalNonNegative moved to
+// lib/hole-score-schema.ts so the round-entry CSV importer
+// (round-hole-csv.ts) can reuse the exact same strokes/putts validation
+// -- gir/inSand/penalties stay defined here (holeFormSchema), not moved,
+// since the CSV path's own optionality for those three genuinely differs
+// from this form's (see hole-score-schema.ts's own doc comment).
 
 const NOT_RECORDED = "";
-
-const optionalNonNegative = z.preprocess(
-  (value) => (typeof value === "number" && Number.isNaN(value) ? undefined : value),
-  z.number().min(0).optional(),
-);
-
-const requiredStrokes = z.preprocess(
-  // A blank/non-numeric input coerces to NaN, not undefined -- without
-  // this, z.number()'s own base type-check rejects NaN before .min()'s
-  // custom message ever runs, surfacing zod's generic "expected number,
-  // received NaN" instead (caught by this component's own test suite).
-  (value) => (typeof value === "number" && Number.isNaN(value) ? undefined : value),
-  z.number({ error: "Enter a stroke count" }).min(1, "Enter a stroke count"),
-);
 
 const holeFormSchema = z.object({
   strokes: requiredStrokes,

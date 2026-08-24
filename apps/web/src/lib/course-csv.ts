@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import { csvNumberOrUndefined } from "./csv-number";
 import { teeConfigurationSchema, toTeeConfigurationInput } from "./tee-configuration-schema";
 import type { TeeConfigurationFormInput } from "./tee-configuration-schema";
 import type { TeeConfigurationInput } from "../types/domain";
@@ -48,22 +49,6 @@ export interface ParsedCourseCsv {
 
 interface RawRow {
   [column: string]: string | undefined;
-}
-
-// Mirrors react-hook-form's own register(..., { valueAsNumber: true })
-// behaviour (a real <input type="number">'s .valueAsNumber is a number
-// or NaN, never a string) -- teeConfigurationSchema's own numberOrUndefined
-// preprocess only recognises "already a number (possibly NaN)", so a raw
-// CSV cell (always a string) must be converted here first, the same way
-// the DOM does it ahead of zod for the manual form. Blank -> undefined
-// (a genuinely missing value, e.g. course_rating/slope_rating on the
-// Llavaneras sample's own 9-hole "Members" config); non-blank -> Number()
-// (NaN for non-numeric garbage, which teeConfigurationSchema already
-// turns into the same "Enter a ..." message an empty manual field gets).
-function csvNumberOrUndefined(raw: string | undefined): number | undefined {
-  const trimmed = raw?.trim();
-  if (!trimmed) return undefined;
-  return Number(trimmed);
 }
 
 function summarizeZodError(error: { issues: Array<{ message: string; path: PropertyKey[] }> }): string {

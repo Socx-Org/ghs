@@ -300,4 +300,122 @@ describe("RoundEntryPage", () => {
       expect(mock.history.post!.some((r) => r.url === "/rounds/round-1/submit")).toBe(true);
     });
   });
+
+  // ghs#160
+  describe("Load from CSV", () => {
+    const VALID_CSV =
+      "hole_number,strokes,putts,gir,fairway_hit,in_sand,penalties\n" +
+      "1,4,2,true,TRUE,false,0\n" +
+      "2,3,1,false,,false,0";
+
+    function csvFile(text: string, name = "round.csv") {
+      return new File([text], name, { type: "text/csv" });
+    }
+
+    it("switches to the CSV form via the toggle, hiding the manual hole cards", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound());
+      renderEntry();
+      await screen.findByText("White");
+
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+
+      expect(screen.queryByLabelText("Strokes")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("CSV file")).toBeInTheDocument();
+    });
+
+    it("shows a preview of every hole found before any import happens, then imports each valid hole independently on Import", async () => {
+      const round = makeRound();
+      mock.onGet("/rounds/round-1").reply(() => [200, round]);
+      mock.onPost("/rounds/round-1/holes").reply((config) => {
+        const body = JSON.parse(config.data);
+        round.holeScores.push({
+          id: `hs-${body.holeNumber}`,
+          holeNumber: body.holeNumber,
+          strokes: body.strokes,
+          putts: body.putts ?? null,
+          gir: body.gir ?? false,
+          fairwayResult: body.fairwayResult ?? null,
+          inSand: body.inSand ?? false,
+          penalties: body.penalties ?? 0,
+          netDoubleBogeyAdjusted: body.strokes,
+        });
+        return [200, round.holeScores[round.holeScores.length - 1]];
+      });
+
+      renderEntry();
+      await screen.findByText("White");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+      await userEvent.upload(screen.getByLabelText("CSV file"), csvFile(VALID_CSV));
+
+      expect(await screen.findByText("Holes found (2 of 2 will import)")).toBeInTheDocument();
+      expect(screen.getByText("Hole 1")).toBeInTheDocument();
+      expect(screen.getByText("Hole 2")).toBeInTheDocument();
+      expect(screen.getAllByText("Will import")).toHaveLength(2);
+      // No request yet -- the preview is shown before any import happens.
+      expect(mock.history.post ?? []).toHaveLength(0);
+
+      await userEvent.click(screen.getByRole("button", { name: "Import" }));
+
+      await waitFor(() => expect(mock.history.post?.length).toBe(2));
+      const bodies = mock.history.post!.map((request) => JSON.parse(request.data));
+      expect(bodies.find((body) => body.holeNumber === 1)).toMatchObject({ holeNumber: 1, strokes: 4, putts: 2, gir: true, fairwayResult: "hit", inSand: false, penalties: 0 });
+      expect(bodies.find((body) => body.holeNumber === 2)).toMatchObject({ holeNumber: 2, strokes: 3 });
+
+      await waitFor(() => expect(screen.getAllByText("Imported")).toHaveLength(2));
+      // The round query is invalidated and refetched -- progress reflects
+      // the real persisted state, same as a manual save already does.
+      await waitFor(() => expect(screen.getByText("2 / 2")).toBeInTheDocument());
+    });
+
+    it("reports a per-hole import failure independently, without blocking the other hole's own successful import", async () => {
+      const round = makeRound();
+      mock.onGet("/rounds/round-1").reply(() => [200, round]);
+      mock.onPost("/rounds/round-1/holes").reply((config) => {
+        const body = JSON.parse(config.data);
+        if (body.holeNumber === 2) {
+          return [500, { error: "unexpected failure saving hole 2" }];
+        }
+        round.holeScores.push({ id: "hs-1", holeNumber: 1, strokes: body.strokes, putts: null, gir: false, fairwayResult: null, inSand: false, penalties: 0, netDoubleBogeyAdjusted: body.strokes });
+        return [200, round.holeScores[0]];
+      });
+
+      renderEntry();
+      await screen.findByText("White");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+      await userEvent.upload(screen.getByLabelText("CSV file"), csvFile(VALID_CSV));
+      await screen.findByText("Holes found (2 of 2 will import)");
+      await userEvent.click(screen.getByRole("button", { name: "Import" }));
+
+      await waitFor(() => expect(screen.getByText("Imported")).toBeInTheDocument());
+      expect(screen.getByText("Failed")).toBeInTheDocument();
+      expect(screen.getByText("unexpected failure saving hole 2")).toBeInTheDocument();
+    });
+
+    it("shows a clear parse error for a malformed file, without calling the API", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound());
+      renderEntry();
+      await screen.findByText("White");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+
+      await userEvent.upload(screen.getByLabelText("CSV file"), csvFile("not,a,valid,round,csv\n1,2,3,4,5"));
+
+      expect(await screen.findByText(/Missing required column/)).toBeInTheDocument();
+      expect(mock.history.post ?? []).toHaveLength(0);
+    });
+
+    it("skips an out-of-range hole number for this round's real hole count, reporting why", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound());
+      renderEntry();
+      await screen.findByText("White");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+
+      // TEE_CONFIGURATION only has 2 holes -- hole 5 is out of range.
+      await userEvent.upload(screen.getByLabelText("CSV file"), csvFile("hole_number,strokes\n5,4"));
+
+      expect(await screen.findByText("Holes found (0 of 1 will import)")).toBeInTheDocument();
+      expect(screen.getByText("Skipped")).toBeInTheDocument();
+      expect(screen.getByText(/invalid hole number '5' \(must be an integer from 1 to 2\)/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Import" })).toBeDisabled();
+    });
+  });
 });
