@@ -669,7 +669,7 @@ export default function ComponentsCatalogue() {
             </List>
           </Example>
 
-          <Example label="ListView -- one data source, table/grid toggle, search + filter (ghs#103, ghs#137)">
+          <Example label="ListView -- one data source, table/grid toggle, search + filter + pagination (ghs#103, ghs#137, ghs#138)">
             <ListView
               id="catalogue-rounds"
               items={SAMPLE_ROUNDS}
@@ -677,6 +677,12 @@ export default function ComponentsCatalogue() {
               searchPlaceholder="Search by course…"
               getSearchText={(r) => r.course}
               filters={[{ id: "status", label: "Status", getValue: (r) => r.status, options: ROUND_STATUS_OPTIONS }]}
+              // ghs#138: a small pageSize override (real screens use the
+              // default of 10) so this catalogue example -- only 5 rows,
+              // kept small for readability -- still visibly demonstrates
+              // the real Previous/Next control rather than staying
+              // permanently inert.
+              pageSize={2}
               tableHead={
                 <>
                   <TableHeaderCell>Course</TableHeaderCell>

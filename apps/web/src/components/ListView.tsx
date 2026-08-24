@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { Button } from "./Button";
 import { EmptyState } from "./EmptyState";
 import { Input } from "./Input";
 import { Select } from "./Select";
@@ -7,6 +8,34 @@ import { Table, TableBody, TableHead, TableRow } from "./Table";
 import { ToggleGroup } from "./ToggleGroup";
 import { useListView } from "../lib/useListView";
 import type { ListViewMode } from "../lib/useListView";
+
+// ghs#138: a fixed page size, not a user-adjustable page-size selector --
+// the issue's own scope is "page numbers and/or next/previous," and
+// nothing in it asks for a size control; keeping this a constant avoids
+// building an unrequested second control. Overridable per screen via the
+// `pageSize` prop for the rare case a screen's real dataset shape wants
+// a different default (none does today).
+const DEFAULT_PAGE_SIZE = 10;
+
+function Pagination({ page, totalPages, totalCount, onChange }: { page: number; totalPages: number; totalCount: number; onChange: (page: number) => void }) {
+  // Nothing to paginate through -- rendering disabled Previous/Next
+  // buttons and "Page 1 of 1" for a list that already fits on one page
+  // is noise, not real affordance.
+  if (totalPages <= 1) return null;
+  return (
+    <nav aria-label="Pagination" className="mt-4 flex items-center justify-between gap-3">
+      <Button type="button" variant="secondary" size="sm" disabled={page <= 1} onClick={() => onChange(page - 1)}>
+        Previous
+      </Button>
+      <p className="text-sm text-text-muted" aria-live="polite">
+        Page {page} of {totalPages} · {totalCount} result{totalCount === 1 ? "" : "s"}
+      </p>
+      <Button type="button" variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>
+        Next
+      </Button>
+    </nav>
+  );
+}
 
 // ghs#137: an opt-in per-column filter (e.g. Role, Status) -- only
 // screens with real enum-like columns provide these (CourseListPage
@@ -40,6 +69,14 @@ export interface ListViewProps<T> {
   searchPlaceholder?: string;
   getSearchText?: (item: T) => string;
   filters?: Array<ListViewFilter<T>>;
+  // ghs#138: applies to the already-filtered result, not the raw items
+  // array -- deliberately sequenced after search/filter (ghs#137), which
+  // is why that issue shipped first. Always on (no opt-in prop) -- unlike
+  // search, which needs a screen to designate its own searchable fields,
+  // pagination needs no per-screen configuration to work; it's simply
+  // inert (Pagination renders nothing) whenever a screen's result set
+  // already fits on one page.
+  pageSize?: number;
 }
 
 // ghs#103: the standard list presentation (design doc section 16) --
@@ -68,10 +105,19 @@ export function ListView<T>({
   searchPlaceholder = "Search…",
   getSearchText,
   filters = [],
+  pageSize = DEFAULT_PAGE_SIZE,
 }: ListViewProps<T>) {
   const [view, setView] = useListView(id, defaultView);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterValues, setFilterValues] = useState<Record<string, string>>({});
+  const [page, setPage] = useState(1);
+
+  // ghs#138 review fix: the default parameter above only covers an
+  // omitted/undefined pageSize -- a caller that ever passes 0, a
+  // negative number, or NaN would otherwise reach Math.ceil(.../pageSize)
+  // below and produce Infinity (Next never disables) or an empty slice.
+  // Falls back to the real default rather than silently misbehaving.
+  const safePageSize = Number.isInteger(pageSize) && pageSize > 0 ? pageSize : DEFAULT_PAGE_SIZE;
 
   const hasControls = Boolean(getSearchText) || filters.length > 0;
 
@@ -98,6 +144,33 @@ export function ListView<T>({
   // here") -- that copy would be actively misleading if items exist but
   // a search/filter just narrowed them all out.
   const noMatches = items.length > 0 && filteredItems.length === 0;
+
+  // ghs#138: back to page 1 whenever the search/filter inputs themselves
+  // change -- otherwise a user could land on e.g. "page 3" immediately
+  // after a filter change that leaves only one page of results, seeing
+  // an empty page instead of their own newly-filtered list. Adjusted
+  // during render (React's own documented pattern for "reset state when
+  // an input changes"), not in a useEffect -- setState synchronously
+  // inside an effect triggers an extra cascading render for no benefit
+  // over resetting immediately, in the same render that already detected
+  // the change (react-hooks/set-state-in-effect).
+  const filterKey = JSON.stringify([searchQuery, filterValues]);
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
+    setPage(1);
+  }
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / safePageSize));
+  // Clamped defensively on every render, not just via the effect above --
+  // covers the filtered set shrinking for any other reason too (e.g. the
+  // underlying items array itself changing), not only a search/filter
+  // edit.
+  const safePage = Math.min(page, totalPages);
+  const pageItems = useMemo(
+    () => filteredItems.slice((safePage - 1) * safePageSize, safePage * safePageSize),
+    [filteredItems, safePage, safePageSize],
+  );
 
   return (
     <div className={className}>
@@ -162,23 +235,28 @@ export function ListView<T>({
         emptyState
       ) : noMatches ? (
         <EmptyState title="No matches" description="Try a different search term or filter." />
-      ) : view === "table" ? (
-        <Table>
-          <TableHead>
-            <TableRow>{tableHead}</TableRow>
-          </TableHead>
-          <TableBody>
-            {filteredItems.map((item) => (
-              <TableRow key={getKey(item)}>{renderTableRow(item)}</TableRow>
-            ))}
-          </TableBody>
-        </Table>
       ) : (
-        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredItems.map((item) => (
-            <li key={getKey(item)}>{renderCard(item)}</li>
-          ))}
-        </ul>
+        <>
+          {view === "table" ? (
+            <Table>
+              <TableHead>
+                <TableRow>{tableHead}</TableRow>
+              </TableHead>
+              <TableBody>
+                {pageItems.map((item) => (
+                  <TableRow key={getKey(item)}>{renderTableRow(item)}</TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {pageItems.map((item) => (
+                <li key={getKey(item)}>{renderCard(item)}</li>
+              ))}
+            </ul>
+          )}
+          <Pagination page={safePage} totalPages={totalPages} totalCount={filteredItems.length} onChange={setPage} />
+        </>
       )}
     </div>
   );
