@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -53,6 +54,22 @@ function renderList(
 }
 
 describe("ListView", () => {
+  // Review finding, PR #161: an editing/tooling mishap left a literal
+  // NUL byte inside a template literal in ListView.tsx -- functionally
+  // harmless (string !== still works with an embedded NUL) but made the
+  // file look binary to common tooling (e.g. `file`/`grep` without -a),
+  // silently breaking searches across it. Guards against this exact
+  // class of source-file corruption recurring, not just the pagination
+  // behaviour it happened to be sitting in.
+  it("ListView.tsx's own source contains no literal NUL bytes", () => {
+    // A plain path relative to the package root (vitest's own cwd when
+    // run via `npm test`), not import.meta.url -- under this project's
+    // jsdom test environment that isn't a real file:// URL, so
+    // fileURLToPath/readFileSync(URL) both reject it.
+    const source = readFileSync("src/components/ListView.tsx");
+    expect(source.includes(0)).toBe(false);
+  });
+
   it("renders the table view by default", () => {
     renderList();
     expect(screen.getByRole("table")).toBeInTheDocument();
@@ -234,6 +251,17 @@ describe("ListView", () => {
       expect(screen.getByText("Page 1 of 5 · 25 results")).toBeInTheDocument();
       expect(screen.getByText("Item 05")).toBeInTheDocument();
       expect(screen.queryByText("Item 06")).not.toBeInTheDocument();
+    });
+
+    // Review finding, PR #161: an invalid pageSize (0, negative, NaN)
+    // previously reached Math.ceil(.../pageSize) directly, producing
+    // Infinity (Next never disables) or an empty slice, rather than
+    // falling back to a real, working page size.
+    it.each([0, -5, NaN])("falls back to the default page size when given an invalid pageSize (%s)", (invalidPageSize) => {
+      renderList(MANY_ITEMS, "fixtures", { pageSize: invalidPageSize });
+      expect(screen.getByText("Page 1 of 3 · 25 results")).toBeInTheDocument();
+      expect(screen.getByText("Item 10")).toBeInTheDocument();
+      expect(screen.queryByText("Item 11")).not.toBeInTheDocument();
     });
 
     it("paginates the grid view the same way as the table view", async () => {
