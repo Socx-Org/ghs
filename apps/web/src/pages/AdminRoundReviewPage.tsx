@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Check, Trash2, X } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, BackButton, Button, Card, CardBody, CardHeader, HolesTable, Modal, RoundStatusBadge, Skeleton, Stat, Textarea, useToast } from "../components";
@@ -187,10 +187,14 @@ export default function AdminRoundReviewPage() {
           {isPending ? (
             <Card>
               <CardBody className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-                <Button variant="destructive" onClick={() => setRejectOpen(true)}>
+                <Button variant="destructive" icon={<X aria-hidden="true" className="h-4 w-4" />} onClick={() => setRejectOpen(true)}>
                   Reject
                 </Button>
-                <Button isLoading={approveMutation.isPending} onClick={() => approveMutation.mutate()}>
+                <Button
+                  icon={<Check aria-hidden="true" className="h-4 w-4" />}
+                  isLoading={approveMutation.isPending}
+                  onClick={() => approveMutation.mutate()}
+                >
                   Approve
                 </Button>
               </CardBody>
@@ -223,6 +227,7 @@ export default function AdminRoundReviewPage() {
               </Button>
               <Button
                 variant="destructive"
+                icon={<X aria-hidden="true" className="h-4 w-4" />}
                 isLoading={rejectMutation.isPending}
                 disabled={rejectionReason.trim().length === 0}
                 onClick={() => rejectMutation.mutate()}
@@ -250,7 +255,7 @@ export default function AdminRoundReviewPage() {
           title="Delete round"
           footer={
             <>
-              <Button variant="secondary" onClick={() => setDeleteOpen(false)}>
+              <Button variant="secondary" icon={<X aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeleteOpen(false)}>
                 Cancel
               </Button>
               <Button

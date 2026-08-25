@@ -16,6 +16,8 @@ import {
   AlertTriangle,
   AlertCircle,
   Info,
+  LayoutGrid,
+  Table2,
 } from "lucide-react";
 import {
   Alert,
@@ -171,6 +173,7 @@ export default function ComponentsCatalogue() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState("list");
+  const [tableGridMode, setTableGridMode] = useState("table");
   const [activeNav, setActiveNav] = useState("dashboard");
   const [showSkeletons, setShowSkeletons] = useState(true);
 
@@ -385,6 +388,17 @@ export default function ComponentsCatalogue() {
             </div>
           </Example>
 
+          <Example label="Icon-only via the icon prop (ghs#134) -- ListView row actions (Edit/Delete/Disable) use this form, so the icon prop gets Button's own square icon-button sizing">
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="secondary" size="sm" icon={<Pencil aria-hidden="true" className="h-4 w-4" />} aria-label="Edit round at Pebble Beach Golf Links" />
+              <Button variant="destructive" size="sm" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} aria-label="Delete round at Pebble Beach Golf Links" />
+              <p className="text-sm text-text-muted">
+                A row-action's aria-label names the row it acts on explicitly (e.g. "Delete round at ...") rather than leaving several
+                identically-named icon buttons on the same page for assistive tech.
+              </p>
+            </div>
+          </Example>
+
           <Example label="ToggleGroup -- mutually exclusive choices, native radios styled as segmented buttons (arrow-key nav is free)">
             <ToggleGroup
               name="view-mode"
@@ -393,6 +407,19 @@ export default function ComponentsCatalogue() {
               options={[
                 { value: "list", label: "List" },
                 { value: "table", label: "Table" },
+              ]}
+            />
+          </Example>
+
+          <Example label="ToggleGroup -- iconOnly (ghs#134), e.g. ListView's own Table/Grid view switch. The label stays as each option's accessible name -- sr-only, not removed.">
+            <ToggleGroup
+              name="table-grid-mode"
+              value={tableGridMode}
+              onChange={setTableGridMode}
+              iconOnly
+              options={[
+                { value: "table", label: "Table", icon: <Table2 aria-hidden="true" className="h-4 w-4" /> },
+                { value: "grid", label: "Grid", icon: <LayoutGrid aria-hidden="true" className="h-4 w-4" /> },
               ]}
             />
           </Example>

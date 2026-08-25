@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { UserPlus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -82,7 +83,7 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
         <Input type="password" autoComplete="new-password" {...register("password")} />
       </FormField>
 
-      <Button type="submit" isLoading={isSubmitting} className="w-full">
+      <Button type="submit" icon={<UserPlus aria-hidden="true" className="h-4 w-4" />} isLoading={isSubmitting} className="w-full">
         Create account
       </Button>
     </form>

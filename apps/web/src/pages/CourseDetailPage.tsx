@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -113,7 +113,12 @@ function CourseEditForm({ course }: { course: Course }) {
         <Input type="text" autoComplete="off" maxLength={2} {...register("country")} />
       </FormField>
 
-      <Button type="submit" isLoading={isSubmitting} className="w-full sm:w-auto">
+      <Button
+        type="submit"
+        icon={<Save aria-hidden="true" className="h-4 w-4" />}
+        isLoading={isSubmitting}
+        className="w-full sm:w-auto"
+      >
         Save changes
       </Button>
     </form>
@@ -284,7 +289,7 @@ function TeeConfigurationsSection({ course, isAdmin }: { course: Course; isAdmin
           title="Delete tee configuration"
           footer={
             <>
-              <Button variant="secondary" onClick={() => setDeletingTee(null)}>
+              <Button variant="secondary" icon={<X aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeletingTee(null)}>
                 Cancel
               </Button>
               <Button
@@ -389,7 +394,7 @@ export default function CourseDetailPage() {
           title="Delete course"
           footer={
             <>
-              <Button variant="secondary" onClick={() => setDeleteModalOpen(false)}>
+              <Button variant="secondary" icon={<X aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeleteModalOpen(false)}>
                 Cancel
               </Button>
               <Button

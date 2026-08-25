@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { KeyRound, LogIn } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -97,11 +98,15 @@ function CredentialsForm({
         <Input type="password" autoComplete="current-password" {...register("password")} />
       </FormField>
 
-      <Link to="/forgot-password" className="-mt-3 self-end text-sm font-medium text-primary hover:underline">
+      <Link
+        to="/forgot-password"
+        className="-mt-3 inline-flex items-center gap-1.5 self-end text-sm font-medium text-primary hover:underline"
+      >
+        <KeyRound aria-hidden="true" className="h-4 w-4" />
         Forgot my password?
       </Link>
 
-      <Button type="submit" isLoading={isSubmitting} className="w-full">
+      <Button type="submit" icon={<LogIn aria-hidden="true" className="h-4 w-4" />} isLoading={isSubmitting} className="w-full">
         Sign in
       </Button>
     </form>

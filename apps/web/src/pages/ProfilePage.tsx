@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { KeyRound } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -72,7 +73,12 @@ function ChangePasswordForm() {
         <Input type="password" autoComplete="new-password" {...register("confirmPassword")} />
       </FormField>
 
-      <Button type="submit" isLoading={isSubmitting} className="w-full sm:w-auto">
+      <Button
+        type="submit"
+        icon={<KeyRound aria-hidden="true" className="h-4 w-4" />}
+        isLoading={isSubmitting}
+        className="w-full sm:w-auto"
+      >
         Change password
       </Button>
     </form>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Send } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -64,7 +65,7 @@ export default function ForgotPasswordPage() {
                   <Input type="email" autoComplete="email" {...register("email")} />
                 </FormField>
 
-                <Button type="submit" isLoading={isSubmitting} className="w-full">
+                <Button type="submit" icon={<Send aria-hidden="true" className="h-4 w-4" />} isLoading={isSubmitting} className="w-full">
                   Send reset link
                 </Button>
               </form>
