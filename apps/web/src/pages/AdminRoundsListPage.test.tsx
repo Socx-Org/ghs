@@ -141,8 +141,10 @@ describe("AdminRoundsListPage", () => {
 
       renderAsRole("admin");
       await screen.findByText("Alice Whitfield");
-      const [firstDeleteButton] = await screen.findAllByRole("button", { name: "Delete" });
-      await userEvent.click(firstDeleteButton!);
+      // ghs#134: row actions are icon-only -- the accessible name names
+      // the round's player explicitly instead of relying on visible
+      // "Delete" text.
+      await userEvent.click(await screen.findByRole("button", { name: "Delete Alice Whitfield's round" }));
 
       const dialog = await screen.findByRole("dialog", { name: "Delete round" });
       expect(dialog).toHaveTextContent("Alice Whitfield");
@@ -175,8 +177,7 @@ describe("AdminRoundsListPage", () => {
       expect(queryClient.getQueryData(["rounds", "round-1"])).toBeDefined();
 
       await screen.findByText("Alice Whitfield");
-      const [firstDeleteButton] = await screen.findAllByRole("button", { name: "Delete" });
-      await userEvent.click(firstDeleteButton!);
+      await userEvent.click(await screen.findByRole("button", { name: "Delete Alice Whitfield's round" }));
       const dialog = await screen.findByRole("dialog", { name: "Delete round" });
       await userEvent.click(within(dialog).getByRole("button", { name: "Delete round" }));
 
@@ -190,8 +191,7 @@ describe("AdminRoundsListPage", () => {
 
       renderAsRole("admin");
       await screen.findByText("Bob Carver");
-      const deleteButtons = await screen.findAllByRole("button", { name: "Delete" });
-      await userEvent.click(deleteButtons[1]!);
+      await userEvent.click(await screen.findByRole("button", { name: "Delete Bob Carver's round" }));
 
       const dialog = await screen.findByRole("dialog", { name: "Delete round" });
       await userEvent.click(within(dialog).getByRole("button", { name: "Delete round" }));
@@ -206,8 +206,7 @@ describe("AdminRoundsListPage", () => {
 
       renderAsRole("admin");
       await screen.findByText("Alice Whitfield");
-      const [firstDeleteButton] = await screen.findAllByRole("button", { name: "Delete" });
-      await userEvent.click(firstDeleteButton!);
+      await userEvent.click(await screen.findByRole("button", { name: "Delete Alice Whitfield's round" }));
 
       const dialog = await screen.findByRole("dialog", { name: "Delete round" });
       await userEvent.click(within(dialog).getByRole("button", { name: "Delete round" }));

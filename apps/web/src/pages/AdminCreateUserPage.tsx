@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Alert, Button, Checkbox, FormField, Input, Select } from "../components";
+import { Alert, BackButton, Button, Checkbox, FormField, Input, Select } from "../components";
 import { ApiError, createUser } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 
@@ -81,9 +81,7 @@ export default function AdminCreateUserPage() {
 
   return (
     <div className="mx-auto w-full max-w-lg px-4 py-12">
-      <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-        ← Back
-      </Button>
+      <BackButton onClick={() => navigate("/")} />
       <h1 className="mt-4 text-2xl font-semibold text-text">Create account</h1>
       <p className="mt-2 text-sm text-text-muted">
         New accounts default to pending activation. Check "Activate immediately" to skip the

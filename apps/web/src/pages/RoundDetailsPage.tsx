@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, CardBody, CardHeader, HolesTable, RoundStatusBadge, Skeleton, Stat } from "../components";
+import { Alert, BackButton, Button, Card, CardBody, CardHeader, HolesTable, RoundStatusBadge, Skeleton, Stat } from "../components";
 import { ApiError, getPlayerRounds, getRound, getTeeConfiguration } from "../lib/api";
 import { EDITABLE_ROUND_STATUSES } from "../types/domain";
 
@@ -62,9 +62,7 @@ export default function RoundDetailsPage() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 sm:p-6">
       <div>
-        <Button variant="ghost" size="sm" onClick={() => navigate("/rounds")}>
-          ← Back to My Rounds
-        </Button>
+        <BackButton onClick={() => navigate("/rounds")}>Back to My Rounds</BackButton>
       </div>
 
       {roundQuery.isPending || (teeConfigurationId && teeQuery.isPending) ? (

@@ -44,4 +44,30 @@ describe("ToggleGroup", () => {
     expect(screen.getByLabelText("Table")).toBeDisabled();
     expect(screen.getByLabelText("List")).not.toBeDisabled();
   });
+
+  // ghs#134 review fix: iconOnly with an option missing its icon would
+  // otherwise silently render with no visible affordance at all.
+  it("logs a dev warning when iconOnly is set but an option has no icon", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<ToggleGroup name="view" options={OPTIONS} value="list" iconOnly />);
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("List, Table"));
+    spy.mockRestore();
+  });
+
+  it("does not warn when iconOnly is set and every option has an icon", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <ToggleGroup
+        name="view"
+        value="list"
+        iconOnly
+        options={[
+          { value: "list", label: "List", icon: <svg aria-hidden="true" /> },
+          { value: "table", label: "Table", icon: <svg aria-hidden="true" /> },
+        ]}
+      />,
+    );
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });

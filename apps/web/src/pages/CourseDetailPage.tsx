@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Alert, Button, Card, CardBody, CardHeader, FormField, Input, Modal, Skeleton, TeeConfigurationForm, useToast } from "../components";
+import { Alert, BackButton, Button, Card, CardBody, CardHeader, FormField, Input, Modal, Skeleton, TeeConfigurationForm, useToast } from "../components";
 import { ApiError, createTeeConfiguration, deleteCourse, deleteTeeConfiguration, getCourse, updateCourse, updateTeeConfiguration } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import type { Course, TeeConfiguration, TeeConfigurationInput } from "../types/domain";
@@ -112,7 +113,12 @@ function CourseEditForm({ course }: { course: Course }) {
         <Input type="text" autoComplete="off" maxLength={2} {...register("country")} />
       </FormField>
 
-      <Button type="submit" isLoading={isSubmitting} className="w-full sm:w-auto">
+      <Button
+        type="submit"
+        icon={<Save aria-hidden="true" className="h-4 w-4" />}
+        isLoading={isSubmitting}
+        className="w-full sm:w-auto"
+      >
         Save changes
       </Button>
     </form>
@@ -200,7 +206,7 @@ function TeeConfigurationsSection({ course, isAdmin }: { course: Course; isAdmin
       <CardHeader className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-text">Tee configurations</h2>
         {isAdmin && (
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Button size="sm" icon={<Plus aria-hidden="true" className="h-4 w-4" />} onClick={() => setCreateOpen(true)}>
             Add tee configuration
           </Button>
         )}
@@ -220,10 +226,20 @@ function TeeConfigurationsSection({ course, isAdmin }: { course: Course; isAdmin
                 </div>
                 {isAdmin && (
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button variant="secondary" size="sm" onClick={() => setEditingTee(tee)}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      icon={<Pencil aria-hidden="true" className="h-4 w-4" />}
+                      onClick={() => setEditingTee(tee)}
+                    >
                       Edit
                     </Button>
-                    <Button variant="destructive" size="sm" onClick={() => setDeletingTee(tee)}>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
+                      onClick={() => setDeletingTee(tee)}
+                    >
                       Delete
                     </Button>
                   </div>
@@ -273,10 +289,15 @@ function TeeConfigurationsSection({ course, isAdmin }: { course: Course; isAdmin
           title="Delete tee configuration"
           footer={
             <>
-              <Button variant="secondary" onClick={() => setDeletingTee(null)}>
+              <Button variant="secondary" icon={<X aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeletingTee(null)}>
                 Cancel
               </Button>
-              <Button variant="destructive" isLoading={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>
+              <Button
+                variant="destructive"
+                icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
+                isLoading={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate()}
+              >
                 Delete tee configuration
               </Button>
             </>
@@ -322,9 +343,7 @@ export default function CourseDetailPage() {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4 sm:p-6">
       <div>
-        <Button variant="ghost" size="sm" onClick={() => navigate("/courses")}>
-          ← Back
-        </Button>
+        <BackButton onClick={() => navigate("/courses")} />
         <h1 className="mt-4 text-2xl font-semibold text-text">{courseQuery.data?.name ?? "Course"}</h1>
       </div>
 
@@ -359,7 +378,7 @@ export default function CourseDetailPage() {
           </CardHeader>
           <CardBody className="flex items-center justify-between gap-3">
             <p className="text-sm text-text-muted">Deleting a course cannot be undone from here.</p>
-            <Button variant="destructive" onClick={() => setDeleteModalOpen(true)}>
+            <Button variant="destructive" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeleteModalOpen(true)}>
               Delete course
             </Button>
           </CardBody>
@@ -375,10 +394,15 @@ export default function CourseDetailPage() {
           title="Delete course"
           footer={
             <>
-              <Button variant="secondary" onClick={() => setDeleteModalOpen(false)}>
+              <Button variant="secondary" icon={<X aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeleteModalOpen(false)}>
                 Cancel
               </Button>
-              <Button variant="destructive" isLoading={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>
+              <Button
+                variant="destructive"
+                icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
+                isLoading={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate()}
+              >
                 Delete course
               </Button>
             </>

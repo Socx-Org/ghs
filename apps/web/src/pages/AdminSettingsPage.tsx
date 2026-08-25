@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, Card, CardBody, Checkbox, Skeleton, useToast } from "../components";
+import { Alert, BackButton, Card, CardBody, Checkbox, Skeleton, useToast } from "../components";
 import { ApiError, getAdminSettings, setMaintenanceMode, setNotificationSetting, setSelfRegistrationEnabled } from "../lib/api";
 import type { NotificationSettingType } from "../lib/api";
 
@@ -96,9 +96,7 @@ export default function AdminSettingsPage() {
 
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-8 sm:px-6">
-      <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-        ← Back
-      </Button>
+      <BackButton onClick={() => navigate("/")} />
       <h1 className="mt-4 text-2xl font-semibold text-text">Settings</h1>
       <p className="mt-2 text-sm text-text-muted">System-wide configuration for GHS.</p>
 

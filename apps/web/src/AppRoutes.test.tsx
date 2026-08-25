@@ -259,10 +259,11 @@ describe("AppRoutes", () => {
   it("renders the round entry screen at /rounds/:id for an authenticated player (ghs#94)", () => {
     setTokens(AUTHENTICATED_TOKENS);
     renderAt("/rounds/some-round-id");
-    // "← Back" is static JSX, rendered regardless of how the (unmocked,
-    // in this routing-focused file) round/tee-configuration queries
-    // resolve -- a deterministic marker that RoundEntryPage rendered.
-    expect(screen.getByRole("button", { name: "← Back" })).toBeInTheDocument();
+    // "Back" (BackButton, ghs#134) is static JSX, rendered regardless of
+    // how the (unmocked, in this routing-focused file) round/tee-
+    // configuration queries resolve -- a deterministic marker that
+    // RoundEntryPage rendered.
+    expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
   });
 
   it("redirects /rounds to /login when unauthenticated (ghs#147)", () => {
@@ -284,10 +285,11 @@ describe("AppRoutes", () => {
   it("renders RoundDetailsPage at /rounds/:id/details for an authenticated player, distinct from /rounds/:id (ghs#147)", () => {
     setTokens(AUTHENTICATED_TOKENS);
     renderAt("/rounds/some-round-id/details");
-    // "← Back to My Rounds" is static JSX, rendered regardless of how
-    // the (unmocked, in this routing-focused file) round query
-    // resolves -- a deterministic marker that RoundDetailsPage
-    // rendered, not RoundEntryPage (which renders "← Back" instead).
-    expect(screen.getByRole("button", { name: "← Back to My Rounds" })).toBeInTheDocument();
+    // "Back to My Rounds" (BackButton, ghs#134) is static JSX, rendered
+    // regardless of how the (unmocked, in this routing-focused file)
+    // round query resolves -- a deterministic marker that
+    // RoundDetailsPage rendered, not RoundEntryPage (which renders
+    // plain "Back" instead).
+    expect(screen.getByRole("button", { name: "Back to My Rounds" })).toBeInTheDocument();
   });
 });

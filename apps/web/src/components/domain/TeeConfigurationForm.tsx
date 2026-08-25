@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Save } from "lucide-react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Alert } from "../Alert";
@@ -178,7 +179,17 @@ export function TeeConfigurationForm({ initialValues, onSubmit, onCancel, submit
         <Button type="button" variant="secondary" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" isLoading={isSubmitting}>
+        <Button
+          type="submit"
+          // ghs#134: a Save icon only in edit mode -- submitLabel reads
+          // "Save changes" there, matching CourseDetailPage's own course-
+          // edit form; create mode's "Add tee configuration" is a
+          // different action class (see that page's own icon-audit
+          // notes) and stays icon-free, consistent with every other
+          // form-submit "Create X" button in the app.
+          icon={initialValues ? <Save aria-hidden="true" className="h-4 w-4" /> : undefined}
+          isLoading={isSubmitting}
+        >
           {submitLabel}
         </Button>
       </div>

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { ChevronLeft, ChevronRight, LayoutGrid, Table2 } from "lucide-react";
 import { Button } from "./Button";
 import { EmptyState } from "./EmptyState";
 import { Input } from "./Input";
@@ -24,7 +25,14 @@ function Pagination({ page, totalPages, totalCount, onChange }: { page: number; 
   if (totalPages <= 1) return null;
   return (
     <nav aria-label="Pagination" className="mt-4 flex items-center justify-between gap-3">
-      <Button type="button" variant="secondary" size="sm" disabled={page <= 1} onClick={() => onChange(page - 1)}>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        icon={<ChevronLeft aria-hidden="true" className="h-4 w-4" />}
+        disabled={page <= 1}
+        onClick={() => onChange(page - 1)}
+      >
         Previous
       </Button>
       <p className="text-sm text-text-muted" aria-live="polite">
@@ -32,6 +40,7 @@ function Pagination({ page, totalPages, totalCount, onChange }: { page: number; 
       </p>
       <Button type="button" variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>
         Next
+        <ChevronRight aria-hidden="true" className="h-4 w-4" />
       </Button>
     </nav>
   );
@@ -223,9 +232,10 @@ export function ListView<T>({
                 setView(next);
               }
             }}
+            iconOnly
             options={[
-              { value: "table", label: "Table" },
-              { value: "grid", label: "Grid" },
+              { value: "table", label: "Table", icon: <Table2 aria-hidden="true" className="h-4 w-4" /> },
+              { value: "grid", label: "Grid", icon: <LayoutGrid aria-hidden="true" className="h-4 w-4" /> },
             ]}
           />
         </fieldset>

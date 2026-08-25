@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { Ban, CircleCheck, Plus, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
   AccountStatusBadge,
   Alert,
+  BackButton,
   Button,
   Card,
   CardBody,
@@ -90,25 +92,34 @@ export default function AdminAccountsPage() {
     // finding, PR #122).
     const showStatusToggle = item.status === "active" || item.status === "disabled";
     const nextStatus = item.status === "active" ? "disabled" : "active";
+    // ghs#134: row actions are icon-only within a ListView -- the row's
+    // own cells already give a sighted user context, and the accessible
+    // name (aria-label, below) names the account explicitly rather than
+    // relying on ambiguous table-position context for assistive tech.
+    const isDisabling = item.status === "active";
     return (
       <div className="flex flex-wrap items-center gap-2">
         {showStatusToggle && (
           <Button
             variant="secondary"
             size="sm"
+            icon={isDisabling ? <Ban aria-hidden="true" className="h-4 w-4" /> : <CircleCheck aria-hidden="true" className="h-4 w-4" />}
+            aria-label={`${isDisabling ? "Disable" : "Enable"} ${item.email}`}
             isLoading={statusMutation.isPending && statusMutation.variables?.id === item.id}
             onClick={() => statusMutation.mutate({ id: item.id, status: nextStatus })}
-          >
-            {item.status === "active" ? "Disable" : "Enable"}
-          </Button>
+          />
         )}
         {/* Self-deletion is already rejected server-side (400), but not
             offering the action at all on your own row is the honest UI
             -- matching, not merely tolerating, that server rule. */}
         {!isSelf && (
-          <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(item)}>
-            Delete
-          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
+            aria-label={`Delete ${item.email}`}
+            onClick={() => setDeleteTarget(item)}
+          />
         )}
       </div>
     );
@@ -118,13 +129,13 @@ export default function AdminAccountsPage() {
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-            ← Back
-          </Button>
+          <BackButton onClick={() => navigate("/")} />
           <h1 className="mt-4 text-2xl font-semibold text-text">Accounts</h1>
           <p className="mt-2 text-sm text-text-muted">Manage member and staff accounts.</p>
         </div>
-        <Button onClick={() => navigate("/admin/users/new")}>Create account</Button>
+        <Button icon={<Plus aria-hidden="true" className="h-4 w-4" />} onClick={() => navigate("/admin/users/new")}>
+          Create account
+        </Button>
       </div>
 
       <Card className="mt-8">
@@ -202,11 +213,12 @@ export default function AdminAccountsPage() {
         title="Delete account"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+            <Button variant="secondary" icon={<X aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeleteTarget(null)}>
               Cancel
             </Button>
             <Button
               variant="destructive"
+              icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
               isLoading={deleteMutation.isPending}
               onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
             >

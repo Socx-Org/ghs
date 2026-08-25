@@ -43,6 +43,26 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   isLoading?: boolean;
+  // ghs#134: a leading icon, e.g.
+  // `icon={<ArrowLeft aria-hidden="true" className="h-4 w-4" />}`.
+  // Deliberately not auto-sized/wrapped here: every other icon usage in
+  // this app (Sidebar, AccountMenu, ThemeToggle) sizes its own icon via
+  // className at the call site, not via a parent component forcing a
+  // size -- this stays consistent with that rather than inventing a
+  // second convention. Replaced by the loading spinner, not shown
+  // alongside it, while isLoading is true.
+  //
+  // Icon-only buttons (no visible text, an `aria-label` instead) can be
+  // built two ways, both valid: passing the icon as `children`
+  // (ThemeToggle's pre-existing usage, predating this prop), or passing
+  // it as `icon` with `children` omitted (every ListView row action --
+  // Edit/Delete/Disable -- added after this prop existed uses this
+  // form). Prefer the `icon`-prop form for new icon-only buttons: below,
+  // `isIconOnly` is `!children && Boolean(ariaLabel)` -- true only when
+  // `children` is empty (regardless of whether `icon` is set) *and* an
+  // `aria-label` is present, so the icon-as-children form never gets the
+  // square icon-button sizing, only the `icon`-prop form does.
+  icon?: ReactNode;
   children?: ReactNode;
 }
 
@@ -51,6 +71,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     variant = "primary",
     size = "md",
     isLoading = false,
+    icon,
     disabled,
     className,
     children,
@@ -84,7 +105,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       )}
       {...rest}
     >
-      {isLoading && <Spinner size="sm" className={SPINNER_CLASSES[variant]} />}
+      {isLoading ? <Spinner size="sm" className={SPINNER_CLASSES[variant]} /> : icon}
       {children}
     </button>
   );

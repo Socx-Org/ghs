@@ -1,8 +1,13 @@
+import type { ReactNode } from "react";
 import { cn } from "../lib/cn";
 
 export interface ToggleOption {
   value: string;
   label: string;
+  // ghs#134: an optional leading icon, shown ahead of the label. The
+  // label itself is never removed from the DOM -- see `iconOnly` below --
+  // so it always remains the option's accessible name regardless.
+  icon?: ReactNode;
   disabled?: boolean;
 }
 
@@ -22,6 +27,14 @@ export interface ToggleGroupProps {
   onChange?: (value: string) => void;
   disabled?: boolean;
   className?: string;
+  // ghs#134: hides each option's visible label text (sr-only instead),
+  // for a compact icon-only segmented control (e.g. ListView's own
+  // Table/Grid view switch). The label text still renders -- just
+  // visually hidden -- so it remains the radio's accessible name via the
+  // same implicit <label> wrapping used in the visible-text case; no
+  // parallel aria-label bookkeeping needed. Requires every option to
+  // pass an `icon`, or there'd be nothing visible left at all.
+  iconOnly?: boolean;
 }
 
 // Built on real <input type="radio"> elements (visually hidden, not
@@ -33,7 +46,23 @@ export interface ToggleGroupProps {
 // be strictly worse and is exactly the kind of hand-rolled keyboard
 // handling this project has already had to retrofit once (ListItem,
 // ghs#78's review pass) rather than get right the first time.
-export function ToggleGroup({ name, options, value, onChange, disabled, className }: ToggleGroupProps) {
+export function ToggleGroup({ name, options, value, onChange, disabled, className, iconOnly }: ToggleGroupProps) {
+  // ghs#134 review fix: iconOnly's own doc comment says every option
+  // must pass an icon, but nothing enforced that -- an option missing
+  // one would silently render with no visible affordance at all (its
+  // label sr-only, no icon to replace it). Same dev-time-only
+  // console.error convention Button already uses for its own icon-only
+  // aria-label requirement, not a thrown error -- this shouldn't crash
+  // production over a caller mistake it can still render (if badly).
+  if (import.meta.env.DEV && iconOnly) {
+    const missing = options.filter((option) => !option.icon);
+    if (missing.length > 0) {
+      console.error(
+        `ToggleGroup: iconOnly requires every option to have an icon. Missing for: ${missing.map((option) => option.label).join(", ")}.`,
+      );
+    }
+  }
+
   return (
     <div className={cn("inline-flex rounded-md border border-border bg-surface p-1", className)}>
       {options.map((option) => {
@@ -42,7 +71,7 @@ export function ToggleGroup({ name, options, value, onChange, disabled, classNam
           <label
             key={option.value}
             className={cn(
-              "relative flex min-h-9 min-w-11 cursor-pointer items-center justify-center rounded px-3 text-sm font-medium text-text-muted transition-colors",
+              "relative flex min-h-9 min-w-11 cursor-pointer items-center justify-center gap-1.5 rounded px-3 text-sm font-medium text-text-muted transition-colors",
               "has-[:checked]:bg-primary has-[:checked]:text-text-on-primary",
               "has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-primary",
               isDisabled ? "cursor-not-allowed opacity-50" : "hover:text-text",
@@ -57,7 +86,8 @@ export function ToggleGroup({ name, options, value, onChange, disabled, classNam
               onChange={() => onChange?.(option.value)}
               className="sr-only"
             />
-            {option.label}
+            {option.icon}
+            <span className={iconOnly ? "sr-only" : undefined}>{option.label}</span>
           </label>
         );
       })}

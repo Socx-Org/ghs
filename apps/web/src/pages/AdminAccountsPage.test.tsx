@@ -118,9 +118,12 @@ describe("AdminAccountsPage", () => {
     const ownRow = rowFor("admin@example.com");
     const aliceRow = rowFor("alice@example.com");
     // Disable is still offered on your own row -- only Delete is withheld.
-    expect(within(ownRow).getByRole("button", { name: "Disable" })).toBeInTheDocument();
-    expect(within(ownRow).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
-    expect(within(aliceRow).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    // ghs#134: row actions are icon-only -- each one's accessible name
+    // (aria-label) names the account explicitly instead of relying on
+    // visible "Disable"/"Delete" text.
+    expect(within(ownRow).getByRole("button", { name: "Disable admin@example.com" })).toBeInTheDocument();
+    expect(within(ownRow).queryByRole("button", { name: "Delete admin@example.com" })).not.toBeInTheDocument();
+    expect(within(aliceRow).getByRole("button", { name: "Delete alice@example.com" })).toBeInTheDocument();
   });
 
   it("offers neither Enable/Disable nor Delete on an already-deleted row", async () => {
@@ -140,9 +143,9 @@ describe("AdminAccountsPage", () => {
     await screen.findByText("pending@example.com");
 
     const pendingRow = rowFor("pending@example.com");
-    expect(within(pendingRow).queryByRole("button", { name: "Enable" })).not.toBeInTheDocument();
-    expect(within(pendingRow).queryByRole("button", { name: "Disable" })).not.toBeInTheDocument();
-    expect(within(pendingRow).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(within(pendingRow).queryByRole("button", { name: "Enable pending@example.com" })).not.toBeInTheDocument();
+    expect(within(pendingRow).queryByRole("button", { name: "Disable pending@example.com" })).not.toBeInTheDocument();
+    expect(within(pendingRow).getByRole("button", { name: "Delete pending@example.com" })).toBeInTheDocument();
   });
 
   it("Disable calls the real endpoint and refreshes the list on success", async () => {
@@ -153,7 +156,7 @@ describe("AdminAccountsPage", () => {
     await screen.findByText("alice@example.com");
 
     const aliceRow = rowFor("alice@example.com");
-    await userEvent.click(within(aliceRow).getByRole("button", { name: "Disable" }));
+    await userEvent.click(within(aliceRow).getByRole("button", { name: "Disable alice@example.com" }));
 
     await waitFor(() => expect(mock.history.patch?.length).toBe(1));
     expect(JSON.parse(mock.history.patch![0]!.data)).toEqual({ status: "disabled" });
@@ -168,7 +171,7 @@ describe("AdminAccountsPage", () => {
     await screen.findByText("ben@example.com");
 
     const benRow = rowFor("ben@example.com");
-    await userEvent.click(within(benRow).getByRole("button", { name: "Enable" }));
+    await userEvent.click(within(benRow).getByRole("button", { name: "Enable ben@example.com" }));
 
     await waitFor(() => expect(mock.history.patch?.length).toBe(1));
     expect(JSON.parse(mock.history.patch![0]!.data)).toEqual({ status: "active" });
@@ -181,7 +184,7 @@ describe("AdminAccountsPage", () => {
     await screen.findByText("alice@example.com");
 
     const aliceRow = rowFor("alice@example.com");
-    await userEvent.click(within(aliceRow).getByRole("button", { name: "Delete" }));
+    await userEvent.click(within(aliceRow).getByRole("button", { name: "Delete alice@example.com" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Delete account" });
     expect(within(dialog).getByText("alice@example.com")).toBeInTheDocument();
@@ -195,7 +198,7 @@ describe("AdminAccountsPage", () => {
     await screen.findByText("alice@example.com");
 
     const aliceRow = rowFor("alice@example.com");
-    await userEvent.click(within(aliceRow).getByRole("button", { name: "Delete" }));
+    await userEvent.click(within(aliceRow).getByRole("button", { name: "Delete alice@example.com" }));
     const dialog = await screen.findByRole("dialog", { name: "Delete account" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Delete account" }));
 
@@ -211,7 +214,7 @@ describe("AdminAccountsPage", () => {
     await screen.findByText("alice@example.com");
 
     const aliceRow = rowFor("alice@example.com");
-    await userEvent.click(within(aliceRow).getByRole("button", { name: "Delete" }));
+    await userEvent.click(within(aliceRow).getByRole("button", { name: "Delete alice@example.com" }));
     const dialog = await screen.findByRole("dialog", { name: "Delete account" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 

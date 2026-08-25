@@ -97,8 +97,11 @@ describe("MyRoundsPage", () => {
 
     await screen.findByText("Pebble Beach Golf Links");
     // Exactly one editable round (round-2, draft) -- one Edit, one Delete.
-    expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Delete" })).toHaveLength(1);
+    // ghs#134: row actions are icon-only -- the accessible name names
+    // the round's course explicitly instead of relying on visible
+    // "Edit"/"Delete" text.
+    expect(screen.getAllByRole("button", { name: "Edit round at St Andrews Links" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Delete round at St Andrews Links" })).toHaveLength(1);
   });
 
   it("Edit navigates to the existing edit/resume screen (/rounds/:id)", async () => {
@@ -107,7 +110,7 @@ describe("MyRoundsPage", () => {
     mock.onGet("/tee-configurations/tee-1").reply(200, { id: "tee-1", name: "Blue", holeCount: 18, courseRating: 71.2, slopeRating: 128, holes: [] });
 
     renderAsRole("player");
-    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Edit round at St Andrews Links" }));
 
     expect(await screen.findByText("Holes recorded")).toBeInTheDocument();
   });
@@ -125,7 +128,7 @@ describe("MyRoundsPage", () => {
     // (ghs#137), which persists in the DOM regardless of what's deleted.
     const table = await screen.findByRole("table");
     await within(table).findByText("Draft");
-    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete round at St Andrews Links" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Delete round" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Delete round" }));

@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, Checkbox, FormField, Input, Select } from "../components";
+import { Alert, BackButton, Button, Checkbox, FormField, Input, Select } from "../components";
 import { ApiError, createRound, getCourse, getMyPlayerProfile, listCourses, listUsers } from "../lib/api";
 import { playedAtToIsoString } from "../lib/dates";
 import { useAuth } from "../hooks/useAuth";
@@ -129,9 +129,7 @@ export default function NewRoundPage() {
 
   return (
     <div className="mx-auto w-full max-w-lg px-4 py-12">
-      <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-        ← Back
-      </Button>
+      <BackButton onClick={() => navigate("/")} />
       <h1 className="mt-4 text-2xl font-semibold text-text">Start a round</h1>
       <p className="mt-2 text-sm text-text-muted">
         {isAdmin

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, useToast } from "../components";
@@ -78,14 +79,24 @@ export default function MyRoundsPage() {
 
   function renderActions(item: PlayerRoundListItem) {
     if (!EDITABLE_ROUND_STATUSES.has(item.status)) return null;
+    // ghs#134: icon-only within this ListView -- see AdminAccountsPage's
+    // own renderActions for the same reasoning.
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="secondary" size="sm" onClick={() => navigate(`/rounds/${item.id}`)}>
-          Edit
-        </Button>
-        <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(item)}>
-          Delete
-        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<Pencil aria-hidden="true" className="h-4 w-4" />}
+          aria-label={`Edit round at ${item.courseName}`}
+          onClick={() => navigate(`/rounds/${item.id}`)}
+        />
+        <Button
+          variant="destructive"
+          size="sm"
+          icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
+          aria-label={`Delete round at ${item.courseName}`}
+          onClick={() => setDeleteTarget(item)}
+        />
       </div>
     );
   }
@@ -97,7 +108,9 @@ export default function MyRoundsPage() {
           <h1 className="mt-4 text-2xl font-semibold text-text">My Rounds</h1>
           <p className="mt-2 text-sm text-text-muted">Every round you've played.</p>
         </div>
-        <Button onClick={() => navigate("/rounds/new")}>New round</Button>
+        <Button icon={<Plus aria-hidden="true" className="h-4 w-4" />} onClick={() => navigate("/rounds/new")}>
+          New round
+        </Button>
       </div>
 
       <Card className="mt-8">
@@ -173,11 +186,12 @@ export default function MyRoundsPage() {
         title="Delete round"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+            <Button variant="secondary" icon={<X aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeleteTarget(null)}>
               Cancel
             </Button>
             <Button
               variant="destructive"
+              icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
               isLoading={deleteMutation.isPending}
               onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
             >

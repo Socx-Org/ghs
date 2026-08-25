@@ -16,11 +16,14 @@ import {
   AlertTriangle,
   AlertCircle,
   Info,
+  LayoutGrid,
+  Table2,
 } from "lucide-react";
 import {
   Alert,
   AppHeader,
   Avatar,
+  BackButton,
   Badge,
   Button,
   Card,
@@ -170,6 +173,7 @@ export default function ComponentsCatalogue() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState("list");
+  const [tableGridMode, setTableGridMode] = useState("table");
   const [activeNav, setActiveNav] = useState("dashboard");
   const [showSkeletons, setShowSkeletons] = useState(true);
 
@@ -358,16 +362,40 @@ export default function ComponentsCatalogue() {
             </div>
           </Example>
 
-          <Example label="Icon + text, and icon-only (requires aria-label -- no visible text)">
+          <Example label="Icon + text (icon prop, ghs#134) -- caller sizes and aria-hides its own icon; Button doesn't wrap or resize it">
             <div className="flex flex-wrap items-center gap-3">
-              <Button variant="secondary">
-                <Plus aria-hidden="true" className="h-4 w-4" />
-                Add round
+              <Button icon={<Plus aria-hidden="true" className="h-4 w-4" />}>Create course</Button>
+              <Button variant="secondary" icon={<Pencil aria-hidden="true" className="h-4 w-4" />}>
+                Edit
               </Button>
+              <Button variant="destructive" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}>
+                Delete
+              </Button>
+              <BackButton />
+              <p className="text-sm text-text-muted">
+                BackButton wraps this same icon prop with a fixed ArrowLeft + ghost/sm styling -- used for every "back to the previous
+                screen" link across the app instead of each page hand-rolling its own.
+              </p>
+            </div>
+          </Example>
+
+          <Example label="Icon-only (requires aria-label -- no visible text)">
+            <div className="flex flex-wrap items-center gap-3">
               <Button variant="ghost" aria-label="Close">
                 <X aria-hidden="true" className="h-5 w-5" />
               </Button>
               <p className="text-sm text-text-muted">Compact affordances (e.g. remove a hole-score row) get an accessible name via aria-label, not visible text.</p>
+            </div>
+          </Example>
+
+          <Example label="Icon-only via the icon prop (ghs#134) -- ListView row actions (Edit/Delete/Disable) use this form, so the icon prop gets Button's own square icon-button sizing">
+            <div className="flex flex-wrap items-center gap-3">
+              <Button variant="secondary" size="sm" icon={<Pencil aria-hidden="true" className="h-4 w-4" />} aria-label="Edit round at Pebble Beach Golf Links" />
+              <Button variant="destructive" size="sm" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} aria-label="Delete round at Pebble Beach Golf Links" />
+              <p className="text-sm text-text-muted">
+                A row-action's aria-label names the row it acts on explicitly (e.g. "Delete round at ...") rather than leaving several
+                identically-named icon buttons on the same page for assistive tech.
+              </p>
             </div>
           </Example>
 
@@ -379,6 +407,19 @@ export default function ComponentsCatalogue() {
               options={[
                 { value: "list", label: "List" },
                 { value: "table", label: "Table" },
+              ]}
+            />
+          </Example>
+
+          <Example label="ToggleGroup -- iconOnly (ghs#134), e.g. ListView's own Table/Grid view switch. The label stays as each option's accessible name -- sr-only, not removed.">
+            <ToggleGroup
+              name="table-grid-mode"
+              value={tableGridMode}
+              onChange={setTableGridMode}
+              iconOnly
+              options={[
+                { value: "table", label: "Table", icon: <Table2 aria-hidden="true" className="h-4 w-4" /> },
+                { value: "grid", label: "Grid", icon: <LayoutGrid aria-hidden="true" className="h-4 w-4" /> },
               ]}
             />
           </Example>

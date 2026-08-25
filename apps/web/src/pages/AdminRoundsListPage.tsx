@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, useToast } from "../components";
@@ -70,10 +71,16 @@ export default function AdminRoundsListPage() {
   });
 
   function renderActions(item: AdminRoundListItem) {
+    // ghs#134: icon-only within this ListView -- see AdminAccountsPage's
+    // own renderActions for the same reasoning.
     return (
-      <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(item)}>
-        Delete
-      </Button>
+      <Button
+        variant="destructive"
+        size="sm"
+        icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
+        aria-label={`Delete ${item.playerFirstName} ${item.playerLastName}'s round`}
+        onClick={() => setDeleteTarget(item)}
+      />
     );
   }
 
@@ -159,11 +166,12 @@ export default function AdminRoundsListPage() {
         title="Delete round"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDeleteTarget(null)}>
+            <Button variant="secondary" icon={<X aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeleteTarget(null)}>
               Cancel
             </Button>
             <Button
               variant="destructive"
+              icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
               isLoading={deleteMutation.isPending}
               onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
             >

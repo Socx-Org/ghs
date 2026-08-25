@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -73,7 +74,7 @@ export default function PlayerDashboardPage() {
       <Card>
         <CardHeader className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-text">Recent rounds</h2>
-          <Button size="sm" onClick={() => navigate("/rounds/new")}>
+          <Button size="sm" icon={<Plus aria-hidden="true" className="h-4 w-4" />} onClick={() => navigate("/rounds/new")}>
             New round
           </Button>
         </CardHeader>
