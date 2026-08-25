@@ -75,8 +75,13 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+// ghs#163: must match AppRoutes.tsx's real route exactly -- it's
+// `/activate`, not `/activate-account`. Confirmed by direct comparison
+// against resetUrl() below, whose own `/reset-password` already
+// correctly matches its real route; this was an isolated mismatch, not
+// a broader path-naming pattern bug.
 function activationUrl(appBaseUrl: string, token: string): string {
-  return `${appBaseUrl}/activate-account?token=${encodeURIComponent(token)}`;
+  return `${appBaseUrl}/activate?token=${encodeURIComponent(token)}`;
 }
 
 function resetUrl(appBaseUrl: string, token: string): string {
