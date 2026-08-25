@@ -43,16 +43,24 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   isLoading?: boolean;
-  // ghs#134: a leading icon alongside a visible text label -- e.g.
+  // ghs#134: a leading icon, e.g.
   // `icon={<ArrowLeft aria-hidden="true" className="h-4 w-4" />}`.
   // Deliberately not auto-sized/wrapped here: every other icon usage in
   // this app (Sidebar, AccountMenu, ThemeToggle) sizes its own icon via
   // className at the call site, not via a parent component forcing a
   // size -- this stays consistent with that rather than inventing a
   // second convention. Replaced by the loading spinner, not shown
-  // alongside it, while isLoading is true. Icon-only buttons (no
-  // children, an aria-label instead) are unaffected -- those still pass
-  // their icon as children directly, unchanged.
+  // alongside it, while isLoading is true.
+  //
+  // Icon-only buttons (no visible text, an `aria-label` instead) can be
+  // built two ways, both valid: passing the icon as `children`
+  // (ThemeToggle's pre-existing usage, predating this prop), or passing
+  // it as `icon` with `children` omitted (every ListView row action --
+  // Edit/Delete/Disable -- added after this prop existed uses this
+  // form). Prefer the `icon`-prop form for new icon-only buttons: below,
+  // `isIconOnly` checks only `children`, so only that form reliably gets
+  // the square icon-button sizing regardless of whether an `icon` is
+  // also passed.
   icon?: ReactNode;
   children?: ReactNode;
 }

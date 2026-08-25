@@ -47,6 +47,22 @@ export interface ToggleGroupProps {
 // handling this project has already had to retrofit once (ListItem,
 // ghs#78's review pass) rather than get right the first time.
 export function ToggleGroup({ name, options, value, onChange, disabled, className, iconOnly }: ToggleGroupProps) {
+  // ghs#134 review fix: iconOnly's own doc comment says every option
+  // must pass an icon, but nothing enforced that -- an option missing
+  // one would silently render with no visible affordance at all (its
+  // label sr-only, no icon to replace it). Same dev-time-only
+  // console.error convention Button already uses for its own icon-only
+  // aria-label requirement, not a thrown error -- this shouldn't crash
+  // production over a caller mistake it can still render (if badly).
+  if (import.meta.env.DEV && iconOnly) {
+    const missing = options.filter((option) => !option.icon);
+    if (missing.length > 0) {
+      console.error(
+        `ToggleGroup: iconOnly requires every option to have an icon. Missing for: ${missing.map((option) => option.label).join(", ")}.`,
+      );
+    }
+  }
+
   return (
     <div className={cn("inline-flex rounded-md border border-border bg-surface p-1", className)}>
       {options.map((option) => {
