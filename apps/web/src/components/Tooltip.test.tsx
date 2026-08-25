@@ -121,4 +121,25 @@ describe("Tooltip", () => {
     const tooltip = await screen.findByRole("tooltip");
     expect(screen.getByRole("button", { name: "Delete" })).toHaveAttribute("aria-describedby", tooltip.id);
   });
+
+  // Review fix: a child that already carries its own aria-describedby
+  // (e.g. linked to real form error/help text) must keep that link --
+  // Tooltip appends its own id, it doesn't replace it.
+  it("appends to, rather than overwrites, a child's pre-existing aria-describedby", async () => {
+    render(
+      <Tooltip content="This can't be undone">
+        <Button aria-describedby="existing-help-text">Delete</Button>
+      </Tooltip>,
+    );
+    const button = screen.getByRole("button", { name: "Delete" });
+    expect(button).toHaveAttribute("aria-describedby", "existing-help-text");
+
+    await userEvent.tab();
+    const tooltip = await screen.findByRole("tooltip");
+    expect(button).toHaveAttribute("aria-describedby", `existing-help-text ${tooltip.id}`);
+
+    await userEvent.tab();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    expect(button).toHaveAttribute("aria-describedby", "existing-help-text");
+  });
 });

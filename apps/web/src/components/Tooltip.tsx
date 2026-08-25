@@ -103,8 +103,16 @@ export function Tooltip({ content, children, placement = "top" }: TooltipProps) 
 
   useEffect(() => clearTimers, []);
 
-  const childAriaLabel = (children.props as { "aria-label"?: string })["aria-label"];
-  const describedBy = visible && content !== childAriaLabel ? tooltipId : undefined;
+  // Review fix: the child may already carry its own aria-describedby
+  // (e.g. a Button linked to real form error/help text) -- appending
+  // this tooltip's id to that, not replacing it, so cloneElement below
+  // never silently severs an existing accessibility link. Left
+  // untouched (not stripped) whenever the tooltip doesn't need it
+  // (hidden, or its content just mirrors the child's own aria-label).
+  const childProps = children.props as { "aria-label"?: string; "aria-describedby"?: string };
+  const existingDescribedBy = childProps["aria-describedby"];
+  const shouldDescribe = visible && content !== childProps["aria-label"];
+  const describedBy = shouldDescribe ? [existingDescribedBy, tooltipId].filter(Boolean).join(" ") : existingDescribedBy;
 
   return (
     <span
