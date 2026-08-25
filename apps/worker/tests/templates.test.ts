@@ -71,24 +71,29 @@ test("manual_override HTML-escapes the free-text reason -- same injection risk a
   assert.match(rendered.html, /&lt;b&gt;bold&lt;\/b&gt;/);
 });
 
-test("account_activation -- subject preserved verbatim from legacy, builds a real activation URL from the raw token", () => {
+// ghs#163: this exact test previously asserted /activate-account, the
+// wrong path -- matching the real, shipped bug rather than catching it.
+// AppRoutes.tsx's real route is /activate; confirmed directly, not
+// assumed, by reading that file before fixing this one.
+test("account_activation -- subject preserved verbatim from legacy, builds a real activation URL matching the real /activate route", () => {
   const rendered = renderNotification("account_activation", { email: "jane@example.com", token: "raw-token-abc", expiresAt: "2026-08-17T00:00:00.000Z" }, APP_BASE_URL);
   assert.equal(rendered.subject, "Activate your account");
-  assert.match(rendered.text, /https:\/\/ghs\.test\/activate-account\?token=raw-token-abc/);
+  assert.match(rendered.text, /https:\/\/ghs\.test\/activate\?token=raw-token-abc/);
+  assert.doesNotMatch(rendered.text, /activate-account/, "must not regress to the wrong path (ghs#163)");
   assert.doesNotMatch(rendered.text, /raw-token-abc.*raw-token-abc/, "token appears in the URL, not duplicated as a bare value elsewhere");
 });
 
 test("account_activation_resend uses the same subject and activation-link content as the original (same call to action)", () => {
   const rendered = renderNotification("account_activation_resend", { email: "jane@example.com", token: "resend-token", expiresAt: "2026-08-17T00:00:00.000Z" }, APP_BASE_URL);
   assert.equal(rendered.subject, "Activate your account");
-  assert.match(rendered.text, /resend-token/);
+  assert.match(rendered.text, /https:\/\/ghs\.test\/activate\?token=resend-token/);
 });
 
-test("account_activation_admin_invite -- distinct wording (no direct legacy precedent), still a real activation link", () => {
+test("account_activation_admin_invite -- distinct wording (no direct legacy precedent), still a real activation link matching the real /activate route", () => {
   const rendered = renderNotification("account_activation_admin_invite", { email: "invited@example.com", token: "invite-token", expiresAt: "2026-08-17T00:00:00.000Z" }, APP_BASE_URL);
   assert.match(rendered.subject, /invited/i);
   assert.match(rendered.text, /administrator/i);
-  assert.match(rendered.text, /invite-token/);
+  assert.match(rendered.text, /https:\/\/ghs\.test\/activate\?token=invite-token/);
 });
 
 test("password_reset -- subject preserved verbatim from legacy, builds a real reset URL from the raw token", () => {
