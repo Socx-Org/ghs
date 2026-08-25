@@ -6,6 +6,7 @@ import { Button } from "./Button";
 import { Footer } from "./Footer";
 import { Logo } from "./Logo";
 import { ThemeToggle } from "./ThemeToggle";
+import { Tooltip } from "./Tooltip";
 import { AccountMenu } from "./navigation/AccountMenu";
 import { MobileNav } from "./navigation/MobileNav";
 import { Sidebar } from "./navigation/Sidebar";
@@ -38,9 +39,14 @@ export default function AppShell({ children }: AppShellProps) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface px-4 sm:px-6">
           <div className="flex items-center gap-3 lg:hidden">
-            <Button variant="ghost" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}>
-              <Menu aria-hidden="true" className="h-5 w-5" />
-            </Button>
+            {/* ghs#166: placement="bottom" -- this button sits in the top
+                header bar, where the default "top" placement would render
+                the tooltip off-screen above the viewport. */}
+            <Tooltip content="Open navigation" placement="bottom">
+              <Button variant="ghost" aria-label="Open navigation" onClick={() => setMobileNavOpen(true)}>
+                <Menu aria-hidden="true" className="h-5 w-5" />
+              </Button>
+            </Tooltip>
             <Logo variant="mark" label="GHS" />
           </div>
           <div className="hidden lg:block" />

@@ -6,6 +6,7 @@ export * from "./Select";
 export * from "./Checkbox";
 export * from "./RadioGroup";
 export * from "./ToggleGroup";
+export * from "./Tooltip";
 export * from "./FormField";
 export * from "./Alert";
 export * from "./Spinner";

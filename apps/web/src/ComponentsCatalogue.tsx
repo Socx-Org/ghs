@@ -56,6 +56,7 @@ import {
   Textarea,
   ThemeToggle,
   ToggleGroup,
+  Tooltip,
 } from "./components";
 import { useToast } from "./components/useToast";
 import { ROUND_STATUS_OPTIONS } from "./lib/domain-labels";
@@ -395,6 +396,36 @@ export default function ComponentsCatalogue() {
               <p className="text-sm text-text-muted">
                 A row-action's aria-label names the row it acts on explicitly (e.g. "Delete round at ...") rather than leaving several
                 identically-named icon buttons on the same page for assistive tech.
+              </p>
+            </div>
+          </Example>
+
+          <Example label="Tooltip (ghs#166) -- liquid glass: a blurred, translucent panel, not an opaque one. Hover (after a brief delay), Tab to focus, or tap on touch -- never hover-only.">
+            {/* pt-10, not the usual py-4 -- a "top"-placed Tooltip needs
+                real clearance above the button, or it overlaps this
+                Example's own (possibly wrapped) label text above it. */}
+            <div className="flex flex-wrap items-center gap-6 pt-10 pb-4">
+              <Tooltip content="Edit round at Pebble Beach Golf Links">
+                <Button variant="secondary" size="sm" icon={<Pencil aria-hidden="true" className="h-4 w-4" />} aria-label="Edit round at Pebble Beach Golf Links" />
+              </Tooltip>
+              <Tooltip content="Delete round at Pebble Beach Golf Links">
+                <Button variant="destructive" size="sm" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} aria-label="Delete round at Pebble Beach Golf Links" />
+              </Tooltip>
+              {/* Illustrative only -- no real button in the app today has
+                  a labelled Tooltip; the audit found every visible button
+                  label already says enough on its own (see
+                  frontend-architecture.md). Shown here so the pattern is
+                  demonstrated even though it's currently unused for a
+                  labelled button. */}
+              <Tooltip content="Deleting removes it permanently -- this can't be undone" placement="bottom">
+                <Button variant="destructive" size="sm">
+                  Delete
+                </Button>
+              </Tooltip>
+              <p className="text-sm text-text-muted">
+                For an icon-only button (the first two above), the tooltip content mirrors its own aria-label -- one source of truth,
+                not a second copy that can drift. A labelled button (the third) only gets one when it adds something the visible text
+                doesn't already say.
               </p>
             </div>
           </Example>
@@ -772,7 +803,10 @@ export default function ComponentsCatalogue() {
           <Example label="Disabled action because of permissions">
             <div className="flex items-center gap-3">
               <Button disabled>Approve round</Button>
-              <p className="text-sm text-text-muted">Only committee members can approve rounds. Inline text, not a hover-only tooltip -- see frontend-architecture.md.</p>
+              <p className="text-sm text-text-muted">
+                Only committee members can approve rounds. Inline text, not a tooltip -- always visible without hovering/focusing/tapping
+                first, even though Tooltip (ghs#166) exists elsewhere now. See frontend-architecture.md.
+              </p>
             </div>
           </Example>
 
