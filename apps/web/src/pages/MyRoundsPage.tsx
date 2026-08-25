@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Pencil, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, useToast } from "../components";
@@ -80,10 +81,10 @@ export default function MyRoundsPage() {
     if (!EDITABLE_ROUND_STATUSES.has(item.status)) return null;
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="secondary" size="sm" onClick={() => navigate(`/rounds/${item.id}`)}>
+        <Button variant="secondary" size="sm" icon={<Pencil aria-hidden="true" className="h-4 w-4" />} onClick={() => navigate(`/rounds/${item.id}`)}>
           Edit
         </Button>
-        <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(item)}>
+        <Button variant="destructive" size="sm" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeleteTarget(item)}>
           Delete
         </Button>
       </div>
@@ -178,6 +179,7 @@ export default function MyRoundsPage() {
             </Button>
             <Button
               variant="destructive"
+              icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
               isLoading={deleteMutation.isPending}
               onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
             >

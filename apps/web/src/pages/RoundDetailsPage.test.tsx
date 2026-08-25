@@ -141,7 +141,7 @@ describe("RoundDetailsPage", () => {
 
     renderAsRole("player");
     await screen.findByText("Blue");
-    await userEvent.click(screen.getByRole("button", { name: "← Back to My Rounds" }));
+    await userEvent.click(screen.getByRole("button", { name: "Back to My Rounds" }));
 
     expect(await screen.findByRole("heading", { name: "My Rounds" })).toBeInTheDocument();
   });

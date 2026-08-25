@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
   AccountStatusBadge,
   Alert,
+  BackButton,
   Button,
   Card,
   CardBody,
@@ -106,7 +108,7 @@ export default function AdminAccountsPage() {
             offering the action at all on your own row is the honest UI
             -- matching, not merely tolerating, that server rule. */}
         {!isSelf && (
-          <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(item)}>
+          <Button variant="destructive" size="sm" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeleteTarget(item)}>
             Delete
           </Button>
         )}
@@ -118,13 +120,13 @@ export default function AdminAccountsPage() {
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-            ← Back
-          </Button>
+          <BackButton onClick={() => navigate("/")} />
           <h1 className="mt-4 text-2xl font-semibold text-text">Accounts</h1>
           <p className="mt-2 text-sm text-text-muted">Manage member and staff accounts.</p>
         </div>
-        <Button onClick={() => navigate("/admin/users/new")}>Create account</Button>
+        <Button icon={<Plus aria-hidden="true" className="h-4 w-4" />} onClick={() => navigate("/admin/users/new")}>
+          Create account
+        </Button>
       </div>
 
       <Card className="mt-8">
@@ -207,6 +209,7 @@ export default function AdminAccountsPage() {
             </Button>
             <Button
               variant="destructive"
+              icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
               isLoading={deleteMutation.isPending}
               onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
             >

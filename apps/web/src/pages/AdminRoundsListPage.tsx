@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, useToast } from "../components";
@@ -71,7 +72,7 @@ export default function AdminRoundsListPage() {
 
   function renderActions(item: AdminRoundListItem) {
     return (
-      <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(item)}>
+      <Button variant="destructive" size="sm" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeleteTarget(item)}>
         Delete
       </Button>
     );
@@ -164,6 +165,7 @@ export default function AdminRoundsListPage() {
             </Button>
             <Button
               variant="destructive"
+              icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
               isLoading={deleteMutation.isPending}
               onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
             >

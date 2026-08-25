@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Button } from "./Button";
 
@@ -58,5 +58,22 @@ describe("Button", () => {
     render(<Button />);
     expect(spy).toHaveBeenCalledWith(expect.stringContaining("aria-label"));
     spy.mockRestore();
+  });
+
+  // ghs#134
+  it("renders a leading icon alongside a visible text label", () => {
+    render(<Button icon={<svg data-testid="leading-icon" aria-hidden="true" />}>Back</Button>);
+    const button = screen.getByRole("button", { name: "Back" });
+    expect(within(button).getByTestId("leading-icon")).toBeInTheDocument();
+  });
+
+  it("shows the loading spinner instead of the icon, not alongside it, while isLoading is true", () => {
+    render(
+      <Button isLoading icon={<svg data-testid="leading-icon" aria-hidden="true" />}>
+        Back
+      </Button>,
+    );
+    expect(screen.queryByTestId("leading-icon")).not.toBeInTheDocument();
+    expect(screen.getByRole("button")).toHaveAttribute("aria-busy", "true");
   });
 });

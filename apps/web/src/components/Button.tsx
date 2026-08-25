@@ -43,6 +43,17 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   isLoading?: boolean;
+  // ghs#134: a leading icon alongside a visible text label -- e.g.
+  // `icon={<ArrowLeft aria-hidden="true" className="h-4 w-4" />}`.
+  // Deliberately not auto-sized/wrapped here: every other icon usage in
+  // this app (Sidebar, AccountMenu, ThemeToggle) sizes its own icon via
+  // className at the call site, not via a parent component forcing a
+  // size -- this stays consistent with that rather than inventing a
+  // second convention. Replaced by the loading spinner, not shown
+  // alongside it, while isLoading is true. Icon-only buttons (no
+  // children, an aria-label instead) are unaffected -- those still pass
+  // their icon as children directly, unchanged.
+  icon?: ReactNode;
   children?: ReactNode;
 }
 
@@ -51,6 +62,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     variant = "primary",
     size = "md",
     isLoading = false,
+    icon,
     disabled,
     className,
     children,
@@ -84,7 +96,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       )}
       {...rest}
     >
-      {isLoading && <Spinner size="sm" className={SPINNER_CLASSES[variant]} />}
+      {isLoading ? <Spinner size="sm" className={SPINNER_CLASSES[variant]} /> : icon}
       {children}
     </button>
   );

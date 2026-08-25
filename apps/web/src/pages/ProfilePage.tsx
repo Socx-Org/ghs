@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Alert, Button, Card, CardBody, CardHeader, FormField, Input, RoleBadge, Skeleton } from "../components";
+import { Alert, BackButton, Button, Card, CardBody, CardHeader, FormField, Input, RoleBadge, Skeleton } from "../components";
 import { ApiError, changePassword, getMe } from "../lib/api";
 import type { AccountProfile } from "../types/domain";
 
@@ -86,9 +86,7 @@ export default function ProfilePage() {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4 sm:p-6">
       <div>
-        <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-          ← Back
-        </Button>
+        <BackButton onClick={() => navigate("/")} />
         <h1 className="mt-4 text-2xl font-semibold text-text">Profile</h1>
         <p className="mt-2 text-sm text-text-muted">View your account details and change your password.</p>
       </div>

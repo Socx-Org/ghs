@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Card, CardBody, CardHeader, HoleEntryCard, RoundHoleCsvImportForm, RoundStatusBadge, Skeleton, Stat, ToggleGroup, useToast } from "../components";
+import { Alert, BackButton, Button, Card, CardBody, CardHeader, HoleEntryCard, RoundHoleCsvImportForm, RoundStatusBadge, Skeleton, Stat, ToggleGroup, useToast } from "../components";
 import { ApiError, getRound, getTeeConfiguration, submitRound } from "../lib/api";
 import { EDITABLE_ROUND_STATUSES } from "../types/domain";
 import type { Round, TeeConfiguration } from "../types/domain";
@@ -184,9 +184,7 @@ export default function RoundEntryPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4 sm:p-6">
-      <Button variant="ghost" size="sm" onClick={() => navigate("/")} className="self-start">
-        ← Back
-      </Button>
+      <BackButton onClick={() => navigate("/")} className="self-start" />
 
       {roundQuery.isPending || teeQuery.isPending ? (
         <div className="flex flex-col gap-3">

@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, CardBody, CardHeader, HolesTable, Modal, RoundStatusBadge, Skeleton, Stat, Textarea, useToast } from "../components";
+import { Alert, BackButton, Button, Card, CardBody, CardHeader, HolesTable, Modal, RoundStatusBadge, Skeleton, Stat, Textarea, useToast } from "../components";
 import { ApiError, approveRound, deleteRound, getPlayer, getRound, getTeeConfiguration, rejectRound } from "../lib/api";
 
 // ghs#67: the admin's round-review screen -- reached from the pending
@@ -139,9 +140,7 @@ export default function AdminRoundReviewPage() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 sm:p-6">
       <div>
-        <Button variant="ghost" size="sm" onClick={() => navigate("/admin/rounds/pending")}>
-          ← Back
-        </Button>
+        <BackButton onClick={() => navigate("/admin/rounds/pending")} />
         <h1 className="mt-4 text-2xl font-semibold text-text">Review round</h1>
       </div>
 
@@ -204,7 +203,7 @@ export default function AdminRoundReviewPage() {
               Approve/Reject above. */}
           <Card>
             <CardBody className="flex justify-end">
-              <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
+              <Button variant="destructive" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} onClick={() => setDeleteOpen(true)}>
                 Delete round
               </Button>
             </CardBody>
@@ -254,7 +253,12 @@ export default function AdminRoundReviewPage() {
               <Button variant="secondary" onClick={() => setDeleteOpen(false)}>
                 Cancel
               </Button>
-              <Button variant="destructive" isLoading={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>
+              <Button
+                variant="destructive"
+                icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
+                isLoading={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate()}
+              >
                 Delete round
               </Button>
             </>

@@ -1,3 +1,4 @@
+import { Plus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Skeleton, TableCell, TableHeaderCell } from "../components";
@@ -42,7 +43,11 @@ export default function CourseListPage() {
           <h1 className="mt-4 text-2xl font-semibold text-text">Courses</h1>
           <p className="mt-2 text-sm text-text-muted">Golf courses available for round entry.</p>
         </div>
-        {isAdmin && <Button onClick={() => navigate("/courses/new")}>Create course</Button>}
+        {isAdmin && (
+          <Button icon={<Plus aria-hidden="true" className="h-4 w-4" />} onClick={() => navigate("/courses/new")}>
+            Create course
+          </Button>
+        )}
       </div>
 
       <Card className="mt-8">

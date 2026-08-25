@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Alert, Button, CourseCsvImportForm, FormField, Input, ToggleGroup } from "../components";
+import { Alert, BackButton, Button, CourseCsvImportForm, FormField, Input, ToggleGroup } from "../components";
 import type { CourseCsvImportSubmitValue } from "../components";
 import { ApiError, createCourse } from "../lib/api";
 
@@ -105,9 +105,7 @@ export default function CreateCoursePage() {
 
   return (
     <div className={mode === "csv" ? "mx-auto w-full max-w-2xl px-4 py-12" : "mx-auto w-full max-w-lg px-4 py-12"}>
-      <Button variant="ghost" size="sm" onClick={() => navigate("/courses")}>
-        ← Back
-      </Button>
+      <BackButton onClick={() => navigate("/courses")} />
       <h1 className="mt-4 text-2xl font-semibold text-text">Create course</h1>
       <p className="mt-2 text-sm text-text-muted">
         {mode === "manual" ? "Add a new golf course. Tee configurations can be added afterward." : "Import a course and its tee configurations from a CSV file."}

@@ -183,8 +183,9 @@ describe("PlayerDashboardPage", () => {
     expect(continueButtons).toHaveLength(1);
 
     await userEvent.click(continueButtons[0]!);
-    // Real navigation into RoundEntryPage -- "← Back" is its own
-    // deterministic, query-independent marker (same as AppRoutes.test.tsx).
-    expect(await screen.findByRole("button", { name: "← Back" })).toBeInTheDocument();
+    // Real navigation into RoundEntryPage -- "Back" (BackButton, ghs#134)
+    // is its own deterministic, query-independent marker (same as
+    // AppRoutes.test.tsx).
+    expect(await screen.findByRole("button", { name: "Back" })).toBeInTheDocument();
   });
 });

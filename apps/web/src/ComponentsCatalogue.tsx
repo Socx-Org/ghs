@@ -21,6 +21,7 @@ import {
   Alert,
   AppHeader,
   Avatar,
+  BackButton,
   Badge,
   Button,
   Card,
@@ -358,12 +359,25 @@ export default function ComponentsCatalogue() {
             </div>
           </Example>
 
-          <Example label="Icon + text, and icon-only (requires aria-label -- no visible text)">
+          <Example label="Icon + text (icon prop, ghs#134) -- caller sizes and aria-hides its own icon; Button doesn't wrap or resize it">
             <div className="flex flex-wrap items-center gap-3">
-              <Button variant="secondary">
-                <Plus aria-hidden="true" className="h-4 w-4" />
-                Add round
+              <Button icon={<Plus aria-hidden="true" className="h-4 w-4" />}>Create course</Button>
+              <Button variant="secondary" icon={<Pencil aria-hidden="true" className="h-4 w-4" />}>
+                Edit
               </Button>
+              <Button variant="destructive" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}>
+                Delete
+              </Button>
+              <BackButton />
+              <p className="text-sm text-text-muted">
+                BackButton wraps this same icon prop with a fixed ArrowLeft + ghost/sm styling -- used for every "back to the previous
+                screen" link across the app instead of each page hand-rolling its own.
+              </p>
+            </div>
+          </Example>
+
+          <Example label="Icon-only (requires aria-label -- no visible text)">
+            <div className="flex flex-wrap items-center gap-3">
               <Button variant="ghost" aria-label="Close">
                 <X aria-hidden="true" className="h-5 w-5" />
               </Button>
