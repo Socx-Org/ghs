@@ -58,9 +58,10 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   // it as `icon` with `children` omitted (every ListView row action --
   // Edit/Delete/Disable -- added after this prop existed uses this
   // form). Prefer the `icon`-prop form for new icon-only buttons: below,
-  // `isIconOnly` checks only `children`, so only that form reliably gets
-  // the square icon-button sizing regardless of whether an `icon` is
-  // also passed.
+  // `isIconOnly` is `!children && Boolean(ariaLabel)` -- true only when
+  // `children` is empty (regardless of whether `icon` is set) *and* an
+  // `aria-label` is present, so the icon-as-children form never gets the
+  // square icon-button sizing, only the `icon`-prop form does.
   icon?: ReactNode;
   children?: ReactNode;
 }
