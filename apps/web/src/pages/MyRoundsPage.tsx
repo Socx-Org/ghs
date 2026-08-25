@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, useToast } from "../components";
+import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, Tooltip, useToast } from "../components";
 import { ApiError, deleteRound, getMyPlayerProfile, getPlayerRounds } from "../lib/api";
 import { ROUND_STATUS_OPTIONS } from "../lib/domain-labels";
 import { EDITABLE_ROUND_STATUSES } from "../types/domain";
@@ -81,22 +81,18 @@ export default function MyRoundsPage() {
     if (!EDITABLE_ROUND_STATUSES.has(item.status)) return null;
     // ghs#134: icon-only within this ListView -- see AdminAccountsPage's
     // own renderActions for the same reasoning.
+    // ghs#166: content mirrors each button's own aria-label -- single
+    // source of truth, not a second copy that can drift.
+    const editLabel = `Edit round at ${item.courseName}`;
+    const deleteLabel = `Delete round at ${item.courseName}`;
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<Pencil aria-hidden="true" className="h-4 w-4" />}
-          aria-label={`Edit round at ${item.courseName}`}
-          onClick={() => navigate(`/rounds/${item.id}`)}
-        />
-        <Button
-          variant="destructive"
-          size="sm"
-          icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
-          aria-label={`Delete round at ${item.courseName}`}
-          onClick={() => setDeleteTarget(item)}
-        />
+        <Tooltip content={editLabel}>
+          <Button variant="secondary" size="sm" icon={<Pencil aria-hidden="true" className="h-4 w-4" />} aria-label={editLabel} onClick={() => navigate(`/rounds/${item.id}`)} />
+        </Tooltip>
+        <Tooltip content={deleteLabel}>
+          <Button variant="destructive" size="sm" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} aria-label={deleteLabel} onClick={() => setDeleteTarget(item)} />
+        </Tooltip>
       </div>
     );
   }

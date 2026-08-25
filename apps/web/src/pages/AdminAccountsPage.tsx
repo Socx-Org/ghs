@@ -16,6 +16,7 @@ import {
   Skeleton,
   TableCell,
   TableHeaderCell,
+  Tooltip,
   useToast,
 } from "../components";
 import { ApiError, deleteUser, listUsers, setUserStatus } from "../lib/api";
@@ -97,29 +98,31 @@ export default function AdminAccountsPage() {
     // name (aria-label, below) names the account explicitly rather than
     // relying on ambiguous table-position context for assistive tech.
     const isDisabling = item.status === "active";
+    // ghs#166: content mirrors each button's own aria-label -- single
+    // source of truth, not a second copy that can drift.
+    const statusLabel = `${isDisabling ? "Disable" : "Enable"} ${item.email}`;
+    const deleteLabel = `Delete ${item.email}`;
     return (
       <div className="flex flex-wrap items-center gap-2">
         {showStatusToggle && (
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={isDisabling ? <Ban aria-hidden="true" className="h-4 w-4" /> : <CircleCheck aria-hidden="true" className="h-4 w-4" />}
-            aria-label={`${isDisabling ? "Disable" : "Enable"} ${item.email}`}
-            isLoading={statusMutation.isPending && statusMutation.variables?.id === item.id}
-            onClick={() => statusMutation.mutate({ id: item.id, status: nextStatus })}
-          />
+          <Tooltip content={statusLabel}>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={isDisabling ? <Ban aria-hidden="true" className="h-4 w-4" /> : <CircleCheck aria-hidden="true" className="h-4 w-4" />}
+              aria-label={statusLabel}
+              isLoading={statusMutation.isPending && statusMutation.variables?.id === item.id}
+              onClick={() => statusMutation.mutate({ id: item.id, status: nextStatus })}
+            />
+          </Tooltip>
         )}
         {/* Self-deletion is already rejected server-side (400), but not
             offering the action at all on your own row is the honest UI
             -- matching, not merely tolerating, that server rule. */}
         {!isSelf && (
-          <Button
-            variant="destructive"
-            size="sm"
-            icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
-            aria-label={`Delete ${item.email}`}
-            onClick={() => setDeleteTarget(item)}
-          />
+          <Tooltip content={deleteLabel}>
+            <Button variant="destructive" size="sm" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} aria-label={deleteLabel} onClick={() => setDeleteTarget(item)} />
+          </Tooltip>
         )}
       </div>
     );

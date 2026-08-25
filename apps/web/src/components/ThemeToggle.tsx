@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { Button } from "./Button";
+import { Tooltip } from "./Tooltip";
 
 type Theme = "light" | "dark";
 
@@ -66,15 +67,17 @@ export interface ThemeToggleProps {
 export function ThemeToggle({ className }: ThemeToggleProps) {
   const [theme, setTheme] = useTheme();
   const next = theme === "dark" ? "light" : "dark";
+  // ghs#166: content mirrors the button's own aria-label -- single
+  // source of truth, not a second copy that can drift. placement="bottom"
+  // -- this button lives in the top header bar, where the default "top"
+  // placement would render the tooltip off-screen above the viewport.
+  const label = `Switch to ${next} theme`;
 
   return (
-    <Button
-      variant="ghost"
-      aria-label={`Switch to ${next} theme`}
-      onClick={() => setTheme(next)}
-      className={className}
-    >
-      {theme === "dark" ? <Sun aria-hidden="true" className="h-5 w-5" /> : <Moon aria-hidden="true" className="h-5 w-5" />}
-    </Button>
+    <Tooltip content={label} placement="bottom">
+      <Button variant="ghost" aria-label={label} onClick={() => setTheme(next)} className={className}>
+        {theme === "dark" ? <Sun aria-hidden="true" className="h-5 w-5" /> : <Moon aria-hidden="true" className="h-5 w-5" />}
+      </Button>
+    </Tooltip>
   );
 }

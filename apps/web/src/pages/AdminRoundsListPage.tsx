@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, useToast } from "../components";
+import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, Tooltip, useToast } from "../components";
 import { ApiError, deleteRound, listAdminRounds } from "../lib/api";
 import { ROUND_STATUS_OPTIONS } from "../lib/domain-labels";
 import type { AdminRoundListItem } from "../types/domain";
@@ -73,14 +73,13 @@ export default function AdminRoundsListPage() {
   function renderActions(item: AdminRoundListItem) {
     // ghs#134: icon-only within this ListView -- see AdminAccountsPage's
     // own renderActions for the same reasoning.
+    const label = `Delete ${item.playerFirstName} ${item.playerLastName}'s round`;
+    // ghs#166: content mirrors the button's own aria-label -- single
+    // source of truth, not a second copy that can drift.
     return (
-      <Button
-        variant="destructive"
-        size="sm"
-        icon={<Trash2 aria-hidden="true" className="h-4 w-4" />}
-        aria-label={`Delete ${item.playerFirstName} ${item.playerLastName}'s round`}
-        onClick={() => setDeleteTarget(item)}
-      />
+      <Tooltip content={label}>
+        <Button variant="destructive" size="sm" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} aria-label={label} onClick={() => setDeleteTarget(item)} />
+      </Tooltip>
     );
   }
 
