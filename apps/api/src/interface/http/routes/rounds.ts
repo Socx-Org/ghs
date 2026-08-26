@@ -275,6 +275,15 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         res.status(400).json({ error: "playedAt is required" });
         return;
       }
+      // Review fix: an unparseable value would otherwise reach the
+      // TIMESTAMPTZ column as-is and surface as a raw Postgres error
+      // (500), not a 400 -- rejected at the HTTP boundary instead, same
+      // discipline every other validated field in this file already
+      // gets.
+      if (Number.isNaN(Date.parse(playedAt))) {
+        res.status(400).json({ error: "playedAt must be a valid date" });
+        return;
+      }
 
       res.status(200).json(await service.updatePlayedAt(roundId, playedAt));
     } catch (err) {

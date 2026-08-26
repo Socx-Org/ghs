@@ -67,6 +67,22 @@ export function EditPlayedDateButton({ roundId, playedAt, size = "sm" }: EditPla
     },
   });
 
+  // Review fix: clearing the native date input leaves dateValue "" --
+  // playedAtToIsoString would then construct an Invalid Date and
+  // .toISOString() on it throws a RangeError, synchronously, outside
+  // useMutation's own try/catch (it happens while computing .mutate()'s
+  // argument, not inside mutationFn) -- an uncaught exception in a click
+  // handler, not a caught, reportable error. Validated here instead, the
+  // same "reject bad input at the boundary" discipline as every other
+  // form in this app.
+  function handleSave() {
+    if (!dateValue) {
+      setFeedback("Choose a date.");
+      return;
+    }
+    mutation.mutate(playedAtToIsoString(dateValue));
+  }
+
   return (
     <>
       <Button variant="secondary" size={size} icon={<Pencil aria-hidden="true" className="h-4 w-4" />} onClick={openModal}>
@@ -83,7 +99,7 @@ export function EditPlayedDateButton({ roundId, playedAt, size = "sm" }: EditPla
               <Button variant="secondary" onClick={() => setOpen(false)}>
                 Cancel
               </Button>
-              <Button isLoading={mutation.isPending} onClick={() => mutation.mutate(playedAtToIsoString(dateValue))}>
+              <Button isLoading={mutation.isPending} disabled={!dateValue} onClick={handleSave}>
                 Save
               </Button>
             </>

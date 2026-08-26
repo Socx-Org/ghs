@@ -297,6 +297,28 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
     assert.equal(invalidHoleResponse.status, 400);
     const invalidHoleBody = await invalidHoleResponse.json() as { error: string };
     assert.match(invalidHoleBody.error, /no hole metadata/);
+
+    // ghs#169: a real HTTP round-trip for the new played-at update path.
+    const updateDateResponse = await fetch(`${baseUrl}/api/v1/rounds/${ownRound.id}/played-at`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ playedAt: "2026-06-15T09:00:00.000Z" }),
+    });
+    assert.equal(updateDateResponse.status, 200);
+    const updateDateBody = await updateDateResponse.json() as { round: { playedAt: string } };
+    assert.equal(updateDateBody.round.playedAt, "2026-06-15T09:00:00.000Z");
+
+    // Review fix: an unparseable playedAt must be rejected at the HTTP
+    // boundary (400), not reach the TIMESTAMPTZ column and surface as a
+    // raw, unhandled Postgres error (500).
+    const invalidDateResponse = await fetch(`${baseUrl}/api/v1/rounds/${ownRound.id}/played-at`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ playedAt: "not-a-date" }),
+    });
+    assert.equal(invalidDateResponse.status, 400);
+    const invalidDateBody = await invalidDateResponse.json() as { error: string };
+    assert.match(invalidDateBody.error, /valid date/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

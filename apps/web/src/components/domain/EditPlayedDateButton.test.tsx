@@ -71,6 +71,22 @@ describe("EditPlayedDateButton", () => {
     expect(screen.getByRole("dialog", { name: "Edit played date" })).toBeInTheDocument();
   });
 
+  // Review fix: clearing the date input used to reach playedAtToIsoString
+  // with an empty string, which throws (Invalid Date -> toISOString
+  // RangeError) synchronously in the click handler -- outside
+  // useMutation's own error handling entirely, an uncaught crash rather
+  // than a reportable error.
+  it("disables Save and shows a validation message instead of crashing when the date is cleared", async () => {
+    renderButton();
+    await userEvent.click(screen.getByRole("button", { name: "Edit date" }));
+
+    const input = await screen.findByLabelText("Date played");
+    await userEvent.clear(input);
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(mock.history.patch ?? []).toHaveLength(0);
+  });
+
   it("re-derives the date field from the current playedAt each time it's reopened, not stale from a previous open", async () => {
     const { rerender } = renderButton("2026-05-01T12:00:00.000Z");
     await userEvent.click(screen.getByRole("button", { name: "Edit date" }));
