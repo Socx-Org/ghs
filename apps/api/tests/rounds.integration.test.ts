@@ -318,7 +318,21 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
     });
     assert.equal(invalidDateResponse.status, 400);
     const invalidDateBody = await invalidDateResponse.json() as { error: string };
-    assert.match(invalidDateBody.error, /valid date/);
+    assert.match(invalidDateBody.error, /ISO 8601/);
+
+    // Review fix: a bare "YYYY-MM-DD" is real, Date.parse()-parseable
+    // input -- but not the real contract (a genuine ISO date-*time*,
+    // the shape playedAtToIsoString always produces). A bare date would
+    // otherwise reach Postgres and be interpreted as midnight in the
+    // *server's* session timezone, not a real, unambiguous instant --
+    // exactly the class of bug this app's own timezone-safety convention
+    // exists to avoid.
+    const bareDateResponse = await fetch(`${baseUrl}/api/v1/rounds/${ownRound.id}/played-at`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ playedAt: "2026-06-15" }),
+    });
+    assert.equal(bareDateResponse.status, 400);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

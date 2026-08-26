@@ -76,7 +76,7 @@ describe("EditPlayedDateButton", () => {
   // RangeError) synchronously in the click handler -- outside
   // useMutation's own error handling entirely, an uncaught crash rather
   // than a reportable error.
-  it("disables Save and shows a validation message instead of crashing when the date is cleared", async () => {
+  it("disables Save when the date is cleared, preventing the crash entirely rather than catching it after the fact", async () => {
     renderButton();
     await userEvent.click(screen.getByRole("button", { name: "Edit date" }));
 

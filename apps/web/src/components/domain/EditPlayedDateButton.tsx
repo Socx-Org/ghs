@@ -72,14 +72,13 @@ export function EditPlayedDateButton({ roundId, playedAt, size = "sm" }: EditPla
   // .toISOString() on it throws a RangeError, synchronously, outside
   // useMutation's own try/catch (it happens while computing .mutate()'s
   // argument, not inside mutationFn) -- an uncaught exception in a click
-  // handler, not a caught, reportable error. Validated here instead, the
-  // same "reject bad input at the boundary" discipline as every other
-  // form in this app.
+  // handler, not a caught, reportable error. Prevented entirely, not
+  // guarded-then-messaged: Save's own `disabled={!dateValue}` below means
+  // this can never be called with an empty value, so there's nothing
+  // left for this function to validate itself (an earlier version of
+  // this fix duplicated the check here too, which review correctly
+  // flagged as unreachable dead code).
   function handleSave() {
-    if (!dateValue) {
-      setFeedback("Choose a date.");
-      return;
-    }
     mutation.mutate(playedAtToIsoString(dateValue));
   }
 
