@@ -17,13 +17,25 @@ const VALID_ROUND_STATUSES = ["draft", "pending", "approved", "rejected", "amend
 const DEFAULT_ADMIN_ROUNDS_LIMIT = 50;
 const MAX_ADMIN_ROUNDS_LIMIT = 200;
 
-// ghs#169 review fix: the played-at update route's real contract -- a
-// genuine ISO 8601 date-time (the shape playedAtToIsoString, lib/dates.ts
-// on the frontend, always produces), not just anything Date.parse()
-// happens to accept. Date.parse() alone would also take a bare
-// "YYYY-MM-DD" -- the exact ambiguous, server-timezone-dependent shape
-// this app's own timezone-safety convention exists to avoid.
+// ghs#169 review fix: playedAt's real contract, wherever it's accepted
+// over HTTP (both POST /rounds and PATCH /rounds/:id/played-at below) --
+// a genuine ISO 8601 date-time (the shape playedAtToIsoString,
+// lib/dates.ts on the frontend, always produces), not just anything
+// Date.parse() happens to accept on its own. Date.parse() alone would
+// also take a bare "YYYY-MM-DD" -- the exact ambiguous, server-
+// timezone-dependent shape this app's own timezone-safety convention
+// exists to avoid (Postgres would parse a bare date as midnight in the
+// *server's* session timezone, not a real, unambiguous instant).
+// Originally only applied to the PATCH route (review, PR #170); a
+// follow-up review finding pointed out the resulting inconsistency --
+// pulled out into one shared check both routes call, rather than two
+// independently-drifting copies of the same rule.
 const ISO_DATETIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+const INVALID_PLAYED_AT_MESSAGE = "playedAt must be a real ISO 8601 date-time, e.g. 2026-06-15T09:00:00.000Z";
+
+function isValidPlayedAt(value: unknown): value is string {
+  return typeof value === "string" && ISO_DATETIME_PATTERN.test(value) && !Number.isNaN(Date.parse(value));
+}
 
 // Request/response shape and input validation live here, not in the
 // application layer (ADR-060).
@@ -57,6 +69,16 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
 
       if (typeof playerId !== "string" || typeof teeConfigurationId !== "string" || typeof playedAt !== "string") {
         res.status(400).json({ error: "playerId, teeConfigurationId, playedAt are required" });
+        return;
+      }
+      // Review fix (PR #170): the same real contract PATCH .../played-at
+      // enforces, applied here too -- previously only checked
+      // `typeof playedAt === "string"`, silently allowing a bare
+      // "YYYY-MM-DD" or other locale-dependent shape in at creation time
+      // while the update path rejected it, a real inconsistency for the
+      // same field on the same resource.
+      if (!isValidPlayedAt(playedAt)) {
+        res.status(400).json({ error: INVALID_PLAYED_AT_MESSAGE });
         return;
       }
 
@@ -283,17 +305,8 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         res.status(400).json({ error: "playedAt is required" });
         return;
       }
-      // Review fix: Date.parse() alone is too permissive -- it also
-      // accepts a bare "YYYY-MM-DD" (exactly the ambiguous, locale/
-      // timezone-dependent shape playedAtToIsoString exists to avoid,
-      // since Postgres would parse it as midnight in the *server's*
-      // session timezone, not a real instant) and other locale-dependent
-      // formats. The real contract is a genuine ISO 8601 date-time, the
-      // same shape playedAtToIsoString always produces -- checked with a
-      // real pattern instead of trusting whatever Date.parse happens to
-      // accept.
-      if (!ISO_DATETIME_PATTERN.test(playedAt) || Number.isNaN(Date.parse(playedAt))) {
-        res.status(400).json({ error: "playedAt must be a real ISO 8601 date-time, e.g. 2026-06-15T09:00:00.000Z" });
+      if (!isValidPlayedAt(playedAt)) {
+        res.status(400).json({ error: INVALID_PLAYED_AT_MESSAGE });
         return;
       }
 
