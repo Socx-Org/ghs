@@ -217,6 +217,41 @@ describe("RoundEntryPage", () => {
     expect(screen.queryByRole("button", { name: "Submit for review" })).not.toBeInTheDocument();
   });
 
+  // ghs#169: the played date is now editable via a shared modal, for
+  // every status this screen itself renders a form for (draft/rejected/
+  // amending -- pending never reaches this screen at all, see
+  // RoundDetailsPage.test.tsx for that case).
+  describe("played date", () => {
+    it("shows the Edit date button for a draft round", async () => {
+      mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "draft" }));
+      renderEntry();
+      await screen.findByText("White");
+      expect(screen.getByRole("button", { name: "Edit date" })).toBeInTheDocument();
+    });
+
+    it("changes the played date and reflects the update after refetch", async () => {
+      const round = makeRound({ status: "draft", playedAt: "2026-05-01T12:00:00.000Z" });
+      mock.onGet("/rounds/round-1").reply(() => [200, round]);
+      mock.onPatch("/rounds/round-1/played-at").reply((config) => {
+        const body = JSON.parse(config.data);
+        round.playedAt = body.playedAt;
+        return [200, { round }];
+      });
+
+      renderEntry();
+      await screen.findByText("White");
+      expect(screen.getByText("May 1, 2026")).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Edit date" }));
+      const input = await screen.findByLabelText("Date played");
+      await userEvent.clear(input);
+      await userEvent.type(input, "2026-06-15");
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(screen.getByText("Jun 15, 2026")).toBeInTheDocument());
+    });
+  });
+
   // ghs#68: the real gap this issue closes -- a rejected round
   // previously went straight into this same entry form with zero
   // indication it had been rejected, or why.

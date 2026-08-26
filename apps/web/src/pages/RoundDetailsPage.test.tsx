@@ -128,6 +128,49 @@ describe("RoundDetailsPage", () => {
     expect(await screen.findByText("Holes recorded")).toBeInTheDocument();
   });
 
+  // ghs#169: the real gap this issue closes -- a pending round is never
+  // reached through RoundEntryPage at all (it renders a plain
+  // "already submitted" card there), so this screen is the only place
+  // its played date can ever be edited.
+  it("offers Edit date for a pending round, even though it offers no Edit round action at all for one", async () => {
+    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "pending" }));
+    renderAsRole("player");
+
+    await screen.findByText("Blue");
+    expect(screen.getByRole("button", { name: "Edit date" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit round" })).not.toBeInTheDocument();
+  });
+
+  it("offers no Edit date action once a round is approved", async () => {
+    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "approved" }));
+    renderAsRole("player");
+
+    await screen.findByText("Blue");
+    expect(screen.queryByRole("button", { name: "Edit date" })).not.toBeInTheDocument();
+  });
+
+  it("changes a pending round's played date and reflects it after refetch", async () => {
+    const round = makeRound({ status: "pending", playedAt: "2026-05-01T12:00:00.000Z" });
+    mock.onGet("/rounds/round-1").reply(() => [200, round]);
+    mock.onPatch("/rounds/round-1/played-at").reply((config) => {
+      const body = JSON.parse(config.data);
+      round.playedAt = body.playedAt;
+      return [200, { round }];
+    });
+    renderAsRole("player");
+
+    await screen.findByText("Blue");
+    expect(screen.getByText("May 1, 2026")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit date" }));
+    const input = await screen.findByLabelText("Date played");
+    await userEvent.clear(input);
+    await userEvent.type(input, "2026-06-15");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByText("Jun 15, 2026");
+  });
+
   it("shows the real error message when the round fails to load", async () => {
     mock.onGet("/rounds/round-1").reply(404, { error: "round not found" });
     renderAsRole("player");

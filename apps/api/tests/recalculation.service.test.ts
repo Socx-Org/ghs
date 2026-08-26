@@ -33,6 +33,7 @@ function fakeRoundsRepository(differentialsByPlayer: Record<string, RoundDiffere
       return differentialsByPlayer[playerId] ?? [];
     },
     async setStatus() { /* not used */ },
+    async updatePlayedAt() { throw new Error("not used"); },
     async getForUpdate() { throw new Error("not used"); },
     async countHoleScores() { throw new Error("not used"); },
     async softDelete() { throw new Error("not used"); },

@@ -145,6 +145,18 @@ export interface RoundsService {
   // 2026-08-12) -- ghs#25's concern, not enforced here, just not
   // triggered here either.
   reopenForAmendment(id: string, reason: string): Promise<RoundWorkflowResult>;
+
+  // ghs#169: draft/pending/rejected/amending only -- see
+  // isDateEditableStatus's own comment for the full reasoning, including
+  // why this doesn't copy deleteRound's admin-unrestricted-by-status
+  // asymmetry. No recalculation is ever triggered here -- none of the
+  // four eligible statuses carries a differential that currently counts
+  // toward handicap calculation (an 'amending' round's own stale
+  // score_differential/pcc from its prior approval is deliberately left
+  // as-is here, same as a hole-score edit made during amending -- only
+  // the next approval's own rescore picks up whatever played_at is
+  // current at that point).
+  updatePlayedAt(id: string, playedAt: string): Promise<RoundWorkflowResult>;
 }
 
 // A hole's net_double_bogey_adjusted only depends on that hole's own
@@ -216,6 +228,23 @@ export function createRoundsService(
   // maintained lists that could drift apart.
   function isEditableStatus(status: RoundStatus): boolean {
     return status === "draft" || status === "rejected" || status === "amending";
+  }
+
+  // ghs#169: deliberately broader than isEditableStatus above -- also
+  // true for 'pending'. A wrong played date is a data-entry slip a
+  // player should be able to self-correct without needing an admin to
+  // reject the round first, unlike hole scores (which stay locked while
+  // a round is under active review). The only status excluded is
+  // 'approved', the only one a round's own score_differential is ever
+  // read from for handicap calculation (RoundsRepository.
+  // listApprovedDifferentialsForPlayer). Same boundary for a player and
+  // an admin/super_admin caller alike -- unlike deleteRound's admin-
+  // unrestricted-by-status precedent, changing an approved round's date
+  // is "amend this round," which reopenForAmendment already exists to
+  // do safely; this doesn't invent a second way to edit an approved
+  // round directly.
+  function isDateEditableStatus(status: RoundStatus): boolean {
+    return status === "draft" || status === "pending" || status === "rejected" || status === "amending";
   }
 
   async function runWorkflowTransition(
@@ -624,6 +653,22 @@ export function createRoundsService(
       // so the absence reads as deliberate, not an oversight, for
       // whoever wires ghs#25's triggers against this method later.
       return result;
+    },
+
+    async updatePlayedAt(id, playedAt) {
+      return runWorkflowTransition(
+        id,
+        (existing) => {
+          if (!isDateEditableStatus(existing.status)) {
+            throw new InvalidRoundTransitionError(`cannot change the played date of a round in status '${existing.status}'`);
+          }
+        },
+        async (client) => {
+          await repository.updatePlayedAt(id, playedAt, client);
+          logger.info("round played date updated", { roundId: id, playedAt });
+          return null;
+        },
+      );
     },
   };
 }

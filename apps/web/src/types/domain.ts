@@ -15,6 +15,16 @@ export type RoundStatus = "draft" | "pending" | "approved" | "rejected" | "amend
 // tolerating. Mirrors rounds.service.ts's own isEditableStatus exactly.
 export const EDITABLE_ROUND_STATUSES = new Set<RoundStatus>(["draft", "rejected", "amending"]);
 
+// ghs#169: a deliberately DIFFERENT, broader set -- also includes
+// 'pending'. Do not merge this into EDITABLE_ROUND_STATUSES above; the
+// four screens that already depend on that one meaning exactly
+// draft/rejected/amending (hole-score entry, "Continue"/Edit/Delete
+// gating) would otherwise start offering those actions on a pending
+// round too, which the backend still correctly rejects for anything
+// except the played date. Mirrors rounds.service.ts's own
+// isDateEditableStatus exactly.
+export const DATE_EDITABLE_ROUND_STATUSES = new Set<RoundStatus>(["draft", "pending", "rejected", "amending"]);
+
 export type UserRole = "player" | "admin" | "super_admin";
 
 export type UserStatus = "pending_verification" | "active" | "disabled" | "deleted";
