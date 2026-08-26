@@ -248,6 +248,48 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
     }
   });
 
+  // ghs#169: a narrow, single-field route -- not a generic PATCH
+  // /rounds/:id -- matching every other round mutation's own
+  // purpose-built shape (/holes, /submit, /status above). Player-facing,
+  // ownership-checked exactly like every other player route in this
+  // file; the status restriction itself (draft/pending/rejected/
+  // amending, not approved) is enforced identically for a player and an
+  // admin caller by RoundsService.updatePlayedAt, unlike DELETE's
+  // admin-unrestricted-by-status behaviour below.
+  router.patch("/rounds/:id/played-at", auth, async (req, res, next) => {
+    try {
+      const roundId = String(req.params.id);
+      const round = await service.getRound(roundId);
+      if (!round) {
+        res.status(404).json({ error: "round not found" });
+        return;
+      }
+      const identity = req.identity!;
+      if (!(await authorizeForPlayer(identity.sub, identity.ghsRole, round.playerId))) {
+        res.status(403).json({ error: "cannot change the played date of another player's round" });
+        return;
+      }
+
+      const { playedAt } = req.body as Record<string, unknown>;
+      if (typeof playedAt !== "string" || !playedAt) {
+        res.status(400).json({ error: "playedAt is required" });
+        return;
+      }
+
+      res.status(200).json(await service.updatePlayedAt(roundId, playedAt));
+    } catch (err) {
+      if (err instanceof RoundNotFoundError) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      if (err instanceof InvalidRoundTransitionError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
   // ghs#61: the admin pending-review queue -- purpose-built and
   // deliberately narrow (no pagination/filtering/sorting query params),
   // matching the approved scope. Not a generic admin rounds browser;

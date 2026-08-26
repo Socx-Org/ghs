@@ -462,6 +462,15 @@ export async function submitRound(roundId: string): Promise<Round> {
   return data.round;
 }
 
+// ghs#169. `playedAt` must already be a real ISO timestamp (via
+// playedAtToIsoString, lib/dates.ts) -- this function doesn't convert a
+// bare date-input string itself, same division of responsibility as
+// createRound's own playedAt param.
+export async function updateRoundPlayedAt(roundId: string, playedAt: string): Promise<Round> {
+  const { data } = await api.patch<{ round: Round }>(`/rounds/${roundId}/played-at`, { playedAt });
+  return data.round;
+}
+
 // ghs#67. Deliberately narrow -- no pagination/filtering/sorting query
 // params, matching the backend's own approved scope (rounds.ts's own
 // comment). Not a generic admin rounds browser -- that's #113,

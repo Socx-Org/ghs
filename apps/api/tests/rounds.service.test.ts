@@ -351,6 +351,10 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
       round.status = status;
       round.rejectionReason = rejectionReason ?? null;
     },
+    async updatePlayedAt(id: string, playedAt: string) {
+      const round = rounds.get(id)!;
+      round.playedAt = playedAt;
+    },
     async getForUpdate(id: string): Promise<RoundForUpdate | null> {
       if (deleted.has(id)) return null;
       const round = rounds.get(id);
@@ -796,6 +800,53 @@ test("reopenForAmendment moves an approved round to 'amending' and recalculates 
   // The round is no longer 'approved', so listApprovedDifferentialsForPlayer
   // (what the orchestrator reads) already excludes it -- nothing else to do.
   assert.deepEqual(await repo.listApprovedDifferentialsForPlayer("player-1"), []);
+});
+
+test("updatePlayedAt succeeds for every status the issue names -- draft, pending, rejected, amending -- and persists the new date", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+  for (const status of ["draft", "pending", "rejected", "amending"] as const) {
+    const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+    await repo.setStatus(round.id, status);
+
+    const result = await service.updatePlayedAt(round.id, "2026-06-15T12:00:00.000Z");
+
+    assert.equal(result.round!.playedAt, "2026-06-15T12:00:00.000Z");
+    assert.equal(result.round!.status, status, "the status itself must be untouched by a date-only edit");
+  }
+});
+
+test("updatePlayedAt rejects an approved round -- the one status this issue deliberately excludes (use reopenForAmendment first)", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.setStatus(round.id, "approved");
+
+  await assert.rejects(() => service.updatePlayedAt(round.id, "2026-06-15T12:00:00.000Z"), InvalidRoundTransitionError);
+  // Confirms the rejection actually prevented the write, not just threw
+  // after already mutating (same discipline as approveRound's own
+  // pre-rescore status check, PR #32).
+  assert.equal((await service.getRound(round.id))!.playedAt, "2026-05-01T09:00:00.000Z");
+});
+
+test("updatePlayedAt on a missing round throws RoundNotFoundError", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+
+  await assert.rejects(() => service.updatePlayedAt("no-such-round", "2026-06-15T12:00:00.000Z"), RoundNotFoundError);
+});
+
+test("updatePlayedAt never triggers a handicap recalculation -- none of its four eligible statuses carry a differential that currently counts", async () => {
+  const repo = fakeRepository();
+  const recalculation = fakeRecalculationOrchestrator();
+  const service = roundsService(repo, recalculation);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.setStatus(round.id, "amending");
+
+  const result = await service.updatePlayedAt(round.id, "2026-06-15T12:00:00.000Z");
+
+  assert.equal(result.recalculation, null);
+  assert.equal(recalculation.calls.length, 0);
 });
 
 test("re-approving an amending round uses the 'amendment_approved' trigger, not 'round_approved'", async () => {

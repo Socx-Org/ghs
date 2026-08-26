@@ -41,3 +41,4 @@ export * from "./domain/HolesTable";
 export * from "./domain/TeeConfigurationForm";
 export * from "./domain/CourseCsvImportForm";
 export * from "./domain/RoundHoleCsvImportForm";
+export * from "./domain/EditPlayedDateButton";

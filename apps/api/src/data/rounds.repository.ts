@@ -268,6 +268,12 @@ export interface RoundsRepository {
   // transition's status change and its recalculation can commit or roll
   // back together (ghs#24's atomicity requirement).
   setStatus(id: string, status: RoundStatus, rejectionReason?: string, client?: PoolClient): Promise<void>;
+  // ghs#169: bare column update only -- no recalculation (none of the
+  // statuses this is ever called from carry a differential that counts
+  // toward handicap calculation; see rounds.service.ts's own
+  // isDateEditableStatus). client: same row-locked-transaction threading
+  // convention as setStatus above.
+  updatePlayedAt(id: string, playedAt: string, client?: PoolClient): Promise<void>;
   // Soft delete (rounds.deleted_at), matching the players/clubs
   // convention. No return value -- callers already have the round's
   // pre-deletion state from getForUpdate, called just before this.
@@ -751,6 +757,13 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       await (client ?? pool).query(
         `UPDATE rounds SET status = $2, rejection_reason = $3, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
         [id, status, rejectionReason ?? null],
+      );
+    },
+
+    async updatePlayedAt(id, playedAt, client) {
+      await (client ?? pool).query(
+        `UPDATE rounds SET played_at = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+        [id, playedAt],
       );
     },
 

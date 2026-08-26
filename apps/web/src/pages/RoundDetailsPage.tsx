@@ -1,8 +1,8 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, BackButton, Button, Card, CardBody, CardHeader, HolesTable, RoundStatusBadge, Skeleton, Stat } from "../components";
+import { Alert, BackButton, Button, Card, CardBody, CardHeader, EditPlayedDateButton, HolesTable, RoundStatusBadge, Skeleton, Stat } from "../components";
 import { ApiError, getPlayerRounds, getRound, getTeeConfiguration } from "../lib/api";
-import { EDITABLE_ROUND_STATUSES } from "../types/domain";
+import { DATE_EDITABLE_ROUND_STATUSES, EDITABLE_ROUND_STATUSES } from "../types/domain";
 
 // ghs#147: the player's own read-only round-detail view -- reached from
 // My Rounds (MyRoundsPage), works for any status. A separate screen
@@ -58,6 +58,11 @@ export default function RoundDetailsPage() {
   const teeConfiguration = teeQuery.data;
   const courseName = roundsListQuery.data?.find((item) => item.id === id)?.courseName;
   const isEditable = round ? EDITABLE_ROUND_STATUSES.has(round.status) : false;
+  // ghs#169: deliberately a different, broader check than isEditable
+  // above -- also true while 'pending'. This is the only screen a
+  // pending round's played date can be edited from at all; RoundEntryPage
+  // never renders a form for one (see that issue's own discovery notes).
+  const isDateEditable = round ? DATE_EDITABLE_ROUND_STATUSES.has(round.status) : false;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 sm:p-6">
@@ -87,7 +92,10 @@ export default function RoundDetailsPage() {
               <RoundStatusBadge status={round.status} />
             </CardHeader>
             <CardBody className="flex flex-wrap gap-8">
-              <Stat label="Played" value={formatPlayedAt(round.playedAt)} />
+              <div className="flex items-end gap-2">
+                <Stat label="Played" value={formatPlayedAt(round.playedAt)} />
+                {isDateEditable && <EditPlayedDateButton roundId={round.id} playedAt={round.playedAt} />}
+              </div>
               <Stat label="Gross score" value={round.grossScore ?? "—"} />
               <Stat label="Score differential" value={round.scoreDifferential ?? "—"} />
             </CardBody>

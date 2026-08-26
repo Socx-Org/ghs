@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
-import { Alert, BackButton, Button, Card, CardBody, CardHeader, HoleEntryCard, RoundHoleCsvImportForm, RoundStatusBadge, Skeleton, Stat, ToggleGroup, useToast } from "../components";
+import { Alert, BackButton, Button, Card, CardBody, CardHeader, EditPlayedDateButton, HoleEntryCard, RoundHoleCsvImportForm, RoundStatusBadge, Skeleton, Stat, ToggleGroup, useToast } from "../components";
 import { ApiError, getRound, getTeeConfiguration, submitRound } from "../lib/api";
 import { EDITABLE_ROUND_STATUSES } from "../types/domain";
 import type { Round, TeeConfiguration } from "../types/domain";
@@ -69,7 +69,10 @@ function HoleEntryForm({
         <CardHeader className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-semibold text-text">{teeConfiguration.name}</h1>
-            <p className="text-sm text-text-muted">{formatPlayedAt(round.playedAt)}</p>
+            <div className="mt-0.5 flex items-center gap-2">
+              <p className="text-sm text-text-muted">{formatPlayedAt(round.playedAt)}</p>
+              <EditPlayedDateButton roundId={round.id} playedAt={round.playedAt} />
+            </div>
           </div>
           <RoundStatusBadge status={round.status} />
         </CardHeader>
