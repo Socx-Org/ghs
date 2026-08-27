@@ -7,6 +7,7 @@ import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth, requireRole } from "../middleware/require-auth.ts";
 import { ADMIN_ROLES, createPlayerAccessAuthorizer } from "../authorization.ts";
 import { HoleMetadataNotFoundError } from "../../../application/scoring.service.ts";
+import { getPlayedOnDate, InvalidPccInputError } from "../../../application/pcc.service.ts";
 
 const FAIRWAY_RESULTS: FairwayResult[] = ["hit", "missed_left", "missed_right"];
 
@@ -345,7 +346,7 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
   // purpose-built and deliberately narrow.
   router.get("/admin/rounds", ...requireAdmin, async (req, res, next) => {
     try {
-      const { status, playerId, limit, offset } = req.query;
+      const { status, playerId, teeConfigurationId, playedOn, limit, offset } = req.query;
 
       let resolvedStatus: (typeof VALID_ROUND_STATUSES)[number] | undefined;
       if (status !== undefined) {
@@ -365,13 +366,57 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         resolvedPlayerId = playerId;
       }
 
+      let resolvedTeeConfigurationId: string | undefined;
+      if (teeConfigurationId !== undefined) {
+        if (typeof teeConfigurationId !== "string") {
+          res.status(400).json({ error: "teeConfigurationId must be a string" });
+          return;
+        }
+        resolvedTeeConfigurationId = teeConfigurationId;
+      }
+
+      // ghs#168 review fix: normalised via the same getPlayedOnDate
+      // pcc.service.ts itself uses, not just validated-then-forwarded
+      // raw. Forwarding an un-normalised full ISO date-time straight
+      // into the repository's own `played_at::date = $N::date` comparison
+      // (rounds.repository.ts) would rely on Postgres's own text-to-date
+      // cast (which takes the literal date component, ignoring any
+      // offset) rather than a single explicit, self-documenting
+      // definition of "which calendar day" -- normalising here makes the
+      // two sides of that comparison agree by construction, unlike
+      // ghs#169's playedAt body field, which is a full timestamp being
+      // persisted verbatim, not day-scoped.
+      let resolvedPlayedOn: string | undefined;
+      if (playedOn !== undefined) {
+        if (typeof playedOn !== "string") {
+          res.status(400).json({ error: "playedOn must be a valid ISO date or date-time" });
+          return;
+        }
+        try {
+          resolvedPlayedOn = getPlayedOnDate(playedOn);
+        } catch (err) {
+          if (err instanceof InvalidPccInputError) {
+            res.status(400).json({ error: err.message });
+            return;
+          }
+          throw err;
+        }
+      }
+
       const parsedLimit = typeof limit === "string" ? Number.parseInt(limit, 10) : NaN;
       const resolvedLimit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, MAX_ADMIN_ROUNDS_LIMIT) : DEFAULT_ADMIN_ROUNDS_LIMIT;
 
       const parsedOffset = typeof offset === "string" ? Number.parseInt(offset, 10) : NaN;
       const resolvedOffset = Number.isInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
 
-      const result = await service.listAdminRounds({ status: resolvedStatus, playerId: resolvedPlayerId, limit: resolvedLimit, offset: resolvedOffset });
+      const result = await service.listAdminRounds({
+        status: resolvedStatus,
+        playerId: resolvedPlayerId,
+        teeConfigurationId: resolvedTeeConfigurationId,
+        playedOn: resolvedPlayedOn,
+        limit: resolvedLimit,
+        offset: resolvedOffset,
+      });
       res.status(200).json(result);
     } catch (err) {
       next(err);

@@ -65,11 +65,15 @@ export default function MyRoundsPage() {
       queryClient.removeQueries({ queryKey: ["rounds", id] });
       queryClient.invalidateQueries({ queryKey: ["players", playerId, "rounds"] });
       setDeleteTarget(null);
-      // A player may only delete an editable-status round (the only
-      // kind this button is ever offered for), and an editable round
-      // never had a real scoreDifferential yet (that's only computed on
-      // admin approval) -- so unlike #115's admin delete, this never has
-      // a recalculation outcome to report honestly here.
+      // A player may only delete an editable-status round (draft/
+      // rejected/amending, the only kinds this button is ever offered
+      // for). draft/rejected never counted toward handicap either way.
+      // amending is the one exception -- it was previously approved, so
+      // deleting it DOES trigger a real recalculation server-side
+      // (ghs#168's everCountedTowardHandicap, rounds.service.ts, is true
+      // for 'amending'). This toast deliberately stays generic
+      // regardless -- unlike #115's admin delete, no UX decision has
+      // been made yet to surface a per-case recalculation outcome here.
       show({ variant: "success", message: "Round deleted.", duration: 2500 });
     },
     onError: (error) => {

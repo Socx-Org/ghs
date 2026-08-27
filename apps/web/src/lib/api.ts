@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { AccountProfile, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, FairwayResult, HoleScore, PendingRoundQueueItem, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
+import type { AccountProfile, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, DailyPcc, FairwayResult, HoleScore, PccCorrectionOutcome, PendingRoundQueueItem, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -512,13 +512,37 @@ export interface ListAdminRoundsResult {
   total: number;
 }
 
-// ghs#113. No filter/pagination params sent, same reasoning as
+// ghs#113. No filter/pagination params sent by default, same reasoning as
 // listUsers above (ghs#104) -- the backend's own defaults (limit 50, no
-// filter) are the entire scope this issue's own list screen needs; a
-// UI for filtering/pagination is a separate, still-open issue (#138),
-// not merely unimplemented here.
-export async function listAdminRounds(): Promise<ListAdminRoundsResult> {
-  const { data } = await api.get<ListAdminRoundsResult>("/admin/rounds");
+// filter) are the entire scope that issue's own list screen needs; a UI
+// for filtering/pagination is a separate, still-open issue (#138), not
+// merely unimplemented here.
+//
+// ghs#168: teeConfigurationId/playedOn, added for the Daily PCC screen's
+// own real need (scoping to exactly one tee-configuration/day) -- the
+// backend already accepts both (round-workflow.integration.test.ts),
+// just never threaded through the frontend client before now. Kept
+// optional so every existing no-filter call is unaffected.
+export async function listAdminRounds(filter?: { teeConfigurationId?: string; playedOn?: string }): Promise<ListAdminRoundsResult> {
+  const { data } = await api.get<ListAdminRoundsResult>("/admin/rounds", { params: filter });
+  return data;
+}
+
+// ghs#168: read-only, cheap -- defaults to pcc=0/source='calculated' if
+// no row exists yet for this tee-configuration/day. Never bulk-rewrites
+// rounds; that's setDailyPcc below.
+export async function getDailyPcc(teeConfigurationId: string, playedOn: string): Promise<DailyPcc> {
+  const { data } = await api.get<{ dailyPcc: DailyPcc }>(`/admin/tee-configurations/${teeConfigurationId}/pcc`, { params: { playedOn } });
+  return data.dailyPcc;
+}
+
+// ghs#168: `pccOverride` null recalculates from real rounds
+// ("accept the calculated value"); a -1..3 integer forces an override.
+// Bulk-rewrites every affected round's score_differential and
+// recalculates every distinctly affected player's handicap
+// (recalculation.service.ts's recalculatePccForTeeConfigDay).
+export async function setDailyPcc(teeConfigurationId: string, playedOn: string, pccOverride: number | null): Promise<PccCorrectionOutcome> {
+  const { data } = await api.patch<PccCorrectionOutcome>(`/admin/tee-configurations/${teeConfigurationId}/pcc`, { playedOn, pcc: pccOverride });
   return data;
 }
 

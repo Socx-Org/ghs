@@ -10,6 +10,7 @@ import type { SystemSettingsService } from "../../application/system-settings.se
 import type { RoundsService } from "../../application/rounds.service.ts";
 import type { HandicapOverridesService } from "../../application/handicap-overrides.service.ts";
 import type { PccService } from "../../application/pcc.service.ts";
+import type { RecalculationOrchestrator } from "../../application/recalculation.service.ts";
 import type { PlayersRepository } from "../../data/players.repository.ts";
 import type { AuthProvider } from "../../application/auth-provider.ts";
 import {
@@ -43,6 +44,10 @@ export interface AppDeps {
   roundsService: RoundsService;
   handicapOverridesService: HandicapOverridesService;
   pccService: PccService;
+  // ghs#168: needed so admin-pcc.ts's PATCH route can trigger a real
+  // handicap recalculation for every player affected by a PCC
+  // correction, not just bulk-rewrite rounds.score_differential.
+  recalculationOrchestrator: RecalculationOrchestrator;
   playersRepository: PlayersRepository;
   authProvider: AuthProvider;
   // ghs#49: real production wiring never sets this (undefined -- every
@@ -122,7 +127,7 @@ export function createApp(deps: AppDeps): Express {
   v1Router.use(mfaRouter(deps.mfaService, deps.authProvider));
   v1Router.use(adminUsersRouter(deps.adminUsersService, deps.mfaService, deps.authProvider));
   v1Router.use(adminSettingsRouter(deps.systemSettingsService, deps.authProvider));
-  v1Router.use(adminPccRouter(deps.pccService, deps.authProvider));
+  v1Router.use(adminPccRouter(deps.pccService, deps.recalculationOrchestrator, deps.authProvider));
   v1Router.use(clubsRouter(deps.clubsService, deps.authProvider));
   v1Router.use(coursesRouter(deps.coursesService, deps.authProvider));
   v1Router.use(teeConfigurationsRouter(deps.coursesService, deps.authProvider));

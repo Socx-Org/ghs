@@ -97,6 +97,19 @@ describe("RoundDetailsPage", () => {
     expect(screen.getByText("Hit")).toBeInTheDocument();
   });
 
+  it("ghs#168: withholds a real, non-null score from a pending round -- scoring now happens at submission, but display stays gated on approval", async () => {
+    // The exact case ghs#168 introduced: a pending round already carries
+    // a real grossScore/scoreDifferential (submission-time scoring), but
+    // the deliberate product decision is to keep withholding it from the
+    // player until the round is actually approved.
+    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "pending", grossScore: 90, scoreDifferential: 18.4 }));
+    renderAsRole("player");
+
+    expect(await screen.findByText("Pending")).toBeInTheDocument();
+    expect(screen.queryByText("90")).not.toBeInTheDocument();
+    expect(screen.queryByText("18.4")).not.toBeInTheDocument();
+  });
+
   it("shows the rejection reason for a rejected round", async () => {
     mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "rejected", rejectionReason: "Hole 2 looks wrong." }));
     renderAsRole("player");

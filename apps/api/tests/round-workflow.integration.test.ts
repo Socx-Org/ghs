@@ -61,10 +61,10 @@ after(async () => {
   await pool.end();
 });
 
-async function createTeeConfiguration(courseRating = 72.0, slopeRating = 113): Promise<string> {
+async function createTeeConfiguration(courseRating = 72.0, slopeRating = 113, courseName = "Round Workflow Test Course"): Promise<string> {
   const courses = createCoursesRepository(pool);
   const course = await courses.create({
-    name: "Round Workflow Test Course",
+    name: courseName,
     country: "ES",
     teeConfigurations: [{ name: "White", holeCount: 18, courseRating, slopeRating, holes: [] }],
   });
@@ -195,6 +195,64 @@ test("addHoleScore's editable-status check is genuinely atomic with the write --
 
   const holeScore = await addHoleScorePromise;
   assert.equal(holeScore.holeNumber, 1, "proceeds correctly, using a fresh locked read, once the held lock is released");
+});
+
+test("submitForReview rescores AFTER its own locked transition commits, not before it opens -- a hole score that lands while submission is blocked on the row lock is still reflected in the final persisted score (ghs#168 review fix)", async () => {
+  const courses = createCoursesRepository(pool);
+  const course = await courses.create({
+    name: "Submission Rescore Race Test Course",
+    country: "ES",
+    teeConfigurations: [{
+      name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113,
+      holes: [{ holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 7 }],
+    }],
+  });
+  const teeConfigurationId = course.teeConfigurations[0]!.id;
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Race", lastName: "Regression" });
+  const { roundsRepo, roundsService } = buildServices();
+
+  const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsService.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+
+  // Same technique as the lock test directly above -- hold exactly the
+  // row lock submitForReview's own runWorkflowTransition needs, forcing
+  // it to block right at that point (its own pre-check, upstream of the
+  // lock, already ran and found the round complete/editable).
+  const holdingClient = await pool.connect();
+  await holdingClient.query("BEGIN");
+  await holdingClient.query("SELECT id FROM rounds WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", [round.id]);
+
+  let completed = false;
+  const submitPromise = roundsService.submitForReview(round.id, "player").then((result) => {
+    completed = true;
+    return result;
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(completed, false, "blocked on the row lock, exactly like addHoleScore's own lock above");
+
+  // Simulates a hole-score correction landing in that exact window --
+  // direct SQL rather than roundsService.addHoleScore since that method
+  // needs the very same row lock this test is deliberately holding; the
+  // real, lock-protected write path is already proven above. What
+  // matters here is only that hole_scores changes while submission is
+  // blocked, before the lock is released.
+  await pool.query("UPDATE hole_scores SET strokes = 9, net_double_bogey_adjusted = 9 WHERE round_id = $1 AND hole_number = 1", [round.id]);
+
+  await holdingClient.query("COMMIT");
+  holdingClient.release();
+
+  const result = await submitPromise;
+  assert.equal(result.round!.status, "pending");
+  // The bug this regresses: the pre-fix code rescored BEFORE attempting
+  // this lock, so it would have persisted grossScore=4 (the value hole_
+  // scores held at the moment submission started) despite hole_scores
+  // now genuinely holding 9 -- a round silently 'pending' with a score
+  // that disagreed with its own hole-by-hole detail, exactly the
+  // unreliability ghs#168 exists to remove from the Daily PCC screen's
+  // data source.
+  assert.equal(result.round!.grossScore, 9, "reflects the hole score as it stood once the lock was actually available, not a stale pre-lock read");
 });
 
 test("RoundsRepository.addHoleScore upserts against the real ON CONFLICT DO UPDATE, not a second row or a unique-violation (ghs#92)", async () => {
@@ -349,7 +407,7 @@ test("HTTP DELETE /rounds/:id (ghs#147): a player deletes their own draft round 
   const clubsRepo = createClubsRepository(pool);
   const coursesRepo = createCoursesRepository(pool);
   const settingsRepo = createSystemSettingsRepository(pool);
-  const { roundsRepo, roundsService, notificationsRepository } = buildServices();
+  const { roundsRepo, roundsService, notificationsRepository, recalculationOrchestrator } = buildServices();
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
@@ -367,7 +425,7 @@ test("HTTP DELETE /rounds/:id (ghs#147): a player deletes their own draft round 
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -501,7 +559,7 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
   const clubsRepo = createClubsRepository(pool);
   const coursesRepo = createCoursesRepository(pool);
   const settingsRepo = createSystemSettingsRepository(pool);
-  const { roundsRepo, roundsService, notificationsRepository } = buildServices();
+  const { roundsRepo, roundsService, notificationsRepository, recalculationOrchestrator } = buildServices();
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
@@ -519,7 +577,7 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -722,7 +780,7 @@ function buildWorkflowApp() {
   const clubsRepo = createClubsRepository(pool);
   const coursesRepo = createCoursesRepository(pool);
   const settingsRepo = createSystemSettingsRepository(pool);
-  const { roundsRepo, roundsService, notificationsRepository } = buildServices();
+  const { roundsRepo, roundsService, notificationsRepository, recalculationOrchestrator } = buildServices();
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
@@ -740,7 +798,7 @@ function buildWorkflowApp() {
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
   });
 
   return { app, roundsRepo, roundsService, players, adminUsersService, authService };
@@ -768,6 +826,15 @@ test("GET /admin/rounds (ghs#100): returns rounds across every status, filterabl
     await roundsRepo.setStatus(pending.id, "pending");
     const approved = await roundsRepo.create({ playerId: playerB.id, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
     await roundsRepo.setStatus(approved.id, "approved");
+    // ghs#168: a real score, so the list can be asserted to surface it --
+    // the whole point of the Daily PCC screen's data source.
+    await roundsRepo.updateScores(pending.id, { grossScore: 90, adjustedGrossScore: 88, scoreDifferential: 12.3, pcc: 0 });
+
+    // ghs#168: a second tee-configuration, same day as `draft`, to prove
+    // teeConfigurationId/playedOn actually scope the query rather than
+    // just being accepted and ignored.
+    const otherTeeConfigurationId = await createTeeConfiguration(72.0, 113, "Round Workflow Test Course (Other Tee)");
+    const otherTeeSameDay = await roundsRepo.create({ playerId: playerA.id, teeConfigurationId: otherTeeConfigurationId, playedAt: "2026-05-01T15:00:00.000Z" });
 
     const admin = await adminUsersService.adminCreateUser({
       email: "browse-admin@example.com", password: "admin-pw-1", role: "admin",
@@ -787,12 +854,55 @@ test("GET /admin/rounds (ghs#100): returns rounds across every status, filterabl
     const playerAttempt = await fetch(`${baseUrl}/api/v1/admin/rounds`, { headers: asPlayer });
     assert.equal(playerAttempt.status, 403);
 
-    // No filter -- all three rounds, regardless of status.
+    // No filter -- all four rounds, regardless of status or tee configuration.
     const allResponse = await fetch(`${baseUrl}/api/v1/admin/rounds`, { headers: asAdmin });
     assert.equal(allResponse.status, 200);
-    const all = await allResponse.json() as { items: Array<{ id: string; status: string }>; total: number };
-    assert.equal(all.total, 3);
-    assert.deepEqual(new Set(all.items.map((i) => i.id)), new Set([draft.id, pending.id, approved.id]));
+    type AdminRoundListItemBody = {
+      id: string;
+      status: string;
+      grossScore: number | null;
+      adjustedGrossScore: number | null;
+      scoreDifferential: number | null;
+      pcc: number | null;
+    };
+    const all = await allResponse.json() as { items: AdminRoundListItemBody[]; total: number };
+    assert.equal(all.total, 4);
+    assert.deepEqual(new Set(all.items.map((i) => i.id)), new Set([draft.id, pending.id, approved.id, otherTeeSameDay.id]));
+
+    // ghs#168: a round scored (submission-time, or here a directly-
+    // written fixture standing in for it) before approval must surface
+    // its real score fields here -- the Daily PCC screen's whole reason
+    // for extending this endpoint rather than inventing a parallel one.
+    const scoredItem = all.items.find((i) => i.id === pending.id)!;
+    assert.equal(scoredItem.grossScore, 90);
+    assert.equal(scoredItem.adjustedGrossScore, 88);
+    assert.equal(scoredItem.scoreDifferential, 12.3);
+    assert.equal(scoredItem.pcc, 0);
+    const unscoredItem = all.items.find((i) => i.id === draft.id)!;
+    assert.equal(unscoredItem.grossScore, null);
+    assert.equal(unscoredItem.scoreDifferential, null);
+
+    // ghs#168: teeConfigurationId + playedOn together scope to exactly
+    // one tee/day -- otherTeeSameDay shares draft's date but not its tee
+    // configuration, and must be excluded.
+    const dailyResponse = await fetch(
+      `${baseUrl}/api/v1/admin/rounds?teeConfigurationId=${teeConfigurationId}&playedOn=2026-05-01`,
+      { headers: asAdmin },
+    );
+    const daily = await dailyResponse.json() as { items: AdminRoundListItemBody[]; total: number };
+    assert.equal(daily.total, 1);
+    assert.equal(daily.items[0]!.id, draft.id);
+
+    // The other tee configuration's own round, same day, filtered on its
+    // own id -- confirms the filter narrows by tee configuration, not just
+    // date.
+    const otherTeeDailyResponse = await fetch(
+      `${baseUrl}/api/v1/admin/rounds?teeConfigurationId=${otherTeeConfigurationId}&playedOn=2026-05-01`,
+      { headers: asAdmin },
+    );
+    const otherTeeDaily = await otherTeeDailyResponse.json() as { items: AdminRoundListItemBody[]; total: number };
+    assert.equal(otherTeeDaily.total, 1);
+    assert.equal(otherTeeDaily.items[0]!.id, otherTeeSameDay.id);
 
     // status filter.
     const pendingOnlyResponse = await fetch(`${baseUrl}/api/v1/admin/rounds?status=pending`, { headers: asAdmin });
@@ -810,7 +920,7 @@ test("GET /admin/rounds (ghs#100): returns rounds across every status, filterabl
     const pagedResponse = await fetch(`${baseUrl}/api/v1/admin/rounds?limit=1&offset=0`, { headers: asAdmin });
     const paged = await pagedResponse.json() as { items: Array<{ id: string }>; total: number };
     assert.equal(paged.items.length, 1);
-    assert.equal(paged.total, 3, "total reflects the full filtered set, not just this page's length");
+    assert.equal(paged.total, 4, "total reflects the full filtered set, not just this page's length");
 
     // An invalid status value is a 400, not a silently-ignored filter.
     const invalidStatus = await fetch(`${baseUrl}/api/v1/admin/rounds?status=bogus`, { headers: asAdmin });

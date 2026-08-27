@@ -205,7 +205,7 @@ test("HTTP: admin can calculate/override PCC for a tee-configuration/day; a play
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -225,6 +225,14 @@ test("HTTP: admin can calculate/override PCC for a tee-configuration/day; a play
       firstName: "PCC", lastName: "Player", autoActivate: true,
     });
 
+    // ghs#168 review fix regression: a real, scored round sits on this
+    // tee-configuration/day, owned by a real player -- the exact case
+    // that exposed the route bypassing recalculatePccForTeeConfigDay
+    // entirely (playerRecalculations would previously have been absent,
+    // since the route never called the orchestrator at all).
+    const scoredRoundId = await createScoredRound(teeConfigurationId, "2026-05-01T09:00:00.000Z", 90);
+    const scoredPlayerId = (await roundsRepo.get(scoredRoundId))!.playerId;
+
     const adminLogin = await authService.login("pcc-admin@example.com", "admin-pw-1");
     const playerLogin = await authService.login("pcc-player@example.com", "player-pw-1");
     if (adminLogin.status !== "authenticated" || playerLogin.status !== "authenticated") throw new Error("unreachable");
@@ -242,9 +250,21 @@ test("HTTP: admin can calculate/override PCC for a tee-configuration/day; a play
       body: JSON.stringify({ playedOn: "2026-05-01", pcc: 1 }),
     });
     assert.equal(adminResponse.status, 200);
-    const body = await adminResponse.json() as { dailyPcc: { pcc: number; source: string } };
+    const body = await adminResponse.json() as {
+      dailyPcc: { pcc: number; source: string };
+      updatedRounds: number;
+      playerRecalculations: { playerId: string; trigger: string; status: string }[];
+    };
     assert.equal(body.dailyPcc.pcc, 1);
     assert.equal(body.dailyPcc.source, "override");
+
+    // The real ghs#168 fix: the bulk-rewritten round's owner was actually
+    // recalculated via the orchestrator, not just left with an updated
+    // score_differential and no handicap effect.
+    assert.equal(body.updatedRounds, 1);
+    assert.equal(body.playerRecalculations.length, 1);
+    assert.equal(body.playerRecalculations[0]!.playerId, scoredPlayerId);
+    assert.equal(body.playerRecalculations[0]!.trigger, "pcc_correction");
 
     void player; void admin;
   } finally {
