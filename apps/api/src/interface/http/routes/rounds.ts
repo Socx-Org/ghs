@@ -7,6 +7,7 @@ import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth, requireRole } from "../middleware/require-auth.ts";
 import { ADMIN_ROLES, createPlayerAccessAuthorizer } from "../authorization.ts";
 import { HoleMetadataNotFoundError } from "../../../application/scoring.service.ts";
+import { getPlayedOnDate, InvalidPccInputError } from "../../../application/pcc.service.ts";
 
 const FAIRWAY_RESULTS: FairwayResult[] = ["hit", "missed_left", "missed_right"];
 
@@ -374,17 +375,32 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         resolvedTeeConfigurationId = teeConfigurationId;
       }
 
-      // ghs#168: lenient, same as pcc.service.ts's own getPlayedOnDate --
-      // accepts a plain YYYY-MM-DD or a full ISO date-time (the query is a
-      // played_at::date comparison either way, unlike ghs#169's playedAt
-      // body field, which is a full timestamp being persisted verbatim).
+      // ghs#168 review fix: normalised via the same getPlayedOnDate
+      // pcc.service.ts itself uses, not just validated-then-forwarded
+      // raw. Forwarding an un-normalised full ISO date-time straight
+      // into the repository's own `played_at::date = $N::date` comparison
+      // (rounds.repository.ts) would rely on Postgres's own text-to-date
+      // cast (which takes the literal date component, ignoring any
+      // offset) rather than a single explicit, self-documenting
+      // definition of "which calendar day" -- normalising here makes the
+      // two sides of that comparison agree by construction, unlike
+      // ghs#169's playedAt body field, which is a full timestamp being
+      // persisted verbatim, not day-scoped.
       let resolvedPlayedOn: string | undefined;
       if (playedOn !== undefined) {
-        if (typeof playedOn !== "string" || Number.isNaN(new Date(playedOn).getTime())) {
+        if (typeof playedOn !== "string") {
           res.status(400).json({ error: "playedOn must be a valid ISO date or date-time" });
           return;
         }
-        resolvedPlayedOn = playedOn;
+        try {
+          resolvedPlayedOn = getPlayedOnDate(playedOn);
+        } catch (err) {
+          if (err instanceof InvalidPccInputError) {
+            res.status(400).json({ error: err.message });
+            return;
+          }
+          throw err;
+        }
       }
 
       const parsedLimit = typeof limit === "string" ? Number.parseInt(limit, 10) : NaN;

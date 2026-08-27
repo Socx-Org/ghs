@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Alert, BackButton, Button, Checkbox, FormField, Input, Select } from "../components";
 import { ApiError, createRound, getCourse, getMyPlayerProfile, listCourses, listUsers } from "../lib/api";
-import { playedAtToIsoString } from "../lib/dates";
+import { playedAtToIsoString, today } from "../lib/dates";
 import { useAuth } from "../hooks/useAuth";
 
 // ghs#94: the start of the round-entry flow -- course, then tee
@@ -33,10 +33,6 @@ const schema = z.object({
   is9Hole: z.boolean(),
 });
 type FormValues = z.infer<typeof schema>;
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export default function NewRoundPage() {
   const navigate = useNavigate();

@@ -25,3 +25,13 @@ export function isoStringToDateInputValue(iso: string): string {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
+
+// ghs#168 review fix: `new Date().toISOString().slice(0, 10)` reads UTC
+// date parts, not local ones -- for a negative-UTC-offset caller, this
+// silently defaults an <input type="date"> to tomorrow whenever "now" has
+// already crossed local midnight but not UTC midnight yet. Same
+// local-parts fix as isoStringToDateInputValue above, applied to `new
+// Date()` (already local) instead of a parsed ISO string.
+export function today(): string {
+  return isoStringToDateInputValue(new Date().toISOString());
+}

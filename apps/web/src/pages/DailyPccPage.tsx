@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Badge, Button, Card, CardBody, CardHeader, EmptyState, FormField, Input, Select, Skeleton, Stat, RoundStatusBadge, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow, useToast } from "../components";
 import { ApiError, getCourse, getDailyPcc, listAdminRounds, listCourses, setDailyPcc } from "../lib/api";
+import { playedAtToIsoString, today } from "../lib/dates";
 import type { PccCorrectionOutcome } from "../types/domain";
 
 // ghs#168: the Daily PCC screen -- the admin-facing half of "move
@@ -25,10 +26,6 @@ function formatScore(value: number | null): string {
 
 function formatDifferential(value: number | null): string {
   return value === null ? "—" : value.toFixed(1);
-}
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 function describeQueryError(error: unknown, fallback: string): string {
@@ -232,7 +229,7 @@ export default function DailyPccPage() {
                 </Table>
               )}
               <p className="mt-3 text-xs text-text-muted">
-                Rounds without a recorded score yet (still in draft) are excluded from the calculation above -- {formatPlayedAt(`${playedOn}T00:00:00.000Z`)}.
+                Rounds without a recorded score yet (still in draft) are excluded from the calculation above -- {formatPlayedAt(playedAtToIsoString(playedOn))}.
               </p>
             </CardBody>
           </Card>
