@@ -12,6 +12,7 @@ import AdminSettingsPage from "./pages/AdminSettingsPage";
 import CourseDetailPage from "./pages/CourseDetailPage";
 import CourseListPage from "./pages/CourseListPage";
 import CreateCoursePage from "./pages/CreateCoursePage";
+import DailyPccPage from "./pages/DailyPccPage";
 import DashboardPlaceholder from "./pages/DashboardPlaceholder";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import LoginPage from "./pages/LoginPage";
@@ -127,6 +128,12 @@ export default function AppRoutes() {
                 "/admin/rounds" match is a distinct route entirely. */}
             <Route path="/admin/rounds" element={<AdminRoundsListPage />} />
             <Route path="/admin/rounds/:id" element={<AdminRoundReviewPage />} />
+            {/* ghs#168: the Daily PCC screen -- a fresh top-level admin
+                path, not nested under /admin/rounds (which already has
+                its own :id-shaped route for a single round's review
+                screen; this one is scoped by tee-configuration/day, not
+                round id). */}
+            <Route path="/admin/pcc" element={<DailyPccPage />} />
             {/* ghs#157: system settings -- admin-only, matching every
                 PUT/GET under admin-settings.ts being requireRole("admin",
                 "super_admin")-gated server-side too. */}

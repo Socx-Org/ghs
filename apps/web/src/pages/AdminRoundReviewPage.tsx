@@ -271,7 +271,17 @@ export default function AdminRoundReviewPage() {
         >
           <p className="text-sm text-text">
             Delete this round permanently? This can't be undone.{" "}
-            {round.scoreDifferential !== null && "This round has a recorded score -- the player's handicap will be recalculated."}
+            {/* ghs#168 audit fix: scoreDifferential !== null used to be a
+                reliable proxy for "this round ever counted toward
+                handicap" back when only approval ever computed a real
+                score. Scoring now happens at submission, so a merely-
+                pending or since-rejected round has a real, non-null
+                score too, despite never counting -- checking status
+                directly (mirroring rounds.service.ts's own
+                everCountedTowardHandicap) is the only way this warning
+                stays accurate. */}
+            {(round.status === "approved" || round.status === "amending") &&
+              "This round has been approved -- the player's handicap will be recalculated."}
           </p>
         </Modal>
       )}

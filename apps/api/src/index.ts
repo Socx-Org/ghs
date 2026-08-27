@@ -90,6 +90,7 @@ const app = createApp({
   roundsService,
   handicapOverridesService,
   pccService,
+  recalculationOrchestrator,
   playersRepository,
   authProvider,
 });

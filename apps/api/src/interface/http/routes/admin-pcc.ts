@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { PccService } from "../../../application/pcc.service.ts";
 import { InvalidPccInputError } from "../../../application/pcc.service.ts";
+import type { RecalculationOrchestrator } from "../../../application/recalculation.service.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth, requireRole } from "../middleware/require-auth.ts";
 import { ADMIN_ROLES } from "../authorization.ts";
@@ -8,7 +9,19 @@ import { ADMIN_ROLES } from "../authorization.ts";
 // Admin-only: PCC is a per-tee-configuration-per-day calculation with a
 // real effect on every round played there that day (rewrites
 // score_differential in bulk) -- not a player-facing endpoint.
-export function adminPccRouter(pcc: PccService, authProvider: AuthProvider): Router {
+//
+// ghs#168 review fix: the PATCH route below previously called
+// pcc.calculateOrOverride() directly, bypassing recalculation.
+// recalculatePccForTeeConfigDay() entirely -- meaning a PCC correction
+// bulk-rewrote every affected round's score_differential but NEVER
+// actually recalculated any affected player's handicap index, despite
+// this issue's own acceptance criteria requiring exactly that. The
+// orchestrator method (recalculation.service.ts) already existed,
+// already correct and tested, just never wired to this route -- a real
+// gap in already-built-but-never-actually-called machinery, not new WHS
+// math. Still takes `pcc` directly for the read-only GET below, which
+// has no recalculation concern of its own.
+export function adminPccRouter(pcc: PccService, recalculation: RecalculationOrchestrator, authProvider: AuthProvider): Router {
   const router = Router();
   const requireAdmin = [requireAuth(authProvider), requireRole(...ADMIN_ROLES)];
 
@@ -42,7 +55,7 @@ export function adminPccRouter(pcc: PccService, authProvider: AuthProvider): Rou
         return;
       }
 
-      const result = await pcc.calculateOrOverride(
+      const result = await recalculation.recalculatePccForTeeConfigDay(
         String(req.params.teeConfigurationId),
         playedOn,
         typeof pccValue === "number" ? pccValue : null,

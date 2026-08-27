@@ -89,6 +89,13 @@ export interface PendingRoundQueueItem {
 // ghs#100/#113: the general admin all-rounds browser -- same shape as
 // PendingRoundQueueItem plus status, since (unlike the pending-only
 // queue) this list spans every status.
+// ghs#168: the score fields (grossScore/adjustedGrossScore/
+// scoreDifferential/pcc) were added for the Daily PCC screen, which needs
+// to show a tee-configuration/day's real submitted scores before any
+// approval -- possible now that scoring happens at submission time, not
+// approval. All four are null until a round has been scored at least once
+// (draft, or amending since its last edit); that's a real absence, not a
+// bug -- callers must not assume non-null.
 export interface AdminRoundListItem {
   id: string;
   playerId: string;
@@ -100,11 +107,21 @@ export interface AdminRoundListItem {
   teeConfigurationName: string;
   playedAt: string;
   status: RoundStatus;
+  grossScore: number | null;
+  adjustedGrossScore: number | null;
+  scoreDifferential: number | null;
+  pcc: number | null;
 }
 
 export interface ListAdminRoundsFilter {
   status?: RoundStatus;
   playerId?: string;
+  // ghs#168: scopes the list to one tee-configuration/day pair -- the
+  // Daily PCC screen's own query shape, matching pcc.repository.ts's
+  // getRoundInputsForDay (played_at::date comparison, so a plain
+  // YYYY-MM-DD or a full ISO date-time both work).
+  teeConfigurationId?: string;
+  playedOn?: string;
   limit: number;
   offset: number;
 }
@@ -632,6 +649,14 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         values.push(filter.playerId);
         conditions.push(`r.player_id = $${values.length}`);
       }
+      if (filter.teeConfigurationId) {
+        values.push(filter.teeConfigurationId);
+        conditions.push(`r.tee_configuration_id = $${values.length}`);
+      }
+      if (filter.playedOn) {
+        values.push(filter.playedOn);
+        conditions.push(`r.played_at::date = $${values.length}::date`);
+      }
       const whereClause = conditions.join(" AND ");
 
       const countResult = await pool.query<{ count: string }>(
@@ -654,12 +679,17 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         tee_configuration_name: string;
         played_at: Date;
         status: RoundStatus;
+        gross_score: number | null;
+        adjusted_gross_score: number | null;
+        score_differential: string | null;
+        pcc: number | null;
       }>(
         `SELECT
            r.id, r.player_id, p.first_name AS player_first_name, p.last_name AS player_last_name,
            c.id AS course_id, c.name AS course_name,
            tc.id AS tee_configuration_id, tc.name AS tee_configuration_name,
-           r.played_at, r.status
+           r.played_at, r.status,
+           r.gross_score, r.adjusted_gross_score, r.score_differential, r.pcc
          FROM rounds r
          JOIN players p ON p.id = r.player_id
          JOIN tee_configurations tc ON tc.id = r.tee_configuration_id
@@ -682,6 +712,10 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
           teeConfigurationName: row.tee_configuration_name,
           playedAt: row.played_at.toISOString(),
           status: row.status,
+          grossScore: row.gross_score,
+          adjustedGrossScore: row.adjusted_gross_score,
+          scoreDifferential: row.score_differential === null ? null : Number(row.score_differential),
+          pcc: row.pcc,
         })),
         total,
       };

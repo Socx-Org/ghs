@@ -196,20 +196,31 @@ export function createRoundsService(
     if (!player?.userId) return;
     await notifications.record({ userId: player.userId, eventType, payload }, client, options);
   }
-  // recomputeRoundAggregates runs as its own, separate step before the
-  // approval transaction opens -- not threaded into the same client. This
-  // mirrors the precedent PccService.calculateOrOverride (ghs#19) already
-  // set (reading round inputs outside its own bulk-update transaction):
-  // an admin-driven, low-concurrency workflow, where the cost of fully
-  // threading a client through ScoringService's own chain of repository
-  // calls (RoundsRepository.get, CoursesRepository.getTeeConfiguration,
-  // PccService.getOrCreateDailyPcc, RoundsRepository.updateScores) would
-  // be real, ongoing complexity for a race window that's already
-  // acceptably small in practice. The genuinely atomic unit -- state
-  // transition + recalculation -- is what Issue 23/24's acceptance
-  // criteria actually requires, and that part is fully transactional
-  // below.
-  async function rescoreBeforeApproval(roundId: string): Promise<void> {
+  // recomputeRoundAggregates runs as its own, separate step before
+  // whichever locked transition follows it -- never threaded into the
+  // same client. This mirrors the precedent PccService.calculateOrOverride
+  // (ghs#19) already set (reading round inputs outside its own bulk-update
+  // transaction): an admin-driven, low-concurrency workflow, where the
+  // cost of fully threading a client through ScoringService's own chain
+  // of repository calls (RoundsRepository.get, CoursesRepository.
+  // getTeeConfiguration, PccService.getOrCreateDailyPcc, RoundsRepository.
+  // updateScores) would be real, ongoing complexity for a race window
+  // that's already acceptably small in practice. The genuinely atomic
+  // unit -- state transition + recalculation -- is what the workflow's
+  // own acceptance criteria actually requires, and that part is fully
+  // transactional below.
+  //
+  // ghs#168: originally only called before approval (hence the old name,
+  // rescoreBeforeApproval) -- now also called before an ordinary
+  // submission and after a played-at edit on an already-scored round, so
+  // renamed to describe what it does, not just its original one call
+  // site. approveRoundInternal's own call is deliberately kept even
+  // though a round submitted through the ordinary path is already
+  // current by the time it reaches approval -- an 'amending' round is
+  // re-approved directly (never re-submitted), so this is still the only
+  // rescore that path ever gets. Redundant-but-harmless for the ordinary
+  // pending -> approved path, genuinely necessary for amending -> approved.
+  async function rescoreRound(roundId: string): Promise<void> {
     await scoring.recomputeRoundAggregates(roundId);
   }
 
@@ -245,6 +256,63 @@ export function createRoundsService(
   // round directly.
   function isDateEditableStatus(status: RoundStatus): boolean {
     return status === "draft" || status === "pending" || status === "rejected" || status === "amending";
+  }
+
+  // ghs#168 review of every "scoreDifferential === null" assumption in
+  // this file: rejectRound/deleteRound below used to treat a null
+  // scoreDifferential as "this round never counted toward the player's
+  // handicap, skip recalculating" -- a proxy that only worked because,
+  // before this issue, the ONLY way a round got a real scoreDifferential
+  // was approval itself. Now that submission also scores a round
+  // (below), a merely-pending or since-rejected round has a real,
+  // non-null scoreDifferential despite having never been approved --
+  // the old proxy would trigger a wasted (though not incorrect --
+  // recalculating the same already-approved set produces the identical
+  // result) recalculation on every reject/delete of an ordinary
+  // never-approved round. The real question was always "did this round
+  // currently count, or previously count via approval" -- 'approved'
+  // (currently does) or 'amending' (did, until reopened -- already
+  // excluded from listApprovedDifferentialsForPlayer, but its exclusion
+  // was itself a real recalculation-worthy event) -- not "does it happen
+  // to have a number in this column."
+  function everCountedTowardHandicap(status: RoundStatus): boolean {
+    return status === "approved" || status === "amending";
+  }
+
+  // ghs#168: a round already scored at submission (pending) or since
+  // rejected (still carrying that same submission-time score) must be
+  // rescored if its played date changes, or the stored differential
+  // would silently reflect the wrong day's PCC -- exactly the forward
+  // interaction ghs#169 flagged before this issue existed to resolve it.
+  // Deliberately excludes 'amending': that status's own stale
+  // score/pcc-until-re-approval is an already-established, deliberate
+  // exception (ghs#169), not something this issue revisits. Excludes
+  // 'draft' too -- never scored yet, nothing to go stale.
+  function needsRescoreAfterDateChange(status: RoundStatus): boolean {
+    return status === "pending" || status === "rejected";
+  }
+
+  // ghs#92/#168: the completeness rule ("every hole the tee configuration
+  // defines has a recorded score, or at least 9 for an is9Hole round")
+  // now needs checking in three places -- the ordinary submission's own
+  // lock-free pre-check (new, ghs#168, so an incomplete round is never
+  // rescored as a side effect of an attempt that's about to fail
+  // anyway -- same discipline PR #32 already established for
+  // approveRoundInternal's status check), that same submission's
+  // authoritative locked check, and submitAdminCreatedRound's identical
+  // requirement -- one shared implementation instead of three
+  // independently-drifting copies.
+  async function assertCompleteForSubmission(
+    round: { id: string; teeConfigurationId: string; is9Hole: boolean },
+    client?: PoolClient,
+  ): Promise<void> {
+    const teeConfiguration = await courses.getTeeConfiguration(round.teeConfigurationId);
+    if (!teeConfiguration) throw new Error("tee configuration not found");
+    const recordedCount = await repository.countHoleScores(round.id, client);
+    const requiredCount = round.is9Hole ? 9 : teeConfiguration.holes.length;
+    if (recordedCount < requiredCount) {
+      throw new IncompleteRoundError(`round has ${recordedCount} of ${requiredCount} required hole scores recorded`);
+    }
   }
 
   async function runWorkflowTransition(
@@ -285,7 +353,7 @@ export function createRoundsService(
     // without this, a missing round would throw ScoringService's generic
     // "round not found" Error instead of RoundNotFoundError (500 instead
     // of 404), and a round in a non-approvable status would still have
-    // rescoreBeforeApproval persist new score/differential values via
+    // rescoreRound persist new score/differential values via
     // recomputeRoundAggregates before the transition below ever gets a
     // chance to reject it -- a real, unwanted side effect on a call that
     // ultimately fails (caught in review, PR #32).
@@ -293,7 +361,7 @@ export function createRoundsService(
     if (!existing) throw new RoundNotFoundError(`round ${id} not found`);
     assertApprovableStatus(existing.status);
 
-    await rescoreBeforeApproval(id);
+    await rescoreRound(id);
 
     const { roundApproved } = await systemSettings.getNotificationSettings();
 
@@ -357,18 +425,18 @@ export function createRoundsService(
         }
       },
       async (client, existing) => {
-        const teeConfiguration = await courses.getTeeConfiguration(existing.teeConfigurationId);
-        if (!teeConfiguration) throw new Error("tee configuration not found");
-        const recordedCount = await repository.countHoleScores(id, client);
-        const requiredCount = existing.is9Hole ? 9 : teeConfiguration.holes.length;
-        if (recordedCount < requiredCount) {
-          throw new IncompleteRoundError(`round has ${recordedCount} of ${requiredCount} required hole scores recorded`);
-        }
+        await assertCompleteForSubmission(existing, client);
         await repository.setStatus(id, "pending", undefined, client);
         return null;
       },
     );
 
+    // ghs#168: deliberately doesn't rescore here too -- approveRoundInternal,
+    // called immediately below with no observable gap in between, already
+    // does. This round is never visibly "pending" to anything (an admin,
+    // a Daily PCC calculation) between the two calls, so there's no real
+    // window submission-time scoring needs to unblock for this fast path
+    // the way there is for the ordinary player-submission path below.
     return approveRoundInternal(id);
   }
 
@@ -501,6 +569,28 @@ export function createRoundsService(
         return submitAdminCreatedRound(id);
       }
 
+      // ghs#168: status + completeness checked, then rescored, BEFORE the
+      // locked transition below opens -- the same "never mutate the
+      // round as a side effect of an attempt that's ultimately going to
+      // fail" discipline approveRoundInternal already established for
+      // its own rescore (PR #32), now needed here too since scoring runs
+      // at submission, not only at approval. This is the change that
+      // unblocks the Daily PCC screen: once this commits, the round's
+      // real score/PCC exists the moment it's submitted, not only once
+      // an admin gets around to approving it -- so a tee/day's entire
+      // submitted field is visible to PCC calculation before any of it
+      // is approved, regardless of how many rounds or players are
+      // involved (the scaling problem this issue's own discovery
+      // identified). Rescoring an incomplete round would otherwise
+      // persist a real but meaningless partial score.
+      const existing = await repository.get(id);
+      if (!existing) throw new RoundNotFoundError(`round ${id} not found`);
+      if (!isEditableStatus(existing.status)) {
+        throw new InvalidRoundTransitionError(`cannot submit a round in status '${existing.status}' for review`);
+      }
+      await assertCompleteForSubmission(existing);
+      await rescoreRound(id);
+
       const { roundSubmitted } = await systemSettings.getNotificationSettings();
 
       return runWorkflowTransition(
@@ -511,26 +601,11 @@ export function createRoundsService(
           }
         },
         async (client, existing) => {
-          // ghs#92: completeness check, run inside the same locked
-          // transaction as the status change itself -- a round is
-          // "complete" when every hole its tee configuration actually
-          // defines has a recorded score, except for an is9Hole round,
-          // where the schema has no way to record which specific 9 hole
-          // numbers were intended (no front-9/back-9 field anywhere,
-          // and is_9_hole/tee_configurations.hole_count are independent,
-          // unconstrained columns -- confirmed against every real test
-          // fixture, none pairs is9Hole with a 9-hole tee configuration)
-          // -- so "at least 9 distinct scores" is the most precise rule
-          // the current schema can express for that case.
-          const teeConfiguration = await courses.getTeeConfiguration(existing.teeConfigurationId);
-          if (!teeConfiguration) throw new Error("tee configuration not found");
-          const recordedCount = await repository.countHoleScores(id, client);
-          const requiredCount = existing.is9Hole ? 9 : teeConfiguration.holes.length;
-          if (recordedCount < requiredCount) {
-            throw new IncompleteRoundError(
-              `round has ${recordedCount} of ${requiredCount} required hole scores recorded`,
-            );
-          }
+          // ghs#92/#168: re-checked here too, under the row lock -- the
+          // pre-check above ran outside any transaction and could in
+          // principle be stale by the time this runs (e.g. a concurrent
+          // hole-score deletion) -- this is the authoritative check.
+          await assertCompleteForSubmission(existing, client);
 
           // setStatus's rejectionReason param defaults to null when
           // omitted (same as approveRound/reopenForAmendment below) --
@@ -583,8 +658,16 @@ export function createRoundsService(
           // Legacy bug fix: only logged as "requested", never actually
           // recalculated, when rejecting a round that had already
           // contributed a differential (ghs#23's own confirmed finding).
-          if (existing.scoreDifferential === null) {
-            logger.info("round rejected", { roundId: id, playerId: existing.playerId, recalculation: "not applicable -- round never had a differential" });
+          // ghs#168: everCountedTowardHandicap(), not
+          // "scoreDifferential === null" -- a merely-pending round
+          // rejected today already has a real, submission-time-computed
+          // differential (it's never been approved, so it never counted)
+          // -- the old null-check would have wastefully (though not
+          // incorrectly) recalculated on every ordinary rejection. Only
+          // 'amending' (rejectRound's only other legal source status)
+          // ever actually counted.
+          if (!everCountedTowardHandicap(existing.status)) {
+            logger.info("round rejected", { roundId: id, playerId: existing.playerId, recalculation: "not applicable -- round was never approved" });
             return null;
           }
           const result = await recalculation.recalculatePlayerHandicap(existing.playerId, "round_rejected", client);
@@ -614,8 +697,15 @@ export function createRoundsService(
         },
         async (client, existing) => {
           await repository.softDelete(id, client);
-          if (existing.scoreDifferential === null) {
-            logger.info("round deleted", { roundId: id, playerId: existing.playerId, recalculation: "not applicable -- round never had a differential" });
+          // ghs#168: everCountedTowardHandicap(), not
+          // "scoreDifferential === null" -- see rejectRound's identical
+          // fix above for the full reasoning. deleteRound is reachable
+          // from any status (admin-unrestricted), so this also covers
+          // 'draft'/'rejected' (never counted, whether or not they
+          // happen to have a number in this column) correctly alongside
+          // 'pending'.
+          if (!everCountedTowardHandicap(existing.status)) {
+            logger.info("round deleted", { roundId: id, playerId: existing.playerId, recalculation: "not applicable -- round was never approved" });
             return null;
           }
           const result = await recalculation.recalculatePlayerHandicap(existing.playerId, "round_deleted", client);
@@ -656,7 +746,7 @@ export function createRoundsService(
     },
 
     async updatePlayedAt(id, playedAt) {
-      return runWorkflowTransition(
+      const result = await runWorkflowTransition(
         id,
         (existing) => {
           if (!isDateEditableStatus(existing.status)) {
@@ -665,10 +755,26 @@ export function createRoundsService(
         },
         async (client) => {
           await repository.updatePlayedAt(id, playedAt, client);
-          logger.info("round played date updated", { roundId: id, playedAt });
           return null;
         },
       );
+
+      // ghs#168: a pending or rejected round already carries a real,
+      // submission-time-computed score/PCC (see needsRescoreAfterDateChange's
+      // own comment for why 'draft'/'amending' are excluded) -- rescored
+      // as its own separate step after the date change commits (same
+      // "can't run inside an existing transaction" reason rescoreRound's
+      // every other call site has), reading the round's now-current
+      // played_at fresh, so the stored differential never silently keeps
+      // reflecting the day it used to be on.
+      if (result.round && needsRescoreAfterDateChange(result.round.status)) {
+        await rescoreRound(id);
+        logger.info("round played date updated, rescored against the new date", { roundId: id, playedAt });
+        return { round: await repository.get(id), recalculation: null };
+      }
+
+      logger.info("round played date updated", { roundId: id, playedAt, status: result.round?.status });
+      return result;
     },
   };
 }

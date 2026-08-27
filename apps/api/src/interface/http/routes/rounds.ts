@@ -345,7 +345,7 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
   // purpose-built and deliberately narrow.
   router.get("/admin/rounds", ...requireAdmin, async (req, res, next) => {
     try {
-      const { status, playerId, limit, offset } = req.query;
+      const { status, playerId, teeConfigurationId, playedOn, limit, offset } = req.query;
 
       let resolvedStatus: (typeof VALID_ROUND_STATUSES)[number] | undefined;
       if (status !== undefined) {
@@ -365,13 +365,42 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         resolvedPlayerId = playerId;
       }
 
+      let resolvedTeeConfigurationId: string | undefined;
+      if (teeConfigurationId !== undefined) {
+        if (typeof teeConfigurationId !== "string") {
+          res.status(400).json({ error: "teeConfigurationId must be a string" });
+          return;
+        }
+        resolvedTeeConfigurationId = teeConfigurationId;
+      }
+
+      // ghs#168: lenient, same as pcc.service.ts's own getPlayedOnDate --
+      // accepts a plain YYYY-MM-DD or a full ISO date-time (the query is a
+      // played_at::date comparison either way, unlike ghs#169's playedAt
+      // body field, which is a full timestamp being persisted verbatim).
+      let resolvedPlayedOn: string | undefined;
+      if (playedOn !== undefined) {
+        if (typeof playedOn !== "string" || Number.isNaN(new Date(playedOn).getTime())) {
+          res.status(400).json({ error: "playedOn must be a valid ISO date or date-time" });
+          return;
+        }
+        resolvedPlayedOn = playedOn;
+      }
+
       const parsedLimit = typeof limit === "string" ? Number.parseInt(limit, 10) : NaN;
       const resolvedLimit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, MAX_ADMIN_ROUNDS_LIMIT) : DEFAULT_ADMIN_ROUNDS_LIMIT;
 
       const parsedOffset = typeof offset === "string" ? Number.parseInt(offset, 10) : NaN;
       const resolvedOffset = Number.isInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
 
-      const result = await service.listAdminRounds({ status: resolvedStatus, playerId: resolvedPlayerId, limit: resolvedLimit, offset: resolvedOffset });
+      const result = await service.listAdminRounds({
+        status: resolvedStatus,
+        playerId: resolvedPlayerId,
+        teeConfigurationId: resolvedTeeConfigurationId,
+        playedOn: resolvedPlayedOn,
+        limit: resolvedLimit,
+        offset: resolvedOffset,
+      });
       res.status(200).json(result);
     } catch (err) {
       next(err);

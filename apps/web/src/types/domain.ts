@@ -113,9 +113,11 @@ export interface PendingRoundQueueItem {
 }
 
 // Mirrors apps/api/src/data/rounds.repository.ts's AdminRoundListItem
-// exactly (ghs#100/#113) -- the general admin all-rounds browser's row
-// shape, same fields as PendingRoundQueueItem above plus status, since
-// (unlike the pending-only queue) this list spans every status.
+// exactly (ghs#100/#113). Same fields as PendingRoundQueueItem above plus
+// status, since (unlike the pending-only queue) this list spans every
+// status. ghs#168 added the four score fields -- null until a round has
+// been scored at least once (draft, or amending since its last edit);
+// that's a real absence to render around, not a bug.
 export interface AdminRoundListItem {
   id: string;
   playerId: string;
@@ -127,6 +129,44 @@ export interface AdminRoundListItem {
   teeConfigurationName: string;
   playedAt: string;
   status: RoundStatus;
+  grossScore: number | null;
+  adjustedGrossScore: number | null;
+  scoreDifferential: number | null;
+  pcc: number | null;
+}
+
+// Mirrors apps/api/src/data/pcc.repository.ts's DailyPcc exactly.
+export type PccSource = "calculated" | "override";
+
+export interface DailyPcc {
+  id: string;
+  teeConfigurationId: string;
+  playedOn: string;
+  pcc: number;
+  source: PccSource;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+// Mirrors apps/api/src/application/recalculation.service.ts's
+// RecalculationOutcome exactly -- one entry per player whose approved
+// rounds were affected by a PCC correction (ghs#168's PATCH response).
+export interface RecalculationOutcome {
+  playerId: string;
+  trigger: string;
+  status: "eligible" | "insufficient_holes" | "insufficient_rounds" | "player_not_found" | "failed";
+  handicapIndex?: number;
+  historyRecordId?: string | null;
+  error?: string;
+}
+
+// Mirrors apps/api/src/application/recalculation.service.ts's
+// PccCorrectionOutcome exactly -- the PATCH
+// /admin/tee-configurations/:id/pcc response shape.
+export interface PccCorrectionOutcome {
+  dailyPcc: DailyPcc;
+  updatedRounds: number;
+  playerRecalculations: RecalculationOutcome[];
 }
 
 // Mirrors apps/api/src/data/rounds.repository.ts's HoleScore.
@@ -147,11 +187,15 @@ export interface HoleScore {
 // Mirrors apps/api/src/data/rounds.repository.ts's Round -- the full
 // shape GET /rounds/:id and POST /rounds return, including holeScores
 // (unlike PlayerRoundListItem above, a lighter list-row projection).
-// grossScore/adjustedGrossScore/
-// scoreDifferential/pcc/total* all stay null until admin approval
-// (ScoringService.recomputeRoundAggregates only runs then) -- the
-// frontend must never treat a null grossScore during entry as "zero,"
-// and must compute any running total itself from holeScores.
+// grossScore/adjustedGrossScore/scoreDifferential/pcc/total* all stay
+// null until the round is first submitted (ghs#168:
+// ScoringService.recomputeRoundAggregates now runs at submission, not
+// approval) -- still null for a draft round, and while entering scores
+// the frontend must compute any running total itself from holeScores
+// rather than reading these fields. Once populated they are NOT a
+// signal of approval -- see RoundDetailsPage's own status-based gate for
+// why a pending/rejected round's real score is still withheld from the
+// player.
 export interface Round {
   id: string;
   playerId: string;

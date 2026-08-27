@@ -18,13 +18,12 @@ import type { AdminRoundListItem } from "../types/domain";
 // separate, still-open issue, not yet added here.
 //
 // ghs#115: a per-row delete action, admin-only, real confirmation Modal
-// (never window.confirm()). Unlike AdminRoundReviewPage's own delete
-// (which already has the full round loaded, so its confirmation can
-// name whether THIS round has a recorded score), this list's own
-// AdminRoundListItem row shape has no scoreDifferential -- the
-// confirmation here is deliberately general; the real per-round
-// outcome is still surfaced honestly afterward, via the toast, from the
-// actual DELETE response.
+// (never window.confirm()). AdminRoundListItem gained status/score
+// fields with ghs#168, but this confirmation stays deliberately general
+// (unlike AdminRoundReviewPage's own delete, which names whether the
+// round has been approved) -- the real per-round outcome is still
+// surfaced honestly afterward, via the toast, from the actual DELETE
+// response.
 
 function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -39,7 +38,7 @@ export default function AdminRoundsListPage() {
   const { show } = useToast();
   const [deleteTarget, setDeleteTarget] = useState<AdminRoundListItem | null>(null);
 
-  const roundsQuery = useQuery({ queryKey: ["admin", "rounds"], queryFn: listAdminRounds });
+  const roundsQuery = useQuery({ queryKey: ["admin", "rounds"], queryFn: () => listAdminRounds() });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteRound(id),

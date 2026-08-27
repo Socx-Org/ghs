@@ -232,7 +232,7 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -378,7 +378,7 @@ test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole u
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -451,6 +451,112 @@ test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole u
     // Now complete -- submit succeeds.
     const completeSubmit = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/submit`, { method: "POST", headers });
     assert.equal(completeSubmit.status, 200);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("HTTP: submitting a round computes its real score immediately, before any approval (ghs#168 -- scoring moved from approval time to submission time)", async () => {
+  const authConfig: AuthConfig = {
+    jwtSecret: "rounds-test-secret-168",
+    jwtAccessExpiresInSeconds: 900,
+    jwtRefreshExpiresInSeconds: 2_592_000,
+    mfaPendingExpiresInSeconds: 300,
+    mfaEncryptionKey: randomBytes(32),
+  };
+
+  const users = createUsersRepository(pool);
+  const players = createPlayersRepository(pool);
+  const activationTokens = createActivationTokenRepository(pool);
+  const passwordResetTokens = createPasswordResetTokenRepository(pool);
+  const refreshTokens = createRefreshTokensRepository(pool);
+  const mfaRepo = createMfaRepository(pool);
+  const clubsRepo = createClubsRepository(pool);
+  const coursesRepo = createCoursesRepository(pool);
+  const settingsRepo = createSystemSettingsRepository(pool);
+  const roundsRepo = createRoundsRepository(pool);
+  const notificationsRepository = createNotificationsRepository(pool);
+
+  const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
+  const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
+  const systemSettingsService = createSystemSettingsService(settingsRepo);
+  const authService = createAuthService({
+    pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+  });
+  const clubsService = createClubsService(clubsRepo, logger);
+  const coursesService = createCoursesService(coursesRepo, logger);
+  const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
+  const pccService = createPccService(createPccRepository(pool));
+  const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
+  const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
+  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
+  const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
+
+  const app = createApp({
+    logger, clubsService, coursesService, authService, mfaService,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
+  });
+
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once("listening", resolve));
+  const { port } = server.address() as { port: number };
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const course = await coursesRepo.create({
+      name: "ghs#168 Submission Scoring Course",
+      country: "ES",
+      teeConfigurations: [{
+        name: "White", holeCount: 18, courseRating: 68.0, slopeRating: 113,
+        holes: [{ holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 1 }],
+      }],
+    });
+    const teeConfigurationId = course.teeConfigurations[0]!.id;
+
+    const playerUser = await adminUsersService.adminCreateUser({
+      email: "submission-scoring-player@example.com", password: "player-pw-1", role: "player",
+      firstName: "Submission", lastName: "Scoring", autoActivate: true,
+    });
+    const playerRecord = await players.findByUserId(playerUser.userId);
+    const login = await authService.login("submission-scoring-player@example.com", "player-pw-1");
+    if (login.status !== "authenticated") throw new Error("unreachable");
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${login.tokens.accessToken}` };
+
+    const createResponse = await fetch(`${baseUrl}/api/v1/rounds`, {
+      method: "POST", headers,
+      body: JSON.stringify({ playerId: playerRecord!.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" }),
+    });
+    const round = await createResponse.json() as { id: string };
+
+    await fetch(`${baseUrl}/api/v1/rounds/${round.id}/holes`, {
+      method: "POST", headers, body: JSON.stringify({ holeNumber: 1, strokes: 6 }),
+    });
+
+    // Before submission -- unscored (draft never gets rescored).
+    const beforeSubmit = await fetch(`${baseUrl}/api/v1/rounds/${round.id}`, { headers });
+    const roundBeforeSubmit = await beforeSubmit.json() as { grossScore: number | null; scoreDifferential: number | null };
+    assert.equal(roundBeforeSubmit.grossScore, null);
+    assert.equal(roundBeforeSubmit.scoreDifferential, null);
+
+    const submitResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/submit`, { method: "POST", headers });
+    assert.equal(submitResponse.status, 200);
+
+    // Immediately after submission -- still 'pending', not approved, but
+    // already carrying a real score. This is the exact chicken-and-egg
+    // problem ghs#168 fixes: an admin building the Daily PCC screen needs
+    // to see this round's real adjusted_gross_score before approving
+    // anything, and a player must never be blocked from submitting more
+    // rounds on this tee/day while the first sits pending.
+    const afterSubmit = await fetch(`${baseUrl}/api/v1/rounds/${round.id}`, { headers });
+    const roundAfterSubmit = await afterSubmit.json() as {
+      status: string; grossScore: number | null; adjustedGrossScore: number | null; scoreDifferential: number | null;
+    };
+    assert.equal(roundAfterSubmit.status, "pending");
+    assert.equal(roundAfterSubmit.grossScore, 6);
+    assert.ok(roundAfterSubmit.adjustedGrossScore !== null, "a real adjusted gross score, computed at submission, not left null until approval");
+    assert.ok(roundAfterSubmit.scoreDifferential !== null, "a real score differential, computed at submission, not left null until approval");
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

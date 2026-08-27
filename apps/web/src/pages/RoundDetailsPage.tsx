@@ -96,8 +96,14 @@ export default function RoundDetailsPage() {
                 <Stat label="Played" value={formatPlayedAt(round.playedAt)} />
                 {isDateEditable && <EditPlayedDateButton roundId={round.id} playedAt={round.playedAt} />}
               </div>
-              <Stat label="Gross score" value={round.grossScore ?? "—"} />
-              <Stat label="Score differential" value={round.scoreDifferential ?? "—"} />
+              {/* ghs#168: scoring now happens at submission, so a pending
+                  round already carries a real, non-null score -- withheld
+                  from the player until approved anyway (deliberate
+                  decision, applied consistently), so this gates on status
+                  rather than null-ness, which is no longer a reliable
+                  signal. */}
+              <Stat label="Gross score" value={round.status === "approved" ? (round.grossScore ?? "—") : "—"} />
+              <Stat label="Score differential" value={round.status === "approved" ? (round.scoreDifferential ?? "—") : "—"} />
             </CardBody>
           </Card>
 
