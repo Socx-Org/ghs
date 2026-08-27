@@ -7,6 +7,7 @@ import type {
   ListAdminRoundsResult,
   PendingRoundQueueItem,
   PlayerRoundListItem,
+  PlayerStats,
   Round,
   RoundForUpdate,
   RoundScoreUpdate,
@@ -67,6 +68,10 @@ export interface RoundsService {
   // ghs#100/#113: the general admin all-rounds browser -- same thin
   // pass-through reasoning as listPendingQueue above.
   listAdminRounds(filter: ListAdminRoundsFilter): Promise<ListAdminRoundsResult>;
+  // ghs#101: the Dashboard module's Performance Statistics widgets --
+  // same thin pass-through reasoning as listAdminRounds above (pure SQL
+  // aggregation, no business logic belongs at this layer).
+  getPlayerStats(playerId: string): Promise<PlayerStats>;
 
   // draft|rejected|amending -> pending (ghs#58). The explicit moment a
   // round actually becomes visible to the admin pending-queue -- never
@@ -549,6 +554,10 @@ export function createRoundsService(
 
     async listAdminRounds(filter) {
       return repository.listAdminRounds(filter);
+    },
+
+    async getPlayerStats(playerId) {
+      return repository.getPlayerStats(playerId);
     },
 
     async submitForReview(id, submittedByRole) {

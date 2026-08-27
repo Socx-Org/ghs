@@ -101,7 +101,7 @@ function buildApp() {
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService,
     playersRepository: players, authProvider,
     rateLimitOverrides: { general: GENEROUS_OVERRIDE, auth: GENEROUS_OVERRIDE, sensitiveIp: GENEROUS_OVERRIDE, sensitiveEmail: GENEROUS_OVERRIDE },
   });
@@ -849,6 +849,73 @@ test("ownership boundary: a player CAN view their own rounds", async () => {
     const playerProfile = await ctx.players.create({ userId: player.user.id, firstName: "Own", lastName: "Player" });
 
     const res = await fetch(`${baseUrl}/api/v1/players/${playerProfile.id}/rounds`, { headers: authHeader(player.token) });
+    assert.equal(res.status, 200);
+  });
+});
+
+// ---------------------------------------------------------------------
+// ghs#101: GET /players/:playerId/handicap-history and GET
+// /players/:playerId/stats -- same ownership boundary as the rounds
+// sub-resource above (createPlayerAccessAuthorizer, reused not
+// reinvented).
+// ---------------------------------------------------------------------
+
+test("ownership boundary: a player cannot view another player's handicap history, an admin can", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const playerA = await createUserWithRole(ctx, "player");
+    const playerB = await createUserWithRole(ctx, "player");
+    const admin = await createUserWithRole(ctx, "admin");
+    await ctx.players.create({ userId: playerA.user.id, firstName: "A", lastName: "Player" });
+    const playerBProfile = await ctx.players.create({ userId: playerB.user.id, firstName: "B", lastName: "Player" });
+
+    const asPlayerA = await fetch(`${baseUrl}/api/v1/players/${playerBProfile.id}/handicap-history`, { headers: authHeader(playerA.token) });
+    assert.equal(asPlayerA.status, 403, "player A cannot view player B's handicap history");
+
+    const asAdmin = await fetch(`${baseUrl}/api/v1/players/${playerBProfile.id}/handicap-history`, { headers: authHeader(admin.token) });
+    assert.equal(asAdmin.status, 200, "an admin can view any player's handicap history");
+    assert.deepEqual(await asAdmin.json(), [], "a real, empty array (no history yet) -- not an error");
+  });
+});
+
+test("ownership boundary: a player CAN view their own handicap history", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const player = await createUserWithRole(ctx, "player");
+    const playerProfile = await ctx.players.create({ userId: player.user.id, firstName: "Own", lastName: "Player" });
+
+    const res = await fetch(`${baseUrl}/api/v1/players/${playerProfile.id}/handicap-history`, { headers: authHeader(player.token) });
+    assert.equal(res.status, 200);
+  });
+});
+
+test("ownership boundary: a player cannot view another player's stats, an admin can", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const playerA = await createUserWithRole(ctx, "player");
+    const playerB = await createUserWithRole(ctx, "player");
+    const admin = await createUserWithRole(ctx, "admin");
+    await ctx.players.create({ userId: playerA.user.id, firstName: "A", lastName: "Player" });
+    const playerBProfile = await ctx.players.create({ userId: playerB.user.id, firstName: "B", lastName: "Player" });
+
+    const asPlayerA = await fetch(`${baseUrl}/api/v1/players/${playerBProfile.id}/stats`, { headers: authHeader(playerA.token) });
+    assert.equal(asPlayerA.status, 403, "player A cannot view player B's stats");
+
+    const asAdmin = await fetch(`${baseUrl}/api/v1/players/${playerBProfile.id}/stats`, { headers: authHeader(admin.token) });
+    assert.equal(asAdmin.status, 200, "an admin can view any player's stats");
+    const body = await asAdmin.json();
+    assert.equal(body.roundsCount, 0, "no approved rounds yet -- a real zero, not an error");
+    assert.equal(body.girPercentage, null, "null, not NaN or a misleading 0, when there's nothing to divide by yet");
+  });
+});
+
+test("ownership boundary: a player CAN view their own stats", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const player = await createUserWithRole(ctx, "player");
+    const playerProfile = await ctx.players.create({ userId: player.user.id, firstName: "Own", lastName: "Player" });
+
+    const res = await fetch(`${baseUrl}/api/v1/players/${playerProfile.id}/stats`, { headers: authHeader(player.token) });
     assert.equal(res.status, 200);
   });
 });

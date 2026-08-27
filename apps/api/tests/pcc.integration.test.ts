@@ -205,7 +205,7 @@ test("HTTP: admin can calculate/override PCC for a tee-configuration/day; a play
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);

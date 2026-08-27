@@ -150,7 +150,7 @@ test("HTTP: a player can view their own handicap override history but not anothe
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService,
     playersRepository: players, authProvider,
   });
 
