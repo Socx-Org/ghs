@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { isoStringToDateInputValue, playedAtToIsoString } from "./dates";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { isoStringToDateInputValue, playedAtToIsoString, today } from "./dates";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 // ghs#169's own acceptance criteria: prove the round-trip holds under a
 // real negative-UTC-offset timezone, not just whichever one CI happens
@@ -70,6 +74,37 @@ describe("isoStringToDateInputValue", () => {
       for (const day of ["2026-01-01", "2026-05-01", "2026-06-15", "2026-12-31"]) {
         expect(isoStringToDateInputValue(playedAtToIsoString(day))).toBe(day);
       }
+    });
+  });
+});
+
+// ghs#168 review fix: the exact bug this replaced --
+// `new Date().toISOString().slice(0, 10)` reads UTC date parts, so an
+// <input type="date"> could silently default to the wrong calendar day
+// depending on the caller's own timezone and the time of day. Pinned to
+// a specific real instant via fake timers (unlike the round-trip tests
+// above, "now" isn't a caller-supplied value, so there's nothing else to
+// pin against) so the assertion is a real, fixed expectation rather than
+// "whatever today happens to be when this test runs."
+describe("today", () => {
+  it("returns the caller's LOCAL calendar day, not UTC's, once UTC has already rolled over (negative-UTC-offset timezone)", () => {
+    // 2026-05-02T02:00:00.000Z is already May 2 in UTC, but only
+    // 2026-05-01T19:00 PDT (UTC-7) -- still May 1 locally. The pre-fix
+    // implementation would have returned "2026-05-02" here.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-02T02:00:00.000Z"));
+    withTimeZone("America/Los_Angeles", () => {
+      expect(today()).toBe("2026-05-01");
+    });
+  });
+
+  it("returns the caller's LOCAL calendar day once it has already rolled over ahead of UTC (positive-UTC-offset timezone)", () => {
+    // 2026-05-01T20:00:00.000Z is still May 1 in UTC, but already
+    // 2026-05-02T10:00 on Kiritimati (UTC+14) -- May 2 locally.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-01T20:00:00.000Z"));
+    withTimeZone("Pacific/Kiritimati", () => {
+      expect(today()).toBe("2026-05-02");
     });
   });
 });
