@@ -27,9 +27,11 @@ export function isoStringToDateInputValue(iso: string): string {
 }
 
 // ghs#168 review fix: `new Date().toISOString().slice(0, 10)` reads UTC
-// date parts, not local ones -- for a negative-UTC-offset caller, this
-// silently defaults an <input type="date"> to tomorrow whenever "now" has
-// already crossed local midnight but not UTC midnight yet. Same
+// date parts, not local ones -- for a negative-UTC-offset caller (e.g.
+// the US), this silently defaults an <input type="date"> to tomorrow
+// whenever UTC has already crossed midnight into the next day but the
+// caller's own local date hasn't rolled over yet (review finding: an
+// earlier version of this comment had local/UTC backwards). Same
 // local-parts fix as isoStringToDateInputValue above, applied to `new
 // Date()` (already local) instead of a parsed ISO string.
 export function today(): string {

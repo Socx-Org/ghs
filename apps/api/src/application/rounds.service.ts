@@ -569,31 +569,22 @@ export function createRoundsService(
         return submitAdminCreatedRound(id);
       }
 
-      // ghs#168: status + completeness checked, then rescored, BEFORE the
-      // locked transition below opens -- the same "never mutate the
-      // round as a side effect of an attempt that's ultimately going to
-      // fail" discipline approveRoundInternal already established for
-      // its own rescore (PR #32), now needed here too since scoring runs
-      // at submission, not only at approval. This is the change that
-      // unblocks the Daily PCC screen: once this commits, the round's
-      // real score/PCC exists the moment it's submitted, not only once
-      // an admin gets around to approving it -- so a tee/day's entire
-      // submitted field is visible to PCC calculation before any of it
-      // is approved, regardless of how many rounds or players are
-      // involved (the scaling problem this issue's own discovery
-      // identified). Rescoring an incomplete round would otherwise
-      // persist a real but meaningless partial score.
+      // ghs#168: status + completeness checked BEFORE the locked
+      // transition below opens -- avoids uselessly opening a transaction
+      // for an attempt that's obviously going to fail (same reasoning as
+      // approveRoundInternal's own pre-check, PR #32). Read-only, so no
+      // race to worry about here -- unlike rescoring (see below), this
+      // doesn't mutate anything.
       const existing = await repository.get(id);
       if (!existing) throw new RoundNotFoundError(`round ${id} not found`);
       if (!isEditableStatus(existing.status)) {
         throw new InvalidRoundTransitionError(`cannot submit a round in status '${existing.status}' for review`);
       }
       await assertCompleteForSubmission(existing);
-      await rescoreRound(id);
 
       const { roundSubmitted } = await systemSettings.getNotificationSettings();
 
-      return runWorkflowTransition(
+      const result = await runWorkflowTransition(
         id,
         (existing) => {
           if (!isEditableStatus(existing.status)) {
@@ -628,6 +619,28 @@ export function createRoundsService(
           return null;
         },
       );
+
+      // ghs#168 review fix: rescored AFTER the transition commits, not
+      // before it opens. Rescoring before the lock (the original shape)
+      // left a real race open -- the round is still in an EDITABLE
+      // status (draft/rejected/amending) for the entire window between
+      // that unlocked rescore and this transition's own lock
+      // acquisition, so a concurrent addHoleScore (itself lock-
+      // protected, PR #73) could land in between and persist a hole
+      // score the rescore never saw, leaving gross/adjusted/
+      // differential/pcc silently stale the moment the round becomes
+      // 'pending' -- exactly the reliability ghs#168 exists to give the
+      // Daily PCC screen. Rescoring here instead is race-free: by now
+      // the round is durably 'pending' (isEditableStatus is false), so
+      // addHoleScore's own row lock will reject any further write
+      // before it can happen -- no further hole-score mutation is
+      // possible once this point is reached, so whatever this reads is
+      // truly final. ScoringService.recomputeRoundAggregates always uses
+      // its own connection (can't be threaded into the transaction
+      // above), which is exactly why this has to run after that
+      // transaction closes rather than inside it.
+      await rescoreRound(id);
+      return { round: await repository.get(id), recalculation: result.recalculation };
     },
 
     async approveRound(id) {

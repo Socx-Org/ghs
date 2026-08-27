@@ -197,6 +197,64 @@ test("addHoleScore's editable-status check is genuinely atomic with the write --
   assert.equal(holeScore.holeNumber, 1, "proceeds correctly, using a fresh locked read, once the held lock is released");
 });
 
+test("submitForReview rescores AFTER its own locked transition commits, not before it opens -- a hole score that lands while submission is blocked on the row lock is still reflected in the final persisted score (ghs#168 review fix)", async () => {
+  const courses = createCoursesRepository(pool);
+  const course = await courses.create({
+    name: "Submission Rescore Race Test Course",
+    country: "ES",
+    teeConfigurations: [{
+      name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113,
+      holes: [{ holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 7 }],
+    }],
+  });
+  const teeConfigurationId = course.teeConfigurations[0]!.id;
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Race", lastName: "Regression" });
+  const { roundsRepo, roundsService } = buildServices();
+
+  const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsService.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+
+  // Same technique as the lock test directly above -- hold exactly the
+  // row lock submitForReview's own runWorkflowTransition needs, forcing
+  // it to block right at that point (its own pre-check, upstream of the
+  // lock, already ran and found the round complete/editable).
+  const holdingClient = await pool.connect();
+  await holdingClient.query("BEGIN");
+  await holdingClient.query("SELECT id FROM rounds WHERE id = $1 AND deleted_at IS NULL FOR UPDATE", [round.id]);
+
+  let completed = false;
+  const submitPromise = roundsService.submitForReview(round.id, "player").then((result) => {
+    completed = true;
+    return result;
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(completed, false, "blocked on the row lock, exactly like addHoleScore's own lock above");
+
+  // Simulates a hole-score correction landing in that exact window --
+  // direct SQL rather than roundsService.addHoleScore since that method
+  // needs the very same row lock this test is deliberately holding; the
+  // real, lock-protected write path is already proven above. What
+  // matters here is only that hole_scores changes while submission is
+  // blocked, before the lock is released.
+  await pool.query("UPDATE hole_scores SET strokes = 9, net_double_bogey_adjusted = 9 WHERE round_id = $1 AND hole_number = 1", [round.id]);
+
+  await holdingClient.query("COMMIT");
+  holdingClient.release();
+
+  const result = await submitPromise;
+  assert.equal(result.round!.status, "pending");
+  // The bug this regresses: the pre-fix code rescored BEFORE attempting
+  // this lock, so it would have persisted grossScore=4 (the value hole_
+  // scores held at the moment submission started) despite hole_scores
+  // now genuinely holding 9 -- a round silently 'pending' with a score
+  // that disagreed with its own hole-by-hole detail, exactly the
+  // unreliability ghs#168 exists to remove from the Daily PCC screen's
+  // data source.
+  assert.equal(result.round!.grossScore, 9, "reflects the hole score as it stood once the lock was actually available, not a stale pre-lock read");
+});
+
 test("RoundsRepository.addHoleScore upserts against the real ON CONFLICT DO UPDATE, not a second row or a unique-violation (ghs#92)", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   const players = createPlayersRepository(pool);
