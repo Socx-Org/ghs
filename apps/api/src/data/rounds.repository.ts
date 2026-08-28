@@ -211,6 +211,11 @@ export interface RoundDifferentialRow {
 // can't mislabel it as a shot count.
 export interface PlayerStats {
   roundsCount: number;
+  // ghs#176: the Dashboard's Activity widget pairs this with roundsCount
+  // (rounds played / distinct courses played) -- added to this existing
+  // query rather than a second round-trip, same join rounds.repository.ts's
+  // own listByPlayer already has to make for course/tee names.
+  coursesCount: number;
   holesCount: number;
   girPercentage: number | null;
   fairwayHitPercentage: number | null;
@@ -787,6 +792,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       // finding: an earlier version of this comment claimed the latter).
       const result = await pool.query<{
         rounds_count: number;
+        courses_count: number;
         holes_count: number;
         gir_holes: number;
         fairway_relevant_holes: number;
@@ -801,6 +807,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       }>(
         `SELECT
            count(DISTINCT r.id)::int AS rounds_count,
+           count(DISTINCT tc.course_id)::int AS courses_count,
            count(*)::int AS holes_count,
            count(*) FILTER (WHERE hs.gir)::int AS gir_holes,
            count(*) FILTER (WHERE hs.fairway_result IS NOT NULL)::int AS fairway_relevant_holes,
@@ -814,12 +821,13 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
            coalesce(sum(hs.penalties), 0)::int AS total_penalties
          FROM hole_scores hs
          JOIN rounds r ON r.id = hs.round_id
+         JOIN tee_configurations tc ON tc.id = r.tee_configuration_id
          WHERE r.player_id = $1 AND r.status = 'approved' AND r.deleted_at IS NULL`,
         [playerId],
       );
 
       const row = result.rows[0] ?? {
-        rounds_count: 0, holes_count: 0, gir_holes: 0, fairway_relevant_holes: 0,
+        rounds_count: 0, courses_count: 0, holes_count: 0, gir_holes: 0, fairway_relevant_holes: 0,
         fairway_hit_holes: 0, fairway_missed_left_holes: 0, fairway_missed_right_holes: 0,
         sand_holes: 0, one_putt_holes: 0, three_plus_putt_holes: 0, total_putts: 0, total_penalties: 0,
       };
@@ -843,6 +851,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
 
       return {
         roundsCount: row.rounds_count,
+        coursesCount: row.courses_count,
         holesCount: row.holes_count,
         girPercentage: percentage(row.gir_holes, row.holes_count),
         fairwayHitPercentage: percentage(row.fairway_hit_holes, row.fairway_relevant_holes),

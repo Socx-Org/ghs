@@ -24,6 +24,7 @@ import { createHandicapOverridesRepository } from "./data/handicap-overrides.rep
 import { createHandicapOverridesService } from "./application/handicap-overrides.service.ts";
 import { createHandicapHistoryRepository } from "./data/handicap-history.repository.ts";
 import { createHandicapHistoryService } from "./application/handicap-history.service.ts";
+import { createDashboardService } from "./application/dashboard.service.ts";
 import { createPccRepository } from "./data/pcc.repository.ts";
 import { createPccService } from "./application/pcc.service.ts";
 import { createScoringService } from "./application/scoring.service.ts";
@@ -78,6 +79,7 @@ const authService = createAuthService({
   notifications: notificationsRepository,
 });
 const adminUsersService = createAdminUsersService(pool, logger, usersRepository, playersRepository, activationTokenRepository, notificationsRepository);
+const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
 const app = createApp({
   logger,
@@ -92,6 +94,7 @@ const app = createApp({
   pccService,
   recalculationOrchestrator,
   handicapHistoryService,
+  dashboardService,
   playersRepository,
   authProvider,
 });

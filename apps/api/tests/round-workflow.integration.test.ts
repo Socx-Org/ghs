@@ -19,6 +19,7 @@ import { createPccService } from "../src/application/pcc.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
 import { createHandicapHistoryRepository } from "../src/data/handicap-history.repository.ts";
 import { createHandicapHistoryService } from "../src/application/handicap-history.service.ts";
+import { createDashboardService } from "../src/application/dashboard.service.ts";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
 import { createRoundsService } from "../src/application/rounds.service.ts";
@@ -422,10 +423,11 @@ test("HTTP DELETE /rounds/:id (ghs#147): a player deletes their own draft round 
   const pccService = createPccService(createPccRepository(pool));
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -574,10 +576,11 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
   const pccService = createPccService(createPccRepository(pool));
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -795,10 +798,11 @@ function buildWorkflowApp() {
   const pccService = createPccService(createPccRepository(pool));
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
   });
 
   return { app, roundsRepo, roundsService, players, adminUsersService, authService };
