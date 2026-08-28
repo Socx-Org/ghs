@@ -569,13 +569,13 @@ test("HTTP: submitting a round computes its real score immediately, before any a
 test("getPlayerStats (ghs#101/#176): real aggregation math over approved rounds' hole_scores, scoped to the player and excluding non-approved rounds", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   // ghs#176: a second, distinct course -- round2 below is played here
-  // instead of teeConfigurationId's course, so coursesCount is exercised
-  // as a real COUNT(DISTINCT tc.course_id) over two different courses,
-  // not just a query that happens to return the right number for a
-  // single-course fixture. coursesCount and roundsCount both happen to
-  // equal 2 in this test (review finding, PR #183: an earlier version of
-  // this comment wrongly called that "distinguishable" -- they're not,
-  // numerically) -- coincidental here, not something this test relies on.
+  // instead of teeConfigurationId's course. round3 further below is a
+  // third approved round back on teeConfigurationId's course -- with it,
+  // roundsCount (3) and coursesCount (2) are genuinely different numbers
+  // (review finding, PR #183: without a third round, both were 2, so an
+  // implementation bug that returned roundsCount -- or count(DISTINCT
+  // r.id) again by copy-paste -- instead of a real COUNT(DISTINCT
+  // tc.course_id) would still have passed this assertion).
   const courses = createCoursesRepository(pool);
   const secondCourse = await courses.create({
     name: "Second Test Course",
@@ -602,11 +602,18 @@ test("getPlayerStats (ghs#101/#176): real aggregation math over approved rounds'
   await roundsRepo.addHoleScore(round2.id, { holeNumber: 2, strokes: 7, gir: false, fairwayResult: "hit", inSand: true, putts: 4, penalties: 2 });
   await roundsRepo.setStatus(round2.id, "approved");
 
-  // Round 3 (still pending): must be entirely excluded from the
+  // Round 3 (approved): back on the FIRST course -- makes roundsCount
+  // (3) and coursesCount (2) genuinely different, see this test's own
+  // opening comment for why that matters.
+  const round3 = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(round3.id, { holeNumber: 1, strokes: 4, gir: true, fairwayResult: "hit", inSand: false, putts: 2, penalties: 0 });
+  await roundsRepo.setStatus(round3.id, "approved");
+
+  // Round 4 (still pending): must be entirely excluded from the
   // aggregation -- a round only genuinely represents real play once
   // approved, matching listApprovedDifferentialsForPlayer's own
   // reasoning. If this leaked in, every assertion below would be wrong.
-  const pendingRound = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
+  const pendingRound = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-04T09:00:00.000Z" });
   await roundsRepo.addHoleScore(pendingRound.id, { holeNumber: 1, strokes: 3, gir: true, fairwayResult: "hit", inSand: false, putts: 1, penalties: 0 });
   await roundsRepo.setStatus(pendingRound.id, "pending");
 
@@ -618,20 +625,20 @@ test("getPlayerStats (ghs#101/#176): real aggregation math over approved rounds'
 
   const stats = await roundsRepo.getPlayerStats(player.id);
 
-  assert.equal(stats.roundsCount, 2);
-  assert.equal(stats.coursesCount, 2, "round1 and round2 are on two distinct courses");
-  assert.equal(stats.holesCount, 5);
-  assert.equal(stats.girPercentage, 40.0, "2 of 5 holes -> 40%");
-  // 4 fairway-relevant holes (round1's null-fairway_result hole excluded
+  assert.equal(stats.roundsCount, 3);
+  assert.equal(stats.coursesCount, 2, "round1 and round3 share a course; round2 is on a second, distinct one");
+  assert.equal(stats.holesCount, 6);
+  assert.equal(stats.girPercentage, 50.0, "3 of 6 holes -> 50%");
+  // 5 fairway-relevant holes (round1's null-fairway_result hole excluded
   // from the denominator, not counted as a miss).
-  assert.equal(stats.fairwayHitPercentage, 50.0, "2 of 4 relevant holes -> 50%");
-  assert.equal(stats.fairwayMissedLeftPercentage, 25.0, "1 of 4 relevant holes -> 25%");
-  assert.equal(stats.fairwayMissedRightPercentage, 25.0, "1 of 4 relevant holes -> 25%");
-  assert.equal(stats.sandInteractionPercentage, 40.0, "2 of 5 holes had a sand interaction -> 40%, NOT a shot count");
+  assert.equal(stats.fairwayHitPercentage, 60.0, "3 of 5 relevant holes -> 60%");
+  assert.equal(stats.fairwayMissedLeftPercentage, 20.0, "1 of 5 relevant holes -> 20%");
+  assert.equal(stats.fairwayMissedRightPercentage, 20.0, "1 of 5 relevant holes -> 20%");
+  assert.equal(stats.sandInteractionPercentage, 33.3, "2 of 6 holes had a sand interaction -> 33.3%, NOT a shot count");
   assert.equal(stats.onePuttHoles, 2);
   assert.equal(stats.threePlusPuttHoles, 2, "the putts=3 hole and the putts=4 hole both count");
-  assert.equal(stats.puttsPerRound, 5.5, "(1+2+3+1+4)=11 putts over 2 rounds -> 5.5");
-  assert.equal(stats.penaltiesPerRound, 1.5, "(0+1+0+0+2)=3 penalties over 2 rounds -> 1.5");
+  assert.equal(stats.puttsPerRound, 4.3, "(1+2+3+1+4+2)=13 putts over 3 rounds -> 4.333... -> 4.3");
+  assert.equal(stats.penaltiesPerRound, 1.0, "(0+1+0+0+2+0)=3 penalties over 3 rounds -> 1.0");
 });
 
 test("getPlayerStats (ghs#101): a player with no approved rounds gets real zeros/nulls, not an error", async () => {
