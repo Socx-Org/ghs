@@ -26,6 +26,7 @@ import { createHandicapOverridesRepository } from "../src/data/handicap-override
 import { createHandicapOverridesService } from "../src/application/handicap-overrides.service.ts";
 import { createHandicapHistoryRepository } from "../src/data/handicap-history.repository.ts";
 import { createHandicapHistoryService } from "../src/application/handicap-history.service.ts";
+import { createDashboardService } from "../src/application/dashboard.service.ts";
 import { createPccRepository } from "../src/data/pcc.repository.ts";
 import { createPccService } from "../src/application/pcc.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
@@ -229,10 +230,11 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -375,10 +377,11 @@ test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole u
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -493,10 +496,11 @@ test("HTTP: submitting a round computes its real score immediately, before any a
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -562,8 +566,20 @@ test("HTTP: submitting a round computes its real score immediately, before any a
   }
 });
 
-test("getPlayerStats (ghs#101): real aggregation math over approved rounds' hole_scores, scoped to the player and excluding non-approved rounds", async () => {
+test("getPlayerStats (ghs#101/#176): real aggregation math over approved rounds' hole_scores, scoped to the player and excluding non-approved rounds", async () => {
   const teeConfigurationId = await createTeeConfiguration();
+  // ghs#176: a second, distinct course -- round2 below is played here
+  // instead of teeConfigurationId's course, so coursesCount (2) is
+  // genuinely distinguishable from roundsCount (also 2, coincidentally)
+  // rather than the two numbers happening to match for an unrelated
+  // reason.
+  const courses = createCoursesRepository(pool);
+  const secondCourse = await courses.create({
+    name: "Second Test Course",
+    country: "ES",
+    teeConfigurations: [{ name: "Blue", holeCount: 18, courseRating: 70.5, slopeRating: 120, holes: [] }],
+  });
+  const secondTeeConfigurationId = secondCourse.teeConfigurations[0]!.id;
   const roundsRepo = createRoundsRepository(pool);
   const players = createPlayersRepository(pool);
   const player = await players.create({ firstName: "Stats", lastName: "Player" });
@@ -577,8 +593,8 @@ test("getPlayerStats (ghs#101): real aggregation math over approved rounds' hole
   await roundsRepo.addHoleScore(round1.id, { holeNumber: 3, strokes: 5, gir: false, fairwayResult: undefined, inSand: false, putts: 3, penalties: 0 });
   await roundsRepo.setStatus(round1.id, "approved");
 
-  // Round 2 (approved): 2 more holes.
-  const round2 = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-02T09:00:00.000Z" });
+  // Round 2 (approved): 2 more holes, on the second course.
+  const round2 = await roundsRepo.create({ playerId: player.id, teeConfigurationId: secondTeeConfigurationId, playedAt: "2026-05-02T09:00:00.000Z" });
   await roundsRepo.addHoleScore(round2.id, { holeNumber: 1, strokes: 4, gir: true, fairwayResult: "missed_right", inSand: false, putts: 1, penalties: 0 });
   await roundsRepo.addHoleScore(round2.id, { holeNumber: 2, strokes: 7, gir: false, fairwayResult: "hit", inSand: true, putts: 4, penalties: 2 });
   await roundsRepo.setStatus(round2.id, "approved");
@@ -600,6 +616,7 @@ test("getPlayerStats (ghs#101): real aggregation math over approved rounds' hole
   const stats = await roundsRepo.getPlayerStats(player.id);
 
   assert.equal(stats.roundsCount, 2);
+  assert.equal(stats.coursesCount, 2, "round1 and round2 are on two distinct courses");
   assert.equal(stats.holesCount, 5);
   assert.equal(stats.girPercentage, 40.0, "2 of 5 holes -> 40%");
   // 4 fairway-relevant holes (round1's null-fairway_result hole excluded
@@ -622,6 +639,7 @@ test("getPlayerStats (ghs#101): a player with no approved rounds gets real zeros
   const stats = await roundsRepo.getPlayerStats(player.id);
 
   assert.equal(stats.roundsCount, 0);
+  assert.equal(stats.coursesCount, 0);
   assert.equal(stats.holesCount, 0);
   assert.equal(stats.girPercentage, null, "null, not NaN or a misleading 0, when there's nothing to divide by");
   assert.equal(stats.fairwayHitPercentage, null);

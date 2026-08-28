@@ -12,6 +12,7 @@ import type { HandicapOverridesService } from "../../application/handicap-overri
 import type { PccService } from "../../application/pcc.service.ts";
 import type { RecalculationOrchestrator } from "../../application/recalculation.service.ts";
 import type { HandicapHistoryService } from "../../application/handicap-history.service.ts";
+import type { DashboardService } from "../../application/dashboard.service.ts";
 import type { PlayersRepository } from "../../data/players.repository.ts";
 import type { AuthProvider } from "../../application/auth-provider.ts";
 import {
@@ -33,6 +34,7 @@ import { adminPccRouter } from "./routes/admin-pcc.ts";
 import { roundsRouter } from "./routes/rounds.ts";
 import { handicapOverridesRouter } from "./routes/handicap-overrides.ts";
 import { playersRouter } from "./routes/players.ts";
+import { dashboardRouter } from "./routes/dashboard.ts";
 
 export interface AppDeps {
   logger: Logger;
@@ -53,6 +55,8 @@ export interface AppDeps {
   // expose HandicapHistoryService.listHistoryForPlayer over HTTP -- the
   // calculation/storage already existed, just never had a route.
   handicapHistoryService: HandicapHistoryService;
+  // ghs#176: the Player Dashboard's one aggregate endpoint.
+  dashboardService: DashboardService;
   playersRepository: PlayersRepository;
   authProvider: AuthProvider;
   // ghs#49: real production wiring never sets this (undefined -- every
@@ -139,6 +143,7 @@ export function createApp(deps: AppDeps): Express {
   v1Router.use(roundsRouter(deps.roundsService, deps.playersRepository, deps.authProvider));
   v1Router.use(handicapOverridesRouter(deps.handicapOverridesService, deps.playersRepository, deps.authProvider));
   v1Router.use(playersRouter(deps.playersRepository, deps.authProvider, deps.handicapHistoryService, deps.roundsService));
+  v1Router.use(dashboardRouter(deps.dashboardService, deps.playersRepository, deps.authProvider));
 
   app.use("/api/v1", v1Router);
 
