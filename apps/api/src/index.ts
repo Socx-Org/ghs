@@ -79,7 +79,7 @@ const authService = createAuthService({
   notifications: notificationsRepository,
 });
 const adminUsersService = createAdminUsersService(pool, logger, usersRepository, playersRepository, activationTokenRepository, notificationsRepository);
-const dashboardService = createDashboardService(handicapHistoryService, roundsService);
+const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
 const app = createApp({
   logger,

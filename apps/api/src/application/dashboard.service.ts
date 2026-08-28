@@ -1,5 +1,6 @@
 import type { HandicapHistoryRecord } from "../data/handicap-history.repository.ts";
 import type { PlayerRoundListItem, PlayerStats } from "../data/rounds.repository.ts";
+import type { Logger } from "../logger.ts";
 import type { HandicapHistoryService } from "./handicap-history.service.ts";
 import type { RoundsService } from "./rounds.service.ts";
 
@@ -22,15 +23,24 @@ export interface DashboardService {
   getPlayerDashboard(playerId: string): Promise<PlayerDashboard>;
 }
 
-async function toSection<T>(promise: Promise<T>): Promise<DashboardSection<T>> {
+// Review finding, PR #183: toSection previously discarded the error
+// entirely -- a real section failure became a silent 200 with no trace
+// anywhere (the central Express error handler in app.ts never sees it,
+// since the rejection is caught right here), making production
+// diagnosis of "why is this widget showing an error" effectively
+// impossible. section: a short, stable name (not the raw error), so a
+// log line reads "recentRounds failed", not just "something failed".
+async function toSection<T>(logger: Logger, section: string, playerId: string, promise: Promise<T>): Promise<DashboardSection<T>> {
   try {
     return { data: await promise };
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error("dashboard section failed", { section, playerId, error: message });
     return { error: true };
   }
 }
 
-export function createDashboardService(handicapHistory: HandicapHistoryService, rounds: RoundsService): DashboardService {
+export function createDashboardService(handicapHistory: HandicapHistoryService, rounds: RoundsService, logger: Logger): DashboardService {
   return {
     async getPlayerDashboard(playerId) {
       // Promise.all, not sequential awaits -- the three sections are
@@ -38,9 +48,9 @@ export function createDashboardService(handicapHistory: HandicapHistoryService, 
       // toSection already contains each one's own failure so a single
       // rejected promise here can't reject the whole Promise.all.
       const [handicapHistorySection, recentRoundsSection, statsSection] = await Promise.all([
-        toSection(handicapHistory.listHistoryForPlayer(playerId)),
-        toSection(rounds.listRoundsForPlayer(playerId)),
-        toSection(rounds.getPlayerStats(playerId)),
+        toSection(logger, "handicapHistory", playerId, handicapHistory.listHistoryForPlayer(playerId)),
+        toSection(logger, "recentRounds", playerId, rounds.listRoundsForPlayer(playerId)),
+        toSection(logger, "stats", playerId, rounds.getPlayerStats(playerId)),
       ]);
 
       return {

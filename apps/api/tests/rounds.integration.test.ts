@@ -230,7 +230,7 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -377,7 +377,7 @@ test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole u
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -496,7 +496,7 @@ test("HTTP: submitting a round computes its real score immediately, before any a
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -569,10 +569,13 @@ test("HTTP: submitting a round computes its real score immediately, before any a
 test("getPlayerStats (ghs#101/#176): real aggregation math over approved rounds' hole_scores, scoped to the player and excluding non-approved rounds", async () => {
   const teeConfigurationId = await createTeeConfiguration();
   // ghs#176: a second, distinct course -- round2 below is played here
-  // instead of teeConfigurationId's course, so coursesCount (2) is
-  // genuinely distinguishable from roundsCount (also 2, coincidentally)
-  // rather than the two numbers happening to match for an unrelated
-  // reason.
+  // instead of teeConfigurationId's course, so coursesCount is exercised
+  // as a real COUNT(DISTINCT tc.course_id) over two different courses,
+  // not just a query that happens to return the right number for a
+  // single-course fixture. coursesCount and roundsCount both happen to
+  // equal 2 in this test (review finding, PR #183: an earlier version of
+  // this comment wrongly called that "distinguishable" -- they're not,
+  // numerically) -- coincidental here, not something this test relies on.
   const courses = createCoursesRepository(pool);
   const secondCourse = await courses.create({
     name: "Second Test Course",

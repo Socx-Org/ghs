@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createDashboardService } from "../src/application/dashboard.service.ts";
 import type { HandicapHistoryService } from "../src/application/handicap-history.service.ts";
 import type { RoundsService } from "../src/application/rounds.service.ts";
+import type { Logger } from "../src/logger.ts";
 import type { HandicapHistoryRecord } from "../src/data/handicap-history.repository.ts";
 import type { PlayerRoundListItem, PlayerStats } from "../src/data/rounds.repository.ts";
 
@@ -28,6 +29,23 @@ const SAMPLE_STATS: PlayerStats = {
   fairwayMissedLeftPercentage: 20, fairwayMissedRightPercentage: 20, puttsPerRound: 32,
   onePuttHoles: 3, threePlusPuttHoles: 1, penaltiesPerRound: 1, sandInteractionPercentage: 10,
 };
+
+// Records every error() call rather than writing to stdout -- review
+// finding, PR #183: toSection previously discarded a section's error
+// entirely, so a real failure became a silent 200 with no trace
+// anywhere. These tests assert the logger actually captured it.
+function fakeLogger(): Logger & { errors: Array<{ message: string; fields?: Record<string, unknown> }> } {
+  const errors: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+  return {
+    errors,
+    debug() {},
+    info() {},
+    warn() {},
+    error(message, fields) {
+      errors.push({ message, fields });
+    },
+  };
+}
 
 function fakeHandicapHistoryService(overrides: Partial<HandicapHistoryService> = {}): HandicapHistoryService {
   return {
@@ -78,16 +96,19 @@ function fakeRoundsService(overrides: Partial<RoundsService> = {}): RoundsServic
 }
 
 test("getPlayerDashboard returns real data for every section when all three underlying calls succeed", async () => {
-  const service = createDashboardService(fakeHandicapHistoryService(), fakeRoundsService());
+  const logger = fakeLogger();
+  const service = createDashboardService(fakeHandicapHistoryService(), fakeRoundsService(), logger);
 
   const dashboard = await service.getPlayerDashboard("player-1");
 
   assert.deepEqual(dashboard.handicapHistory, { data: SAMPLE_HISTORY });
   assert.deepEqual(dashboard.recentRounds, { data: SAMPLE_ROUNDS });
   assert.deepEqual(dashboard.stats, { data: SAMPLE_STATS });
+  assert.equal(logger.errors.length, 0, "nothing failed -- nothing should be logged");
 });
 
 test("one section's rejected promise becomes { error: true } without affecting the other two sections (per-section failure isolation, ghs#176)", async () => {
+  const logger = fakeLogger();
   const service = createDashboardService(
     fakeHandicapHistoryService({
       async listHistoryForPlayer() {
@@ -95,6 +116,7 @@ test("one section's rejected promise becomes { error: true } without affecting t
       },
     }),
     fakeRoundsService(),
+    logger,
   );
 
   const dashboard = await service.getPlayerDashboard("player-1");
@@ -105,9 +127,19 @@ test("one section's rejected promise becomes { error: true } without affecting t
   // try/catch around the whole aggregation.
   assert.deepEqual(dashboard.recentRounds, { data: SAMPLE_ROUNDS });
   assert.deepEqual(dashboard.stats, { data: SAMPLE_STATS });
+
+  // Review finding, PR #183: the failure must be logged, not just
+  // swallowed into a silent 200 -- verified here, not just assumed from
+  // the source reading correctly.
+  assert.equal(logger.errors.length, 1);
+  assert.equal(logger.errors[0]!.message, "dashboard section failed");
+  assert.equal(logger.errors[0]!.fields?.section, "handicapHistory");
+  assert.equal(logger.errors[0]!.fields?.playerId, "player-1");
+  assert.match(String(logger.errors[0]!.fields?.error), /handicap_history table temporarily unavailable/);
 });
 
 test("a second section can independently fail while a third stays real data", async () => {
+  const logger = fakeLogger();
   const service = createDashboardService(
     fakeHandicapHistoryService(),
     fakeRoundsService({
@@ -115,6 +147,7 @@ test("a second section can independently fail while a third stays real data", as
         throw new Error("rounds query timed out");
       },
     }),
+    logger,
   );
 
   const dashboard = await service.getPlayerDashboard("player-1");
@@ -122,9 +155,12 @@ test("a second section can independently fail while a third stays real data", as
   assert.deepEqual(dashboard.handicapHistory, { data: SAMPLE_HISTORY });
   assert.deepEqual(dashboard.recentRounds, { error: true });
   assert.deepEqual(dashboard.stats, { data: SAMPLE_STATS });
+  assert.equal(logger.errors.length, 1);
+  assert.equal(logger.errors[0]!.fields?.section, "recentRounds");
 });
 
-test("every section can fail independently at once -- still resolves (not a rejected promise/blanket 500), just three error markers", async () => {
+test("every section can fail independently at once -- still resolves (not a rejected promise/blanket 500), just three error markers, each logged", async () => {
+  const logger = fakeLogger();
   const service = createDashboardService(
     fakeHandicapHistoryService({
       async listHistoryForPlayer() {
@@ -139,6 +175,7 @@ test("every section can fail independently at once -- still resolves (not a reje
         throw new Error("boom 3");
       },
     }),
+    logger,
   );
 
   const dashboard = await service.getPlayerDashboard("player-1");
@@ -146,4 +183,6 @@ test("every section can fail independently at once -- still resolves (not a reje
   assert.deepEqual(dashboard.handicapHistory, { error: true });
   assert.deepEqual(dashboard.recentRounds, { error: true });
   assert.deepEqual(dashboard.stats, { error: true });
+  assert.equal(logger.errors.length, 3);
+  assert.deepEqual(logger.errors.map((e) => e.fields?.section).sort(), ["handicapHistory", "recentRounds", "stats"]);
 });

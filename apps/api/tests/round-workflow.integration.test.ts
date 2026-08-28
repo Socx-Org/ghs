@@ -423,7 +423,7 @@ test("HTTP DELETE /rounds/:id (ghs#147): a player deletes their own draft round 
   const pccService = createPccService(createPccRepository(pool));
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -576,7 +576,7 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
   const pccService = createPccService(createPccRepository(pool));
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -798,7 +798,7 @@ function buildWorkflowApp() {
   const pccService = createPccService(createPccRepository(pool));
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,

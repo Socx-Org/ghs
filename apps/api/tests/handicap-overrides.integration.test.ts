@@ -148,7 +148,7 @@ test("HTTP: a player can view their own handicap override history but not anothe
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, overridesRepo, handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
