@@ -26,8 +26,51 @@ import { cn } from "../lib/cn";
 // while the body has nothing to show.
 export type WidgetStatus = "loading" | "error" | "empty" | "idle" | "ready";
 
+// ghs#175 (design doc sections D/L.1): the only span values the two
+// dashboards' layouts use. A literal Tailwind class lookup table, not a
+// template-constructed `` `lg:col-span-${n}` `` string -- Tailwind's JIT
+// only picks up class names that appear literally in source, and a
+// dynamically-interpolated one would silently produce an unstyled grid
+// (real risk, not hypothetical -- see the acceptance criteria on ghs#175).
+// Same technique as Avatar's SIZE_CLASSES and Badge's VARIANT_CLASSES.
+type ColSpanValue = 3 | 4 | 6 | 8 | 12;
+
+export interface WidgetColSpan {
+  base?: ColSpanValue;
+  md?: ColSpanValue;
+  lg?: ColSpanValue;
+}
+
+const COL_SPAN_BASE_CLASSES: Record<ColSpanValue, string> = {
+  3: "col-span-3",
+  4: "col-span-4",
+  6: "col-span-6",
+  8: "col-span-8",
+  12: "col-span-12",
+};
+
+const COL_SPAN_MD_CLASSES: Record<ColSpanValue, string> = {
+  3: "md:col-span-3",
+  4: "md:col-span-4",
+  6: "md:col-span-6",
+  8: "md:col-span-8",
+  12: "md:col-span-12",
+};
+
+const COL_SPAN_LG_CLASSES: Record<ColSpanValue, string> = {
+  3: "lg:col-span-3",
+  4: "lg:col-span-4",
+  6: "lg:col-span-6",
+  8: "lg:col-span-8",
+  12: "lg:col-span-12",
+};
+
 export interface WidgetProps {
   title: string;
+  // Placement within a DashboardGrid (components/DashboardGrid.tsx) --
+  // omitted outside a grid context (e.g. this catalogue's own demos,
+  // which wrap Widget in their own max-w-sm div), where it's a no-op.
+  colSpan?: WidgetColSpan;
   icon?: ComponentType<{ "aria-hidden"?: boolean | "true" | "false"; className?: string }>;
   description?: string;
   // A small trailing figure in the header, distinct from the widget's
@@ -53,6 +96,7 @@ export interface WidgetProps {
 
 export function Widget({
   title,
+  colSpan,
   icon: Icon,
   description,
   secondaryMetric,
@@ -64,8 +108,26 @@ export function Widget({
   children,
   className,
 }: WidgetProps) {
+  // Review finding, PR #182: a caller who sets colSpan but omits `base`
+  // would otherwise get no base col-span class at all, and a grid item
+  // with no explicit column span defaults to CSS grid auto-placement
+  // (effectively span 1) -- a real footgun for a mobile layout, not the
+  // "full-width unless overridden" default every other colSpan example
+  // in this codebase assumes. `base` defaults to 12 whenever colSpan is
+  // provided at all, so mobile only ever narrows from full-width when a
+  // caller explicitly asks it to.
+  const resolvedBase = colSpan ? (colSpan.base ?? 12) : undefined;
+
   return (
-    <Card className={cn("flex flex-col", className)}>
+    <Card
+      className={cn(
+        "flex flex-col",
+        resolvedBase != null && COL_SPAN_BASE_CLASSES[resolvedBase],
+        colSpan?.md != null && COL_SPAN_MD_CLASSES[colSpan.md],
+        colSpan?.lg != null && COL_SPAN_LG_CLASSES[colSpan.lg],
+        className,
+      )}
+    >
       <CardHeader className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-2">
           {Icon && (

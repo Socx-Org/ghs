@@ -18,6 +18,7 @@ import {
   Info,
   LayoutGrid,
   Table2,
+  Users,
 } from "lucide-react";
 import {
   Alert,
@@ -31,10 +32,12 @@ import {
   CardFooter,
   CardHeader,
   Checkbox,
+  DashboardGrid,
   EmptyState,
   FormField,
   HandicapTrendWidget,
   Input,
+  KpiStat,
   List,
   ListItem,
   ListView,
@@ -42,9 +45,11 @@ import {
   Modal,
   NavItem,
   RadioGroup,
+  RankingList,
   RecentRoundsWidget,
   RoleBadge,
   RoundStatusBadge,
+  SegmentedBar,
   Select,
   Skeleton,
   Spinner,
@@ -923,6 +928,85 @@ export default function ComponentsCatalogue() {
           <Example label="HandicapTrendWidget -- empty state (no index established yet)">
             <div className="max-w-sm">
               <HandicapTrendWidget isLoading={false} isError={false} history={[]} />
+            </div>
+          </Example>
+
+          <Example label="DashboardGrid + Widget colSpan (ghs#175) -- a 12-column responsive grid; resize the window narrower to see spans collapse toward full-width">
+            <DashboardGrid>
+              <Widget title="Handicap Trend" status="ready" colSpan={{ base: 12, lg: 8 }}>
+                <div className="flex h-20 items-center justify-center text-sm text-text-muted">colSpan lg: 8</div>
+              </Widget>
+              <Widget title="Activity" status="ready" colSpan={{ base: 12, lg: 4 }}>
+                <div className="flex h-20 items-center justify-center text-sm text-text-muted">colSpan lg: 4</div>
+              </Widget>
+              <Widget title="Recent Rounds" status="ready" colSpan={{ base: 12, md: 6 }}>
+                <div className="flex h-20 items-center justify-center text-sm text-text-muted">colSpan md: 6</div>
+              </Widget>
+              <Widget title="Fairways in Regulation" status="ready" colSpan={{ base: 12, md: 6 }}>
+                <div className="flex h-20 items-center justify-center text-sm text-text-muted">colSpan md: 6</div>
+              </Widget>
+              <Widget title="GIR" status="ready" colSpan={{ base: 6, md: 4, lg: 3 }}>
+                <div className="flex h-20 items-center justify-center text-sm text-text-muted">colSpan lg: 3</div>
+              </Widget>
+              <Widget title="Sand" status="ready" colSpan={{ base: 6, md: 4, lg: 3 }}>
+                <div className="flex h-20 items-center justify-center text-sm text-text-muted">colSpan lg: 3</div>
+              </Widget>
+              <Widget title="Penalties" status="ready" colSpan={{ base: 12, md: 4, lg: 3 }}>
+                <div className="flex h-20 items-center justify-center text-sm text-text-muted">colSpan lg: 3</div>
+              </Widget>
+              <Widget title="Putting" status="ready" colSpan={{ base: 12, lg: 3 }}>
+                <div className="flex h-20 items-center justify-center text-sm text-text-muted">colSpan lg: 3</div>
+              </Widget>
+            </DashboardGrid>
+          </Example>
+
+          <Example label="KpiStat (ghs#175) -- toggle the Widget status control above; accent=&quot;warning&quot; is Pending Review's amber treatment">
+            <div className="grid max-w-sm grid-cols-2 gap-4">
+              <Widget title="Total users" status={widgetStatus} errorMessage="Couldn't load the user count.">
+                <KpiStat label="Total users" value={128} secondary="112 players · 14 admin · 2 super admin" icon={<Users className="h-4 w-4" />} />
+              </Widget>
+              <Widget title="Pending review" status={widgetStatus} errorMessage="Couldn't load the pending count.">
+                <KpiStat label="Pending review" value={7} accent="warning" />
+              </Widget>
+            </div>
+          </Example>
+
+          <Example label="SegmentedBar (ghs#175) -- spatially-ordered segments (e.g. FIR's missed-left/hit/missed-right), deliberately not a donut">
+            <div className="max-w-sm">
+              <Widget title="Fairways in regulation" status={widgetStatus} errorMessage="Couldn't load FIR." emptyState={<EmptyState title="No fairway data yet" />}>
+                <SegmentedBar
+                  headline="55%"
+                  headlineLabel="Fairways hit"
+                  segments={[
+                    { label: "Missed left", value: 20, colorClass: "bg-danger" },
+                    { label: "Hit", value: 55, colorClass: "bg-success" },
+                    { label: "Missed right", value: 25, colorClass: "bg-warning" },
+                  ]}
+                />
+              </Widget>
+            </div>
+          </Example>
+
+          <Example label="RankingList (ghs#175) -- Top Courses (no avatar) and Most Active Players (avatar + secondary text)">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Widget title="Top courses" status={widgetStatus} errorMessage="Couldn't load top courses.">
+                <RankingList
+                  items={[
+                    { id: "c1", label: "Sunningdale (Old)", value: "42 rounds", share: 100 },
+                    { id: "c2", label: "St Andrews (Old)", value: "31 rounds", share: 74 },
+                    { id: "c3", label: "Wentworth (West)", value: "18 rounds", share: 43 },
+                  ]}
+                />
+              </Widget>
+              <Widget title="Most active players" status={widgetStatus} errorMessage="Couldn't load most active players.">
+                <RankingList
+                  items={[
+                    { id: "p1", label: "Alice Whitfield", avatarName: "Alice Whitfield", secondary: "HI 12.4", value: 24, share: 100 },
+                    { id: "p2", label: "Ben Okafor", avatarName: "Ben Okafor", secondary: "HI 8.1", value: 19, share: 79 },
+                    { id: "p3", label: "Carys Newton", avatarName: "Carys Newton", secondary: "HI 15.6", value: 15, share: 63 },
+                  ]}
+                />
+              </Widget>
             </div>
           </Example>
         </Section>
