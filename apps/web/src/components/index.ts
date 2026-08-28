@@ -44,3 +44,4 @@ export * from "./domain/CourseCsvImportForm";
 export * from "./domain/RoundHoleCsvImportForm";
 export * from "./domain/EditPlayedDateButton";
 export * from "./domain/RecentRoundsWidget";
+export * from "./domain/HandicapTrendWidget";
