@@ -5,8 +5,12 @@ import { cn } from "../lib/cn";
 // supplied number with no runtime guarantee it's actually 0-100 -- a
 // rounding error or bad data upstream would otherwise render a
 // negative or overflowing bar segment/width. Clamped once, here, rather
-// than trusting every caller to clamp its own inputs.
+// than trusting every caller to clamp its own inputs. NaN/Infinity
+// (review finding, round 2) would otherwise survive Math.min/Math.max
+// and produce a literal "width: NaN%"/"width: Infinity%" -- treated as
+// 0 rather than propagated.
 function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
   return Math.min(100, Math.max(0, value));
 }
 

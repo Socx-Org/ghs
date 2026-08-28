@@ -44,7 +44,10 @@ export function KpiStat({ label, value, secondary, icon, accent, className }: Kp
         {label}
       </dt>
       <dd className={cn("text-2xl font-semibold tabular-nums", accent ? ACCENT_VALUE_CLASSES[accent] : "text-text")}>{value}</dd>
-      {secondary && <p className="text-xs text-text-muted">{secondary}</p>}
+      {/* Review finding (PR #182, Copilot): a <dl> may only contain
+          dt/dd -- a second <dd> for the secondary line, not a <p>,
+          same reasoning as SegmentedBar's own <dl> validity fix. */}
+      {secondary && <dd className="text-xs text-text-muted">{secondary}</dd>}
     </dl>
   );
 }

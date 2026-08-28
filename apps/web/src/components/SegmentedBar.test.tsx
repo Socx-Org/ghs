@@ -56,4 +56,12 @@ describe("SegmentedBar", () => {
     const fill = container.querySelector('[aria-hidden="true"] .bg-danger');
     expect(fill).toHaveStyle({ width: "0%" });
   });
+
+  it("treats a non-finite segment value (NaN/Infinity) as 0 rather than rendering an invalid width (review finding, PR #182)", () => {
+    const { container } = render(
+      <SegmentedBar headline="0%" segments={[{ label: "Bad data", value: NaN, colorClass: "bg-danger" }]} />,
+    );
+    const fill = container.querySelector('[aria-hidden="true"] .bg-danger');
+    expect(fill).toHaveStyle({ width: "0%" });
+  });
 });

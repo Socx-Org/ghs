@@ -108,6 +108,25 @@ describe("Widget", () => {
     expect(container.firstChild).not.toHaveClass("col-span-12");
   });
 
+  it("colSpan.base defaults to 12 when omitted but md/lg are given (review finding, PR #182 -- otherwise falls back to grid auto-placement/span-1 on mobile)", () => {
+    const { container } = render(
+      <Widget title="Recent rounds" status="ready" colSpan={{ lg: 8 }}>
+        Content
+      </Widget>,
+    );
+    expect(container.firstChild).toHaveClass("col-span-12", "lg:col-span-8");
+  });
+
+  it("colSpan.base is respected when explicitly given, not overridden by the default", () => {
+    const { container } = render(
+      <Widget title="Recent rounds" status="ready" colSpan={{ base: 6, lg: 8 }}>
+        Content
+      </Widget>,
+    );
+    expect(container.firstChild).toHaveClass("col-span-6");
+    expect(container.firstChild).not.toHaveClass("col-span-12");
+  });
+
   it("actions render in every status, e.g. an empty-state 'create the first one' affordance", () => {
     const { rerender } = render(
       <Widget title="Recent rounds" status="empty" actions={<button>New round</button>}>

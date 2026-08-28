@@ -108,11 +108,21 @@ export function Widget({
   children,
   className,
 }: WidgetProps) {
+  // Review finding (PR #182, Copilot): a caller who sets colSpan but
+  // omits `base` would otherwise get no base col-span class at all, and
+  // a grid item with no explicit column span defaults to CSS grid
+  // auto-placement (effectively span 1) -- a real footgun for a mobile
+  // layout, not the "full-width unless overridden" default every other
+  // colSpan example in this codebase assumes. `base` defaults to 12
+  // whenever colSpan is provided at all, so mobile only ever narrows
+  // from full-width when a caller explicitly asks it to.
+  const resolvedBase = colSpan ? (colSpan.base ?? 12) : undefined;
+
   return (
     <Card
       className={cn(
         "flex flex-col",
-        colSpan?.base != null && COL_SPAN_BASE_CLASSES[colSpan.base],
+        resolvedBase != null && COL_SPAN_BASE_CLASSES[resolvedBase],
         colSpan?.md != null && COL_SPAN_MD_CLASSES[colSpan.md],
         colSpan?.lg != null && COL_SPAN_LG_CLASSES[colSpan.lg],
         className,

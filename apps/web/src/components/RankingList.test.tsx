@@ -51,4 +51,10 @@ describe("RankingList", () => {
     const fill = container.querySelector(".bg-primary");
     expect(fill).toHaveStyle({ width: "0%" });
   });
+
+  it("treats a non-finite share (NaN/Infinity) as 0 rather than rendering an invalid width (review finding, PR #182)", () => {
+    const { container } = render(<RankingList items={[{ id: "c1", label: "Sunningdale (Old)", value: "42 rounds", share: Infinity }]} />);
+    const fill = container.querySelector(".bg-primary");
+    expect(fill).toHaveStyle({ width: "0%" });
+  });
 });
