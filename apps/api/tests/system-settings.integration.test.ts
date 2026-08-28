@@ -123,7 +123,7 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on; 
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);

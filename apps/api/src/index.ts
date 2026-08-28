@@ -91,6 +91,7 @@ const app = createApp({
   handicapOverridesService,
   pccService,
   recalculationOrchestrator,
+  handicapHistoryService,
   playersRepository,
   authProvider,
 });

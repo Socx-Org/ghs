@@ -102,7 +102,7 @@ function buildApp(rateLimitOverrides?: AppDeps["rateLimitOverrides"]) {
 
   return createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService,
     playersRepository: players, authProvider, rateLimitOverrides,
   });
 }

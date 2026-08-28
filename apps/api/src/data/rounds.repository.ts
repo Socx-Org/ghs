@@ -195,6 +195,34 @@ export interface RoundDifferentialRow {
   is9Hole: boolean;
 }
 
+// ghs#101: the Dashboard module's Performance Statistics widgets --
+// pure aggregation over an approved round's hole_scores, no WHS-engine
+// business logic. Every percentage/average is null when roundsCount is
+// 0 (nothing to divide by) or, for fairwayHit/MissedLeft/MissedRight
+// specifically, when every recorded hole has a null fairway_result
+// (e.g. a player who has only ever played holes where it doesn't apply)
+// -- never NaN or a misleading 0.
+//
+// sandInteractionPercentage is deliberately NOT "average sand shots per
+// round" (the Dashboard requirements doc's own original wording): in_sand
+// is a per-hole boolean ("was the ball in sand on this hole"), not a shot
+// count, so the only honest metric this data supports is "% of holes
+// with a sand interaction." Named accordingly so a consuming frontend
+// can't mislabel it as a shot count.
+export interface PlayerStats {
+  roundsCount: number;
+  holesCount: number;
+  girPercentage: number | null;
+  fairwayHitPercentage: number | null;
+  fairwayMissedLeftPercentage: number | null;
+  fairwayMissedRightPercentage: number | null;
+  puttsPerRound: number | null;
+  onePuttHoles: number;
+  threePlusPuttHoles: number;
+  penaltiesPerRound: number | null;
+  sandInteractionPercentage: number | null;
+}
+
 // The minimal shape a workflow transition (approve/reject/delete/reopen)
 // actually needs to decide what to do and what to recalculate --
 // deliberately narrower than Round (no hole_scores fetch, which a
@@ -258,6 +286,11 @@ export interface RoundsRepository {
   // this inside its own transaction, so the approved-round set can't
   // change between this read and the recalculation it feeds into.
   listApprovedDifferentialsForPlayer(playerId: string, client?: Pool | PoolClient): Promise<RoundDifferentialRow[]>;
+  // ghs#101: the Dashboard module's Performance Statistics widgets --
+  // pure SQL aggregation over a player's approved rounds' hole_scores,
+  // no WHS-engine business logic (see PlayerStats's own doc comment for
+  // the sand-metric naming decision this issue explicitly requires).
+  getPlayerStats(playerId: string): Promise<PlayerStats>;
   // SELECT ... FOR UPDATE -- requires a real transaction client (same
   // reasoning as HandicapHistoryRepository.getCurrentIndexForUpdate,
   // ghs#24: a lock taken outside an explicit transaction is meaningless).
@@ -738,6 +771,89 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         scoreDifferential: Number(row.score_differential),
         is9Hole: row.is_9_hole,
       }));
+    },
+
+    async getPlayerStats(playerId) {
+      // Scoped to approved rounds only, matching listApprovedDifferentials
+      // ForPlayer's own reasoning -- a round only genuinely represents the
+      // player's play once it's been approved, not while still draft/
+      // pending/rejected/amending. Postgres itself always returns exactly
+      // one row for an aggregate query with no GROUP BY, even when the
+      // JOIN matches nothing (count(*) = 0, sum(...) = NULL, which the
+      // coalesce()s below turn into 0) -- the `?? { ...defaults }` below
+      // exists only to satisfy TypeScript's own (necessarily more
+      // conservative) `T | undefined` typing of result.rows[0], not
+      // because Postgres could genuinely return zero rows here (review
+      // finding: an earlier version of this comment claimed the latter).
+      const result = await pool.query<{
+        rounds_count: number;
+        holes_count: number;
+        gir_holes: number;
+        fairway_relevant_holes: number;
+        fairway_hit_holes: number;
+        fairway_missed_left_holes: number;
+        fairway_missed_right_holes: number;
+        sand_holes: number;
+        one_putt_holes: number;
+        three_plus_putt_holes: number;
+        total_putts: number;
+        total_penalties: number;
+      }>(
+        `SELECT
+           count(DISTINCT r.id)::int AS rounds_count,
+           count(*)::int AS holes_count,
+           count(*) FILTER (WHERE hs.gir)::int AS gir_holes,
+           count(*) FILTER (WHERE hs.fairway_result IS NOT NULL)::int AS fairway_relevant_holes,
+           count(*) FILTER (WHERE hs.fairway_result = 'hit')::int AS fairway_hit_holes,
+           count(*) FILTER (WHERE hs.fairway_result = 'missed_left')::int AS fairway_missed_left_holes,
+           count(*) FILTER (WHERE hs.fairway_result = 'missed_right')::int AS fairway_missed_right_holes,
+           count(*) FILTER (WHERE hs.in_sand)::int AS sand_holes,
+           count(*) FILTER (WHERE hs.putts = 1)::int AS one_putt_holes,
+           count(*) FILTER (WHERE hs.putts >= 3)::int AS three_plus_putt_holes,
+           coalesce(sum(hs.putts) FILTER (WHERE hs.putts IS NOT NULL), 0)::int AS total_putts,
+           coalesce(sum(hs.penalties), 0)::int AS total_penalties
+         FROM hole_scores hs
+         JOIN rounds r ON r.id = hs.round_id
+         WHERE r.player_id = $1 AND r.status = 'approved' AND r.deleted_at IS NULL`,
+        [playerId],
+      );
+
+      const row = result.rows[0] ?? {
+        rounds_count: 0, holes_count: 0, gir_holes: 0, fairway_relevant_holes: 0,
+        fairway_hit_holes: 0, fairway_missed_left_holes: 0, fairway_missed_right_holes: 0,
+        sand_holes: 0, one_putt_holes: 0, three_plus_putt_holes: 0, total_putts: 0, total_penalties: 0,
+      };
+
+      // Null rather than NaN/a misleading 0 whenever there's nothing to
+      // divide by -- same defensive convention as computeScoreDifferential
+      // (scoring.service.ts), though that one stores 3 decimal places for
+      // its own real WHS-precision reasons, unrelated to this. One
+      // decimal here instead, matching the frontend's own established
+      // *display* rounding for this kind of stat (Stat components
+      // elsewhere already format handicap index/score differential to
+      // one decimal for on-screen presentation) -- these are Dashboard
+      // display values, not a stored calculation input, so display
+      // precision is the right thing to match (review finding: an
+      // earlier version of this comment wrongly cited score-differential
+      // storage precision instead).
+      const percentage = (count: number, denominator: number): number | null =>
+        denominator === 0 ? null : Number(((count / denominator) * 100).toFixed(1));
+      const averagePerRound = (total: number): number | null =>
+        row.rounds_count === 0 ? null : Number((total / row.rounds_count).toFixed(1));
+
+      return {
+        roundsCount: row.rounds_count,
+        holesCount: row.holes_count,
+        girPercentage: percentage(row.gir_holes, row.holes_count),
+        fairwayHitPercentage: percentage(row.fairway_hit_holes, row.fairway_relevant_holes),
+        fairwayMissedLeftPercentage: percentage(row.fairway_missed_left_holes, row.fairway_relevant_holes),
+        fairwayMissedRightPercentage: percentage(row.fairway_missed_right_holes, row.fairway_relevant_holes),
+        puttsPerRound: averagePerRound(row.total_putts),
+        onePuttHoles: row.one_putt_holes,
+        threePlusPuttHoles: row.three_plus_putt_holes,
+        penaltiesPerRound: averagePerRound(row.total_penalties),
+        sandInteractionPercentage: percentage(row.sand_holes, row.holes_count),
+      };
     },
 
     async getForUpdate(id, client) {

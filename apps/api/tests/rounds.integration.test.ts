@@ -232,7 +232,7 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -378,7 +378,7 @@ test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole u
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -496,7 +496,7 @@ test("HTTP: submitting a round computes its real score immediately, before any a
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -560,4 +560,74 @@ test("HTTP: submitting a round computes its real score immediately, before any a
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test("getPlayerStats (ghs#101): real aggregation math over approved rounds' hole_scores, scoped to the player and excluding non-approved rounds", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const roundsRepo = createRoundsRepository(pool);
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Stats", lastName: "Player" });
+  const otherPlayer = await players.create({ firstName: "Other", lastName: "Player" });
+
+  // Round 1 (approved): 3 holes exercising every dimension --
+  // gir/fairway_result (including a null, e.g. a par-3)/in_sand/putts.
+  const round1 = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(round1.id, { holeNumber: 1, strokes: 4, gir: true, fairwayResult: "hit", inSand: false, putts: 1, penalties: 0 });
+  await roundsRepo.addHoleScore(round1.id, { holeNumber: 2, strokes: 6, gir: false, fairwayResult: "missed_left", inSand: true, putts: 2, penalties: 1 });
+  await roundsRepo.addHoleScore(round1.id, { holeNumber: 3, strokes: 5, gir: false, fairwayResult: undefined, inSand: false, putts: 3, penalties: 0 });
+  await roundsRepo.setStatus(round1.id, "approved");
+
+  // Round 2 (approved): 2 more holes.
+  const round2 = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-02T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(round2.id, { holeNumber: 1, strokes: 4, gir: true, fairwayResult: "missed_right", inSand: false, putts: 1, penalties: 0 });
+  await roundsRepo.addHoleScore(round2.id, { holeNumber: 2, strokes: 7, gir: false, fairwayResult: "hit", inSand: true, putts: 4, penalties: 2 });
+  await roundsRepo.setStatus(round2.id, "approved");
+
+  // Round 3 (still pending): must be entirely excluded from the
+  // aggregation -- a round only genuinely represents real play once
+  // approved, matching listApprovedDifferentialsForPlayer's own
+  // reasoning. If this leaked in, every assertion below would be wrong.
+  const pendingRound = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(pendingRound.id, { holeNumber: 1, strokes: 3, gir: true, fairwayResult: "hit", inSand: false, putts: 1, penalties: 0 });
+  await roundsRepo.setStatus(pendingRound.id, "pending");
+
+  // Another player's approved round -- must not leak into this player's
+  // own stats.
+  const otherRound = await roundsRepo.create({ playerId: otherPlayer.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(otherRound.id, { holeNumber: 1, strokes: 10, gir: false, fairwayResult: "missed_left", inSand: true, putts: 5, penalties: 3 });
+  await roundsRepo.setStatus(otherRound.id, "approved");
+
+  const stats = await roundsRepo.getPlayerStats(player.id);
+
+  assert.equal(stats.roundsCount, 2);
+  assert.equal(stats.holesCount, 5);
+  assert.equal(stats.girPercentage, 40.0, "2 of 5 holes -> 40%");
+  // 4 fairway-relevant holes (round1's null-fairway_result hole excluded
+  // from the denominator, not counted as a miss).
+  assert.equal(stats.fairwayHitPercentage, 50.0, "2 of 4 relevant holes -> 50%");
+  assert.equal(stats.fairwayMissedLeftPercentage, 25.0, "1 of 4 relevant holes -> 25%");
+  assert.equal(stats.fairwayMissedRightPercentage, 25.0, "1 of 4 relevant holes -> 25%");
+  assert.equal(stats.sandInteractionPercentage, 40.0, "2 of 5 holes had a sand interaction -> 40%, NOT a shot count");
+  assert.equal(stats.onePuttHoles, 2);
+  assert.equal(stats.threePlusPuttHoles, 2, "the putts=3 hole and the putts=4 hole both count");
+  assert.equal(stats.puttsPerRound, 5.5, "(1+2+3+1+4)=11 putts over 2 rounds -> 5.5");
+  assert.equal(stats.penaltiesPerRound, 1.5, "(0+1+0+0+2)=3 penalties over 2 rounds -> 1.5");
+});
+
+test("getPlayerStats (ghs#101): a player with no approved rounds gets real zeros/nulls, not an error", async () => {
+  const players = createPlayersRepository(pool);
+  const roundsRepo = createRoundsRepository(pool);
+  const player = await players.create({ firstName: "No", lastName: "Rounds" });
+
+  const stats = await roundsRepo.getPlayerStats(player.id);
+
+  assert.equal(stats.roundsCount, 0);
+  assert.equal(stats.holesCount, 0);
+  assert.equal(stats.girPercentage, null, "null, not NaN or a misleading 0, when there's nothing to divide by");
+  assert.equal(stats.fairwayHitPercentage, null);
+  assert.equal(stats.puttsPerRound, null);
+  assert.equal(stats.penaltiesPerRound, null);
+  assert.equal(stats.sandInteractionPercentage, null);
+  assert.equal(stats.onePuttHoles, 0);
+  assert.equal(stats.threePlusPuttHoles, 0);
 });

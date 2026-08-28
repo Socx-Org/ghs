@@ -11,6 +11,7 @@ import type { RoundsService } from "../../application/rounds.service.ts";
 import type { HandicapOverridesService } from "../../application/handicap-overrides.service.ts";
 import type { PccService } from "../../application/pcc.service.ts";
 import type { RecalculationOrchestrator } from "../../application/recalculation.service.ts";
+import type { HandicapHistoryService } from "../../application/handicap-history.service.ts";
 import type { PlayersRepository } from "../../data/players.repository.ts";
 import type { AuthProvider } from "../../application/auth-provider.ts";
 import {
@@ -48,6 +49,10 @@ export interface AppDeps {
   // handicap recalculation for every player affected by a PCC
   // correction, not just bulk-rewrite rounds.score_differential.
   recalculationOrchestrator: RecalculationOrchestrator;
+  // ghs#101: needed so players.ts's own handicap-history route can
+  // expose HandicapHistoryService.listHistoryForPlayer over HTTP -- the
+  // calculation/storage already existed, just never had a route.
+  handicapHistoryService: HandicapHistoryService;
   playersRepository: PlayersRepository;
   authProvider: AuthProvider;
   // ghs#49: real production wiring never sets this (undefined -- every
@@ -133,7 +138,7 @@ export function createApp(deps: AppDeps): Express {
   v1Router.use(teeConfigurationsRouter(deps.coursesService, deps.authProvider));
   v1Router.use(roundsRouter(deps.roundsService, deps.playersRepository, deps.authProvider));
   v1Router.use(handicapOverridesRouter(deps.handicapOverridesService, deps.playersRepository, deps.authProvider));
-  v1Router.use(playersRouter(deps.playersRepository, deps.authProvider));
+  v1Router.use(playersRouter(deps.playersRepository, deps.authProvider, deps.handicapHistoryService, deps.roundsService));
 
   app.use("/api/v1", v1Router);
 
