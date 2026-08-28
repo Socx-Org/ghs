@@ -41,6 +41,7 @@ import {
   Modal,
   NavItem,
   RadioGroup,
+  RecentRoundsWidget,
   RoleBadge,
   RoundStatusBadge,
   Select,
@@ -57,10 +58,12 @@ import {
   ThemeToggle,
   ToggleGroup,
   Tooltip,
+  Widget,
 } from "./components";
+import type { WidgetStatus } from "./components";
 import { useToast } from "./components/useToast";
 import { ROUND_STATUS_OPTIONS } from "./lib/domain-labels";
-import type { RoundStatus, UserRole } from "./types/domain";
+import type { PlayerRoundListItem, RoundStatus, UserRole } from "./types/domain";
 
 // ghs#78/#82: the living visual reference for GHS. Every component
 // rendered here is the actual component apps/web/src/components exports
@@ -87,6 +90,15 @@ const SAMPLE_ROUNDS: Array<{
   { id: "3", course: "Wentworth (West)", tee: "Yellow", playedAt: "2026-08-16", status: "rejected", differential: null },
   { id: "4", course: "Sunningdale (New)", tee: "Red", playedAt: "2026-08-17", status: "amending", differential: null },
   { id: "5", course: "Wentworth (East)", tee: "Yellow", playedAt: "2026-08-18", status: "draft", differential: null },
+];
+
+// ghs#116: PlayerRoundListItem-shaped (courseName/teeConfigurationName
+// enriched, ghs#147), distinct from SAMPLE_ROUNDS above -- the exact
+// shape RecentRoundsWidget's real caller (PlayerDashboardPage) passes.
+const SAMPLE_PLAYER_ROUNDS: PlayerRoundListItem[] = [
+  { id: "1", playerId: "p1", courseId: "c1", courseName: "Sunningdale (Old)", teeConfigurationId: "t1", teeConfigurationName: "Yellow", playedAt: "2026-08-17T09:00:00.000Z", status: "draft" },
+  { id: "2", playerId: "p1", courseId: "c2", courseName: "St Andrews (Old)", teeConfigurationId: "t2", teeConfigurationName: "White", playedAt: "2026-08-14T09:00:00.000Z", status: "pending" },
+  { id: "3", playerId: "p1", courseId: "c1", courseName: "Sunningdale (Old)", teeConfigurationId: "t1", teeConfigurationName: "Yellow", playedAt: "2026-08-10T09:00:00.000Z", status: "approved" },
 ];
 
 const REJECTED_ROUND_REASON =
@@ -177,6 +189,7 @@ export default function ComponentsCatalogue() {
   const [tableGridMode, setTableGridMode] = useState("table");
   const [activeNav, setActiveNav] = useState("dashboard");
   const [showSkeletons, setShowSkeletons] = useState(true);
+  const [widgetStatus, setWidgetStatus] = useState<WidgetStatus>("ready");
 
   useEffect(() => {
     let cancelled = false;
@@ -228,6 +241,7 @@ export default function ComponentsCatalogue() {
             ["forms", "Forms"],
             ["feedback", "Feedback"],
             ["data-display", "Data/Display"],
+            ["widgets", "Dashboard Widgets"],
             ["overlays", "Overlays"],
             ["navigation", "Navigation"],
           ].map(([id, label]) => (
@@ -824,6 +838,63 @@ export default function ComponentsCatalogue() {
               <span className="flex items-center gap-1.5 text-sm text-info">
                 <Info aria-hidden="true" className="h-4 w-4" /> Info
               </span>
+            </div>
+          </Example>
+        </Section>
+
+        <Section
+          id="widgets"
+          title="Dashboard Widgets"
+          description="ghs#116: the shared Widget shell (title/icon/description/secondary metric/actions, plus loading/error/empty/ready states) -- built from Card/Skeleton/Alert/EmptyState above, not a new visual system. Deliberately not one rigid template: a widget's ready content is just its own children, so a stat-shaped widget and a list-shaped widget can look genuinely different while sharing the same chrome."
+        >
+          <Example label="Widget primitive -- toggle its state; content is a plain Stat here, but could be anything">
+            <div className="flex flex-col gap-4">
+              <ToggleGroup
+                name="widget-status"
+                value={widgetStatus}
+                onChange={(value) => setWidgetStatus(value as WidgetStatus)}
+                options={[
+                  { value: "loading", label: "Loading" },
+                  { value: "error", label: "Error" },
+                  { value: "empty", label: "Empty" },
+                  { value: "ready", label: "Ready" },
+                ]}
+              />
+              <div className="max-w-sm">
+                <Widget
+                  title="Handicap Index"
+                  icon={Flag}
+                  description="Your current index"
+                  secondaryMetric="Low HI 12.9"
+                  status={widgetStatus}
+                  errorMessage="Couldn't load your handicap index."
+                  emptyState={<EmptyState title="Not yet established" description="Submit at least 3 rounds to get your first handicap index." />}
+                >
+                  <Stat label="Handicap Index" value="14.2" />
+                </Widget>
+              </div>
+            </div>
+          </Example>
+
+          <Example label="RecentRoundsWidget -- a real, shipped widget built on the primitive above; shows the 3 most recent rounds (design doc 9.1), capped even though 3 are given here">
+            <div className="max-w-sm">
+              <RecentRoundsWidget
+                isLoading={false}
+                isError={false}
+                rounds={SAMPLE_PLAYER_ROUNDS}
+                onContinue={() => {}}
+                actions={
+                  <Button size="sm" icon={<Plus aria-hidden="true" className="h-4 w-4" />}>
+                    New round
+                  </Button>
+                }
+              />
+            </div>
+          </Example>
+
+          <Example label="RecentRoundsWidget -- empty state">
+            <div className="max-w-sm">
+              <RecentRoundsWidget isLoading={false} isError={false} rounds={[]} onContinue={() => {}} />
             </div>
           </Example>
         </Section>

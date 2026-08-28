@@ -138,6 +138,21 @@ describe("PlayerDashboardPage", () => {
     expect(screen.getByText("Pending")).toBeInTheDocument();
   });
 
+  it("ghs#116: shows only the 3 most recent rounds, via the RecentRoundsWidget's own cap (design doc 9.1)", async () => {
+    mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: 12.4, lowHandicapIndex: 10.1 });
+    mock.onGet("/players/player-1/rounds").reply(200, [
+      { id: "r1", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-05T09:00:00.000Z", status: "approved" },
+      { id: "r2", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-04T09:00:00.000Z", status: "approved" },
+      { id: "r3", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-03T09:00:00.000Z", status: "approved" },
+      { id: "r4", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-02T09:00:00.000Z", status: "approved" },
+    ]);
+
+    renderDashboard();
+
+    await screen.findAllByText("Approved");
+    expect(screen.getAllByText("Approved")).toHaveLength(3);
+  });
+
   it("shows an empty state when there are no rounds yet", async () => {
     mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: null, lowHandicapIndex: null });
     mock.onGet("/players/player-1/rounds").reply(200, []);
