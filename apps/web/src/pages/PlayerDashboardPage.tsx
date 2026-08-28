@@ -57,25 +57,29 @@ export default function PlayerDashboardPage() {
         </CardBody>
       </Card>
 
-      {/* No playerId to fetch rounds for at all when the profile failed --
-          the card above already surfaces that failure; a second,
-          redundant widget error (or a skeleton that can never resolve,
-          since a disabled query stays isPending forever -- review
-          finding, PR #91) here would just be noise. */}
-      {!profileQuery.isError && (
-        <RecentRoundsWidget
-          isLoading={profileQuery.isPending || roundsQuery.isPending}
-          isError={roundsQuery.isError}
-          errorMessage={roundsQuery.isError ? describeQueryError(roundsQuery.error, "Couldn't load your rounds. Try refreshing the page.") : undefined}
-          rounds={roundsQuery.data ?? []}
-          onContinue={(roundId) => navigate(`/rounds/${roundId}`)}
-          actions={
-            <Button size="sm" icon={<Plus aria-hidden="true" className="h-4 w-4" />} onClick={() => navigate("/rounds/new")}>
-              New round
-            </Button>
-          }
-        />
-      )}
+      {/* Review finding, PR #173: the widget itself (including its
+          "New round" action) always renders, even when the profile
+          failed to load -- only its BODY goes idle (isIdle), matching
+          the pre-#116 behaviour where the card header rendered
+          unconditionally and only the body went blank. There's no
+          playerId to fetch rounds for at all in that case -- the
+          profile card above already surfaces the real failure; a
+          second, redundant widget error (or a skeleton that can never
+          resolve, since a disabled query stays isPending forever --
+          review finding, PR #91) here would just be noise. */}
+      <RecentRoundsWidget
+        isIdle={profileQuery.isError}
+        isLoading={profileQuery.isPending || roundsQuery.isPending}
+        isError={roundsQuery.isError}
+        errorMessage={roundsQuery.isError ? describeQueryError(roundsQuery.error, "Couldn't load your rounds. Try refreshing the page.") : undefined}
+        rounds={roundsQuery.data ?? []}
+        onContinue={(roundId) => navigate(`/rounds/${roundId}`)}
+        actions={
+          <Button size="sm" icon={<Plus aria-hidden="true" className="h-4 w-4" />} onClick={() => navigate("/rounds/new")}>
+            New round
+          </Button>
+        }
+      />
     </div>
   );
 }

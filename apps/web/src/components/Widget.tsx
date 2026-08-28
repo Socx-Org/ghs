@@ -6,16 +6,25 @@ import { Skeleton } from "./Skeleton";
 import { cn } from "../lib/cn";
 
 // ghs#116 (design doc section 10): the shared Dashboard widget shell --
-// title/icon/description/secondaryMetric header, one of the four states
+// title/icon/description/secondaryMetric header, one of the five states
 // every widget on the dashboard needs, built entirely from existing
 // primitives (Card/Skeleton/Alert/EmptyState), not a new visual system.
-// Deliberately thin: `status` decides which of loading/error/empty/ready
-// to render, but the READY content is just `children` -- a stat, a
+// Deliberately thin: `status` decides which of loading/error/empty/idle/
+// ready to render, but the READY content is just `children` -- a stat, a
 // table, or (once #117/#118 land) a chart. That's the "small number of
 // deliberate widget variants, not one rigid template" the design doc
 // asks for: this component owns the chrome and the state switch, never
 // the shape of a widget's own real content.
-export type WidgetStatus = "loading" | "error" | "empty" | "ready";
+//
+// "idle" (review finding, ghs#116 PR #173): a widget's body has nothing
+// meaningful to show yet, but that's not itself an error/empty/loading
+// condition worth reporting -- e.g. PlayerDashboardPage's rounds widget
+// when the player's own profile (a real prerequisite) hasn't loaded, an
+// error already surfaced elsewhere on the page. Renders nothing in the
+// body, but -- unlike hiding the whole widget -- the header/actions
+// still render, so an action like "New round" stays available even
+// while the body has nothing to show.
+export type WidgetStatus = "loading" | "error" | "empty" | "idle" | "ready";
 
 export interface WidgetProps {
   title: string;
@@ -89,7 +98,7 @@ export function Widget({
           <Alert variant="error">{errorMessage ?? "Something went wrong. Try refreshing the page."}</Alert>
         ) : status === "empty" ? (
           (emptyState ?? <EmptyState title="Nothing here yet" />)
-        ) : (
+        ) : status === "idle" ? null : (
           children
         )}
       </CardBody>

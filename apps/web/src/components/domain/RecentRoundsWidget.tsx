@@ -13,6 +13,15 @@ function formatPlayedAt(iso: string): string {
 }
 
 export interface RecentRoundsWidgetProps {
+  // Review finding, PR #173: a prerequisite the caller depends on (e.g.
+  // PlayerDashboardPage's own player profile) failed to load, and that
+  // failure is already surfaced elsewhere on the page -- checked before
+  // isLoading/isError below, since none of those states are correct
+  // here (not loading, no rounds-specific error to show, and "empty"
+  // would wrongly imply "confirmed zero rounds" rather than "unknown").
+  // Renders the widget's header/actions as normal, nothing in the body
+  // -- matches Widget's own "idle" status.
+  isIdle?: boolean;
   isLoading: boolean;
   isError: boolean;
   errorMessage?: ReactNode;
@@ -36,9 +45,9 @@ export interface RecentRoundsWidgetProps {
 // that), but "empty" is derived here, not passed in -- whether zero
 // rounds counts as "empty" is this widget's own domain knowledge, not
 // something every caller should have to recompute.
-export function RecentRoundsWidget({ isLoading, isError, errorMessage, rounds, onContinue, actions }: RecentRoundsWidgetProps) {
+export function RecentRoundsWidget({ isIdle, isLoading, isError, errorMessage, rounds, onContinue, actions }: RecentRoundsWidgetProps) {
   const recent = rounds.slice(0, 3);
-  const status = isLoading ? "loading" : isError ? "error" : recent.length === 0 ? "empty" : "ready";
+  const status = isIdle ? "idle" : isLoading ? "loading" : isError ? "error" : recent.length === 0 ? "empty" : "ready";
 
   return (
     <Widget

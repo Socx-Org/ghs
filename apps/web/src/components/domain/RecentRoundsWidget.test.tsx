@@ -13,9 +13,10 @@ function round(id: string, playedAt: string, status: PlayerRoundListItem["status
 }
 
 describe("RecentRoundsWidget", () => {
-  it("shows a loading skeleton when isLoading", () => {
+  it("shows a loading skeleton when isLoading, not the table (review finding: the header's own aria-hidden icon renders in every status, so asserting on that alone is a false positive)", () => {
     const { container } = render(<RecentRoundsWidget isLoading isError={false} rounds={[]} onContinue={vi.fn()} />);
-    expect(container.querySelector('[aria-hidden="true"]')).toBeInTheDocument();
+    expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
   it("shows the error message when isError", () => {
@@ -60,5 +61,14 @@ describe("RecentRoundsWidget", () => {
       <RecentRoundsWidget isLoading={false} isError={false} rounds={[]} onContinue={vi.fn()} actions={<button>New round</button>} />,
     );
     expect(screen.getByRole("button", { name: "New round" })).toBeInTheDocument();
+  });
+
+  it("isIdle renders nothing in the body, but actions stay visible (review finding, PR #173: a prerequisite like the player's profile failed elsewhere on the page)", () => {
+    render(
+      <RecentRoundsWidget isIdle isLoading={false} isError={false} rounds={[]} onContinue={vi.fn()} actions={<button>New round</button>} />,
+    );
+    expect(screen.getByRole("button", { name: "New round" })).toBeInTheDocument();
+    expect(screen.queryByText("No rounds yet")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 });

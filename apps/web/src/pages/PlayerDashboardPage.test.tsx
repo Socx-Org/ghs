@@ -119,10 +119,18 @@ describe("PlayerDashboardPage", () => {
     await screen.findByRole("alert");
     // A disabled query (no playerId to fetch rounds for) never leaves
     // TanStack Query's "pending" status on its own -- rendering that as
-    // a loading skeleton would show it forever. The rounds section must
-    // render nothing here, and no request for rounds is ever made.
+    // a loading skeleton would show it forever. The rounds widget's own
+    // body must render nothing here, and no request for rounds is ever
+    // made.
     expect(screen.queryByText("No rounds yet")).not.toBeInTheDocument();
     expect(mock.history.get?.some((r) => r.url?.includes("/rounds"))).toBe(false);
+    // Review finding, PR #173: the widget's header/actions must still
+    // render even though its body is idle -- a real regression #116
+    // introduced (the whole widget, including "New round", used to
+    // disappear here; only the body should ever go blank, matching the
+    // pre-#116 behaviour where the card header always rendered).
+    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New round" })).toBeInTheDocument();
   });
 
   it("shows recent rounds with a status per row (acceptance criterion)", async () => {

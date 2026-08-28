@@ -63,6 +63,17 @@ describe("Widget", () => {
     expect(screen.getByText("Real content")).toBeInTheDocument();
   });
 
+  it("status=idle renders nothing in the body, but the title and actions still render (review finding, PR #173)", () => {
+    render(
+      <Widget title="Recent rounds" status="idle" actions={<button>New round</button>}>
+        Real content
+      </Widget>,
+    );
+    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New round" })).toBeInTheDocument();
+    expect(screen.queryByText("Real content")).not.toBeInTheDocument();
+  });
+
   it("secondaryMetric only renders alongside ready content, not during loading/error/empty", () => {
     const { rerender } = render(
       <Widget title="Recent rounds" status="ready" secondaryMetric="12 total">
