@@ -324,12 +324,12 @@ export async function getPlayerRounds(playerId: string): Promise<PlayerRoundList
   return data;
 }
 
-// ghs#117: the Handicap Trend Widget's own data source. The backend
-// orders newest-first (calculation_date DESC, handicap-history.
-// repository.ts's own listForPlayer) -- a chronological trend chart
-// needs the reverse, so the caller re-sorts for that specific need
-// rather than this client function silently reordering what the
-// backend actually returns.
+// ghs#117: the Handicap Trend Widget's own data source. Returned as-is,
+// newest-first (calculation_date DESC, handicap-history.repository.ts's
+// own listForPlayer) -- not reordered here. A chronological trend chart
+// needs the reverse, so HandicapTrendWidget itself sorts oldest-first
+// internally for that specific need (review finding: an earlier version
+// of this comment wrongly said the CALLER does this).
 export async function getPlayerHandicapHistory(playerId: string): Promise<HandicapHistoryRecord[]> {
   const { data } = await api.get<HandicapHistoryRecord[]>(`/players/${playerId}/handicap-history`);
   return data;

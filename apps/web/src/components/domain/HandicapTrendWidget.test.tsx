@@ -7,6 +7,19 @@ afterEach(() => {
   cleanup();
 });
 
+// Same technique as lib/dates.test.ts's own withTimeZone -- restored
+// unconditionally, even on failure, so one bad assertion can't leak a
+// wrong TZ into every other test in the file.
+function withTimeZone(timeZone: string, run: () => void): void {
+  const original = process.env.TZ;
+  process.env.TZ = timeZone;
+  try {
+    run();
+  } finally {
+    process.env.TZ = original;
+  }
+}
+
 function record(id: string, calculationDate: string, handicapIndex: number): HandicapHistoryRecord {
   return {
     id,
@@ -64,6 +77,18 @@ describe("HandicapTrendWidget", () => {
     const table = screen.getByRole("table");
     expect(within(table).getByText("14.2")).toBeInTheDocument();
     expect(within(table).getByText("12.4")).toBeInTheDocument();
+  });
+
+  it("ghs#117 review fix: formats a bare YYYY-MM-DD date without a UTC-midnight day-shift, under a real negative-UTC-offset timezone", () => {
+    withTimeZone("America/Los_Angeles", () => {
+      render(<HandicapTrendWidget isLoading={false} isError={false} history={[record("h1", "2026-05-01", 14.2), record("h2", "2026-06-01", 12.4)]} />);
+      const table = screen.getByRole("table");
+      // The pre-fix `new Date("2026-05-01")` parses as UTC midnight,
+      // which is still Apr 30 in America/Los_Angeles (UTC-7/-8) -- the
+      // exact wrong-calendar-day bug this regresses.
+      expect(within(table).getByText("May 1, 2026")).toBeInTheDocument();
+      expect(within(table).getByText("Jun 1, 2026")).toBeInTheDocument();
+    });
   });
 
   it("sorts oldest-first for the trend regardless of the order given (the backend returns newest-first)", () => {

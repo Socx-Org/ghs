@@ -6,8 +6,23 @@ import { Skeleton } from "../Skeleton";
 import { Widget } from "../Widget";
 import type { HandicapHistoryRecord } from "../../types/domain";
 
+// ghs#101/#117: calculationDate is a real backend timestamp
+// (calculation_date.toISOString(), handicap-history.repository.ts) --
+// a genuine instant, so parsing and formatting it via the viewer's own
+// local timezone is correct as-is, unlike a "played on" date. Review
+// finding: a bare "YYYY-MM-DD" (this file's own sample/test data, and
+// nothing in the type stops a real caller from passing one too) is
+// parsed by `new Date()` as UTC midnight per spec, which can display as
+// the *previous* calendar day in a negative-UTC-offset timezone -- the
+// same bug class PR #95/#168/#173 already fixed elsewhere. Building a
+// bare date from explicit local y/m/d parts avoids it, same technique
+// as lib/dates.ts's playedAtToIsoString.
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const bareDateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  const date = bareDateMatch
+    ? new Date(Number(bareDateMatch[1]), Number(bareDateMatch[2]) - 1, Number(bareDateMatch[3]), 12)
+    : new Date(iso);
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 export interface HandicapTrendWidgetProps {
