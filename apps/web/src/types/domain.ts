@@ -78,6 +78,26 @@ export interface PlayerProfile {
   lowHandicapIndex: number | null;
 }
 
+// Mirrors apps/api/src/data/handicap-history.repository.ts's
+// HandicapHistoryRecord/HandicapChangeMethod exactly (ghs#101/#117) --
+// the shape GET /players/:playerId/handicap-history returns, one row
+// per real index change (never a synthetic "unchanged" entry --
+// ghs#21's change-only write policy).
+export type HandicapChangeMethod = "calculated" | "manual_override";
+
+export interface HandicapHistoryRecord {
+  id: string;
+  playerId: string;
+  method: HandicapChangeMethod;
+  handicapIndex: number;
+  previousIndex: number | null;
+  reason: string | null;
+  createdBy: string | null;
+  calculationSnapshot: Record<string, unknown> | null;
+  calculationDate: string;
+  createdAt: string;
+}
+
 // Mirrors apps/api/src/data/rounds.repository.ts's PlayerRoundListItem
 // exactly (ghs#147) -- the shape GET /players/:playerId/rounds returns,
 // enriched with course/tee names (same reasoning as AdminRoundListItem

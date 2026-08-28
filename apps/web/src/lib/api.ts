@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { AccountProfile, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, DailyPcc, FairwayResult, HoleScore, PccCorrectionOutcome, PendingRoundQueueItem, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
+import type { AccountProfile, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, DailyPcc, FairwayResult, HandicapHistoryRecord, HoleScore, PccCorrectionOutcome, PendingRoundQueueItem, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -321,6 +321,17 @@ export async function getMyPlayerProfile(): Promise<PlayerProfile> {
 
 export async function getPlayerRounds(playerId: string): Promise<PlayerRoundListItem[]> {
   const { data } = await api.get<PlayerRoundListItem[]>(`/players/${playerId}/rounds`);
+  return data;
+}
+
+// ghs#117: the Handicap Trend Widget's own data source. The backend
+// orders newest-first (calculation_date DESC, handicap-history.
+// repository.ts's own listForPlayer) -- a chronological trend chart
+// needs the reverse, so the caller re-sorts for that specific need
+// rather than this client function silently reordering what the
+// backend actually returns.
+export async function getPlayerHandicapHistory(playerId: string): Promise<HandicapHistoryRecord[]> {
+  const { data } = await api.get<HandicapHistoryRecord[]>(`/players/${playerId}/handicap-history`);
   return data;
 }
 

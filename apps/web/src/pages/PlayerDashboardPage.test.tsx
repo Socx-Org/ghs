@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -74,19 +74,39 @@ const PROFILE = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
+function historyRecord(id: string, calculationDate: string, handicapIndex: number) {
+  return {
+    id,
+    playerId: "player-1",
+    method: "calculated" as const,
+    handicapIndex,
+    previousIndex: null,
+    reason: null,
+    createdBy: null,
+    calculationSnapshot: null,
+    calculationDate,
+    createdAt: calculationDate,
+  };
+}
+
 describe("PlayerDashboardPage", () => {
-  it("shows the real handicap index once loaded", async () => {
+  it("shows the real handicap trend once loaded (acceptance criterion)", async () => {
     mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: 12.4, lowHandicapIndex: 10.1 });
+    mock.onGet("/players/player-1/handicap-history").reply(200, [
+      historyRecord("h1", "2026-05-01", 14.2),
+      historyRecord("h2", "2026-06-01", 12.4),
+    ]);
     mock.onGet("/players/player-1/rounds").reply(200, []);
 
     renderDashboard();
 
-    expect(await screen.findByText("Handicap Index")).toBeInTheDocument();
-    expect(await screen.findByText("12.4")).toBeInTheDocument();
+    expect(await screen.findByText("Handicap trend")).toBeInTheDocument();
+    expect(await screen.findByText("Current 12.4")).toBeInTheDocument();
   });
 
-  it("shows an eligibility-appropriate empty state when handicapIndex is null (acceptance criterion)", async () => {
+  it("shows an eligibility-appropriate empty state when there's no handicap history yet (acceptance criterion)", async () => {
     mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: null, lowHandicapIndex: null });
+    mock.onGet("/players/player-1/handicap-history").reply(200, []);
     mock.onGet("/players/player-1/rounds").reply(200, []);
 
     renderDashboard();
@@ -95,12 +115,24 @@ describe("PlayerDashboardPage", () => {
     expect(screen.getByText(/Submit at least 3 rounds/)).toBeInTheDocument();
   });
 
+  it("ghs#117: shows a 'not enough history yet' state for exactly one change -- a single point isn't a real trend", async () => {
+    mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: 14.2, lowHandicapIndex: 14.2 });
+    mock.onGet("/players/player-1/handicap-history").reply(200, [historyRecord("h1", "2026-05-01", 14.2)]);
+    mock.onGet("/players/player-1/rounds").reply(200, []);
+
+    renderDashboard();
+
+    expect(await screen.findByText("Not enough history yet")).toBeInTheDocument();
+  });
+
   it("shows an error state when the profile fails to load", async () => {
     mock.onGet("/players/me").reply(500, { error: "internal server error" });
 
     renderDashboard();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("internal server error");
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toHaveTextContent("internal server error");
   });
 
   it("surfaces the real server error message, e.g. the 404 for an account with no linked player row (review finding, PR #91)", async () => {
@@ -108,33 +140,38 @@ describe("PlayerDashboardPage", () => {
 
     renderDashboard();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("no player profile linked to this account");
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toHaveTextContent("no player profile linked to this account");
   });
 
-  it("does not get stuck showing rounds skeletons forever when the profile fails to load (review finding, PR #91)", async () => {
+  it("does not get stuck showing skeletons forever when the profile fails to load (review finding, PR #91)", async () => {
     mock.onGet("/players/me").reply(404, { error: "no player profile linked to this account" });
 
     renderDashboard();
 
     await screen.findByRole("alert");
-    // A disabled query (no playerId to fetch rounds for) never leaves
-    // TanStack Query's "pending" status on its own -- rendering that as
-    // a loading skeleton would show it forever. The rounds widget's own
-    // body must render nothing here, and no request for rounds is ever
-    // made.
+    // A disabled query (no playerId to fetch with) never leaves TanStack
+    // Query's "pending" status on its own -- rendering that as a loading
+    // skeleton would show it forever. Neither widget's body renders
+    // loading/empty content here, and no request for history or rounds
+    // is ever made.
     expect(screen.queryByText("No rounds yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not yet established")).not.toBeInTheDocument();
     expect(mock.history.get?.some((r) => r.url?.includes("/rounds"))).toBe(false);
-    // Review finding, PR #173: the widget's header/actions must still
-    // render even though its body is idle -- a real regression #116
-    // introduced (the whole widget, including "New round", used to
-    // disappear here; only the body should ever go blank, matching the
-    // pre-#116 behaviour where the card header always rendered).
+    expect(mock.history.get?.some((r) => r.url?.includes("/handicap-history"))).toBe(false);
+    // Review finding, PR #173: RecentRoundsWidget's header/actions must
+    // still render even though its body is idle. HandicapTrendWidget,
+    // unlike RecentRoundsWidget, has no header action to preserve --
+    // its own real error IS the one alert asserted above (there's no
+    // longer a separate surface for a profile failure to hide behind).
     expect(screen.getByText("Recent rounds")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New round" })).toBeInTheDocument();
   });
 
   it("shows recent rounds with a status per row (acceptance criterion)", async () => {
     mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: 12.4, lowHandicapIndex: 10.1 });
+    mock.onGet("/players/player-1/handicap-history").reply(200, []);
     mock.onGet("/players/player-1/rounds").reply(200, [
       { id: "r1", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-01T09:00:00.000Z", status: "approved" },
       { id: "r2", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-08T09:00:00.000Z", status: "pending" },
@@ -148,6 +185,7 @@ describe("PlayerDashboardPage", () => {
 
   it("ghs#116: shows only the 3 most recent rounds, via the RecentRoundsWidget's own cap (design doc 9.1)", async () => {
     mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: 12.4, lowHandicapIndex: 10.1 });
+    mock.onGet("/players/player-1/handicap-history").reply(200, []);
     mock.onGet("/players/player-1/rounds").reply(200, [
       { id: "r1", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-05T09:00:00.000Z", status: "approved" },
       { id: "r2", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-04T09:00:00.000Z", status: "approved" },
@@ -163,6 +201,7 @@ describe("PlayerDashboardPage", () => {
 
   it("shows an empty state when there are no rounds yet", async () => {
     mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: null, lowHandicapIndex: null });
+    mock.onGet("/players/player-1/handicap-history").reply(200, []);
     mock.onGet("/players/player-1/rounds").reply(200, []);
 
     renderDashboard();
@@ -172,6 +211,7 @@ describe("PlayerDashboardPage", () => {
 
   it("shows an error state when rounds fail to load", async () => {
     mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: 12.4, lowHandicapIndex: 10.1 });
+    mock.onGet("/players/player-1/handicap-history").reply(200, []);
     mock.onGet("/players/player-1/rounds").reply(500, { error: "internal server error" });
 
     renderDashboard();
@@ -181,6 +221,7 @@ describe("PlayerDashboardPage", () => {
 
   it("navigates to /rounds/new via the New round button (ghs#94)", async () => {
     mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: null, lowHandicapIndex: null });
+    mock.onGet("/players/player-1/handicap-history").reply(200, []);
     mock.onGet("/players/player-1/rounds").reply(200, []);
 
     renderDashboardViaRoutes();
@@ -192,6 +233,7 @@ describe("PlayerDashboardPage", () => {
 
   it("only offers Continue for draft/rejected/amending rounds, navigating to the entry screen (ghs#94)", async () => {
     mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: null, lowHandicapIndex: null });
+    mock.onGet("/players/player-1/handicap-history").reply(200, []);
     mock.onGet("/players/player-1/rounds").reply(200, [
       { id: "r-draft", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-01T09:00:00.000Z", status: "draft" },
       { id: "r-approved", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-02T09:00:00.000Z", status: "approved" },
@@ -210,5 +252,20 @@ describe("PlayerDashboardPage", () => {
     // is its own deterministic, query-independent marker (same as
     // AppRoutes.test.tsx).
     expect(await screen.findByRole("button", { name: "Back" })).toBeInTheDocument();
+  });
+
+  it("ghs#117: the accessible data table alongside the chart reflects the same real values (design doc's 'accessible labels/alternative information')", async () => {
+    mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: 12.4, lowHandicapIndex: 10.1 });
+    mock.onGet("/players/player-1/handicap-history").reply(200, [
+      historyRecord("h1", "2026-05-01", 14.2),
+      historyRecord("h2", "2026-06-01", 12.4),
+    ]);
+    mock.onGet("/players/player-1/rounds").reply(200, []);
+
+    renderDashboard();
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("14.2")).toBeInTheDocument();
+    expect(within(table).getByText("12.4")).toBeInTheDocument();
   });
 });
