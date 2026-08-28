@@ -777,10 +777,14 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       // Scoped to approved rounds only, matching listApprovedDifferentials
       // ForPlayer's own reasoning -- a round only genuinely represents the
       // player's play once it's been approved, not while still draft/
-      // pending/rejected/amending. An INNER JOIN means a player with zero
-      // approved hole_scores rows returns zero SQL rows entirely (not one
-      // row of nulls/zeros), so the JS side below fills in the all-empty
-      // default itself rather than relying on the query to.
+      // pending/rejected/amending. Postgres itself always returns exactly
+      // one row for an aggregate query with no GROUP BY, even when the
+      // JOIN matches nothing (count(*) = 0, sum(...) = NULL, which the
+      // coalesce()s below turn into 0) -- the `?? { ...defaults }` below
+      // exists only to satisfy TypeScript's own (necessarily more
+      // conservative) `T | undefined` typing of result.rows[0], not
+      // because Postgres could genuinely return zero rows here (review
+      // finding: an earlier version of this comment claimed the latter).
       const result = await pool.query<{
         rounds_count: number;
         holes_count: number;
@@ -822,8 +826,16 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
 
       // Null rather than NaN/a misleading 0 whenever there's nothing to
       // divide by -- same defensive convention as computeScoreDifferential
-      // (scoring.service.ts). One decimal place, matching this codebase's
-      // established score-differential precision display convention.
+      // (scoring.service.ts), though that one stores 3 decimal places for
+      // its own real WHS-precision reasons, unrelated to this. One
+      // decimal here instead, matching the frontend's own established
+      // *display* rounding for this kind of stat (Stat components
+      // elsewhere already format handicap index/score differential to
+      // one decimal for on-screen presentation) -- these are Dashboard
+      // display values, not a stored calculation input, so display
+      // precision is the right thing to match (review finding: an
+      // earlier version of this comment wrongly cited score-differential
+      // storage precision instead).
       const percentage = (count: number, denominator: number): number | null =>
         denominator === 0 ? null : Number(((count / denominator) * 100).toFixed(1));
       const averagePerRound = (total: number): number | null =>
