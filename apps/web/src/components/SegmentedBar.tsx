@@ -1,6 +1,15 @@
 import type { ReactNode } from "react";
 import { cn } from "../lib/cn";
 
+// Review finding (PR #182, Copilot): segment.value is a plain caller-
+// supplied number with no runtime guarantee it's actually 0-100 -- a
+// rounding error or bad data upstream would otherwise render a
+// negative or overflowing bar segment/width. Clamped once, here, rather
+// than trusting every caller to clamp its own inputs.
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(0, value));
+}
+
 export interface SegmentedBarSegment {
   label: string;
   // A percentage (0-100). Segments are rendered in the array's own
@@ -43,16 +52,23 @@ export function SegmentedBar({ headline, headlineLabel, segments, className }: S
 
       <div aria-hidden="true" className="flex h-3 w-full overflow-hidden rounded-full bg-border">
         {segments.map((segment) => (
-          <div key={segment.label} className={segment.colorClass} style={{ width: `${segment.value}%` }} />
+          <div key={segment.label} className={segment.colorClass} style={{ width: `${clampPercent(segment.value)}%` }} />
         ))}
       </div>
 
+      {/* Review finding (PR #182, Copilot): a <dl> may only contain dt/dd
+          (optionally grouped in a <div> containing dt/dd, optionally
+          intermixed with script-supporting elements) -- the colour swatch
+          <span> belongs inside <dt>, not as a sibling of it, or the
+          markup is invalid. */}
       <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
         {segments.map((segment) => (
           <div key={segment.label} className="flex items-center gap-1.5">
-            <span aria-hidden="true" className={cn("h-2 w-2 shrink-0 rounded-full", segment.colorClass)} />
-            <dt className="text-text-muted">{segment.label}</dt>
-            <dd className="font-medium tabular-nums text-text">{Math.round(segment.value)}%</dd>
+            <dt className="flex items-center gap-1.5 text-text-muted">
+              <span aria-hidden="true" className={cn("h-2 w-2 shrink-0 rounded-full", segment.colorClass)} />
+              {segment.label}
+            </dt>
+            <dd className="font-medium tabular-nums text-text">{Math.round(clampPercent(segment.value))}%</dd>
           </div>
         ))}
       </dl>

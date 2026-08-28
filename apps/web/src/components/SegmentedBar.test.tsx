@@ -39,4 +39,21 @@ describe("SegmentedBar", () => {
     const bar = container.querySelector('[aria-hidden="true"]');
     expect(bar).toBeInTheDocument();
   });
+
+  it("clamps an out-of-range segment value to [0, 100] rather than overflowing the bar (review finding, PR #182)", () => {
+    const { container } = render(
+      <SegmentedBar headline="0%" segments={[{ label: "Bad data", value: 140, colorClass: "bg-danger" }]} />,
+    );
+    const fill = container.querySelector('[aria-hidden="true"] .bg-danger');
+    expect(fill).toHaveStyle({ width: "100%" });
+    expect(screen.getByText("100%", { selector: "dd" })).toBeInTheDocument();
+  });
+
+  it("clamps a negative segment value to 0 (review finding, PR #182)", () => {
+    const { container } = render(
+      <SegmentedBar headline="0%" segments={[{ label: "Bad data", value: -20, colorClass: "bg-danger" }]} />,
+    );
+    const fill = container.querySelector('[aria-hidden="true"] .bg-danger');
+    expect(fill).toHaveStyle({ width: "0%" });
+  });
 });

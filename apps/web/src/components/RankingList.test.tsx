@@ -39,4 +39,16 @@ describe("RankingList", () => {
     expect(screen.getAllByText("Alice Whitfield")).toHaveLength(2);
     expect(screen.getByText("HI 12.4")).toBeInTheDocument();
   });
+
+  it("clamps an out-of-range share to [0, 100] rather than overflowing the bar (review finding, PR #182)", () => {
+    const { container } = render(<RankingList items={[{ id: "c1", label: "Sunningdale (Old)", value: "42 rounds", share: 140 }]} />);
+    const fill = container.querySelector(".bg-primary");
+    expect(fill).toHaveStyle({ width: "100%" });
+  });
+
+  it("clamps a negative share to 0 (review finding, PR #182)", () => {
+    const { container } = render(<RankingList items={[{ id: "c1", label: "Sunningdale (Old)", value: "42 rounds", share: -10 }]} />);
+    const fill = container.querySelector(".bg-primary");
+    expect(fill).toHaveStyle({ width: "0%" });
+  });
 });

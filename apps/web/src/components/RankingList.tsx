@@ -2,6 +2,14 @@ import type { ReactNode } from "react";
 import { Avatar } from "./Avatar";
 import { cn } from "../lib/cn";
 
+// Review finding (PR #182, Copilot): item.share is a plain caller-
+// supplied number with no runtime guarantee it's actually 0-100 -- bad
+// data or a rounding error upstream would otherwise render a negative
+// or overflowing bar. Clamped here rather than trusting every caller.
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(0, value));
+}
+
 export interface RankingListItem {
   id: string;
   label: string;
@@ -41,7 +49,7 @@ export function RankingList({ items, className }: RankingListProps) {
             </div>
             {item.secondary && <p className="truncate text-xs text-text-muted">{item.secondary}</p>}
             <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-border">
-              <div className="h-full rounded-full bg-primary" style={{ width: `${item.share}%` }} />
+              <div className="h-full rounded-full bg-primary" style={{ width: `${clampPercent(item.share)}%` }} />
             </div>
           </div>
         </li>
