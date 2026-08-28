@@ -119,10 +119,18 @@ describe("PlayerDashboardPage", () => {
     await screen.findByRole("alert");
     // A disabled query (no playerId to fetch rounds for) never leaves
     // TanStack Query's "pending" status on its own -- rendering that as
-    // a loading skeleton would show it forever. The rounds section must
-    // render nothing here, and no request for rounds is ever made.
+    // a loading skeleton would show it forever. The rounds widget's own
+    // body must render nothing here, and no request for rounds is ever
+    // made.
     expect(screen.queryByText("No rounds yet")).not.toBeInTheDocument();
     expect(mock.history.get?.some((r) => r.url?.includes("/rounds"))).toBe(false);
+    // Review finding, PR #173: the widget's header/actions must still
+    // render even though its body is idle -- a real regression #116
+    // introduced (the whole widget, including "New round", used to
+    // disappear here; only the body should ever go blank, matching the
+    // pre-#116 behaviour where the card header always rendered).
+    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New round" })).toBeInTheDocument();
   });
 
   it("shows recent rounds with a status per row (acceptance criterion)", async () => {
@@ -136,6 +144,21 @@ describe("PlayerDashboardPage", () => {
 
     expect(await screen.findByText("Approved")).toBeInTheDocument();
     expect(screen.getByText("Pending")).toBeInTheDocument();
+  });
+
+  it("ghs#116: shows only the 3 most recent rounds, via the RecentRoundsWidget's own cap (design doc 9.1)", async () => {
+    mock.onGet("/players/me").reply(200, { ...PROFILE, handicapIndex: 12.4, lowHandicapIndex: 10.1 });
+    mock.onGet("/players/player-1/rounds").reply(200, [
+      { id: "r1", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-05T09:00:00.000Z", status: "approved" },
+      { id: "r2", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-04T09:00:00.000Z", status: "approved" },
+      { id: "r3", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-03T09:00:00.000Z", status: "approved" },
+      { id: "r4", playerId: "player-1", teeConfigurationId: "t1", playedAt: "2026-05-02T09:00:00.000Z", status: "approved" },
+    ]);
+
+    renderDashboard();
+
+    await screen.findAllByText("Approved");
+    expect(screen.getAllByText("Approved")).toHaveLength(3);
   });
 
   it("shows an empty state when there are no rounds yet", async () => {
