@@ -64,4 +64,19 @@ describe("SegmentedBar", () => {
     const fill = container.querySelector('[aria-hidden="true"] .bg-danger');
     expect(fill).toHaveStyle({ width: "0%" });
   });
+
+  it("renders correctly with duplicate segment labels, i.e. doesn't key solely on label (review finding, PR #182)", () => {
+    render(
+      <SegmentedBar
+        headline="0%"
+        segments={[
+          { label: "Missed", value: 30, colorClass: "bg-danger" },
+          { label: "Missed", value: 70, colorClass: "bg-warning" },
+        ]}
+      />,
+    );
+    expect(screen.getAllByText("Missed")).toHaveLength(2);
+    expect(screen.getByText("30%")).toBeInTheDocument();
+    expect(screen.getByText("70%")).toBeInTheDocument();
+  });
 });
