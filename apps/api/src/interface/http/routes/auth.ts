@@ -293,5 +293,21 @@ export function authRouter(service: AuthService, settings: SystemSettingsService
     }
   });
 
+  // ghs#177 (design doc sections C/J.2): the Admin Dashboard's "Active
+  // Right Now" widget (#180/#181) needs -- called by ghs#179's global
+  // heartbeat hook roughly once a minute from any open, focused,
+  // authenticated tab. Deliberately minimal: no request body, no
+  // response body beyond the status code, any authenticated role (not
+  // admin-only -- presence applies to every user, not just admins), no
+  // business logic beyond the timestamp write.
+  router.post("/auth/heartbeat", auth, async (req, res, next) => {
+    try {
+      await service.recordHeartbeat(req.identity!.sub);
+      res.status(204).send();
+    } catch (err) {
+      next(err);
+    }
+  });
+
   return router;
 }

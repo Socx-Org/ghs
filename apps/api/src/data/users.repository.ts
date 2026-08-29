@@ -37,6 +37,19 @@ export interface UsersRepository {
   // separate soft-delete gate, and an admin listing accounts needs
   // disabled/deleted visibility by default, not just active ones.
   list(filter: ListUsersFilter): Promise<ListUsersPage>;
+  // ghs#177: the heartbeat endpoint's own real work -- a bare timestamp
+  // write, no return value (the caller has nothing to do with the new
+  // value). Never surfaced on the User type/any DTO -- see
+  // countActiveNow's own doc comment for why per-user presence stays
+  // internal to this repository.
+  updateLastActiveAt(id: string): Promise<void>;
+  // ghs#177: the Admin Dashboard's "Active Right Now" widget (#180) --
+  // an aggregate count only. Deliberately no per-user presence query
+  // exists anywhere in this repository: the design review explicitly
+  // rejected showing *who* is active as a materially different (and
+  // more sensitive) feature from a bare count, so there's nothing here
+  // for a future caller to accidentally misuse into that shape.
+  countActiveNow(): Promise<number>;
 }
 
 interface UserRow {
@@ -136,6 +149,22 @@ export function createUsersRepository(pool: Pool): UsersRepository {
         listParams,
       );
       return { users: result.rows.map(toUser), total };
+    },
+
+    async updateLastActiveAt(id) {
+      await pool.query("UPDATE users SET last_active_at = now() WHERE id = $1", [id]);
+    },
+
+    async countActiveNow() {
+      // 5-minute window -- the design review's own fixed definition of
+      // "active right now" (design doc section C/J.2), not a
+      // caller-configurable parameter. A literal SQL interval, same
+      // convention as handicap-history.repository.ts's own hardcoded
+      // INTERVAL '365 days' for the Low Handicap Index window.
+      const result = await pool.query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM users WHERE last_active_at > now() - INTERVAL '5 minutes'",
+      );
+      return Number(result.rows[0]!.count);
     },
   };
 }
