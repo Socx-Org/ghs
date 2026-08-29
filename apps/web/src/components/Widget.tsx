@@ -26,14 +26,18 @@ import { cn } from "../lib/cn";
 // while the body has nothing to show.
 export type WidgetStatus = "loading" | "error" | "empty" | "idle" | "ready";
 
-// ghs#175 (design doc sections D/L.1): the only span values the two
-// dashboards' layouts use. A literal Tailwind class lookup table, not a
-// template-constructed `` `lg:col-span-${n}` `` string -- Tailwind's JIT
-// only picks up class names that appear literally in source, and a
-// dynamically-interpolated one would silently produce an unstyled grid
-// (real risk, not hypothetical -- see the acceptance criteria on ghs#175).
-// Same technique as Avatar's SIZE_CLASSES and Badge's VARIANT_CLASSES.
-type ColSpanValue = 3 | 4 | 6 | 8 | 12;
+// ghs#175 (design doc sections D/L.1), extended by ghs#178: the span
+// values the two dashboards' layouts use. A literal Tailwind class
+// lookup table, not a template-constructed `` `lg:col-span-${n}` ``
+// string -- Tailwind's JIT only picks up class names that appear
+// literally in source, and a dynamically-interpolated one would
+// silently produce an unstyled grid (real risk, not hypothetical -- see
+// the acceptance criteria on ghs#175). Same technique as Avatar's
+// SIZE_CLASSES and Badge's VARIANT_CLASSES. 2 was missing from #175's
+// own list despite the Player Dashboard's Row 3 (design doc section B)
+// needing it for GIR/Sand/Penalties (6+2+2+2=12) -- found while building
+// that row (ghs#178), not a hypothetical gap.
+type ColSpanValue = 2 | 3 | 4 | 6 | 8 | 12;
 
 export interface WidgetColSpan {
   base?: ColSpanValue;
@@ -42,6 +46,7 @@ export interface WidgetColSpan {
 }
 
 const COL_SPAN_BASE_CLASSES: Record<ColSpanValue, string> = {
+  2: "col-span-2",
   3: "col-span-3",
   4: "col-span-4",
   6: "col-span-6",
@@ -50,6 +55,7 @@ const COL_SPAN_BASE_CLASSES: Record<ColSpanValue, string> = {
 };
 
 const COL_SPAN_MD_CLASSES: Record<ColSpanValue, string> = {
+  2: "md:col-span-2",
   3: "md:col-span-3",
   4: "md:col-span-4",
   6: "md:col-span-6",
@@ -58,6 +64,7 @@ const COL_SPAN_MD_CLASSES: Record<ColSpanValue, string> = {
 };
 
 const COL_SPAN_LG_CLASSES: Record<ColSpanValue, string> = {
+  2: "lg:col-span-2",
   3: "lg:col-span-3",
   4: "lg:col-span-4",
   6: "lg:col-span-6",
