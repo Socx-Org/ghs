@@ -1074,7 +1074,9 @@ test("POST /auth/heartbeat works for a plain player role -- explicitly not admin
     // through the repository's own public shape.
     const row = await pool.query<{ last_active_at: Date | null }>("SELECT last_active_at FROM users WHERE id = $1", [player.user.id]);
     assert.ok(row.rows[0]!.last_active_at, "a real timestamp was written");
+    // Review finding, PR #185: absolute delta, not ageMs >= 0 -- see
+    // identity.integration.test.ts's own recordHeartbeat test for why.
     const ageMs = Date.now() - row.rows[0]!.last_active_at!.getTime();
-    assert.ok(ageMs >= 0 && ageMs < 5000, `expected a timestamp from just now, got one ${ageMs}ms old`);
+    assert.ok(Math.abs(ageMs) < 5000, `expected a timestamp from just now, got one ${ageMs}ms away`);
   });
 });

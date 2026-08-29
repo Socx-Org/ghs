@@ -652,8 +652,13 @@ test("recordHeartbeat (ghs#177): writes a real, current last_active_at", async (
 
   const row = await pool.query<{ last_active_at: Date | null }>("SELECT last_active_at FROM users WHERE id = $1", [created.userId]);
   assert.ok(row.rows[0]!.last_active_at, "a real timestamp was written");
+  // Review finding, PR #185: absolute delta, not ageMs >= 0 -- a real
+  // write can still legitimately produce a small negative ageMs if
+  // Postgres' clock is a few ms ahead of the Node test process's own
+  // (common across separate containers/hosts), which isn't a bug in
+  // the write itself.
   const ageMs = Date.now() - row.rows[0]!.last_active_at!.getTime();
-  assert.ok(ageMs >= 0 && ageMs < 5000, `expected a timestamp from just now, got one ${ageMs}ms old`);
+  assert.ok(Math.abs(ageMs) < 5000, `expected a timestamp from just now, got one ${ageMs}ms away`);
 });
 
 test("countActiveNow (ghs#177): the 5-minute window's real boundary behaviour, not just a happy path -- includes a heartbeat 2 minutes ago, excludes one 10 minutes ago", async () => {
