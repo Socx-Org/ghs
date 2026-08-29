@@ -98,6 +98,7 @@ function statsFixture(overrides: Partial<PlayerStats> = {}): PlayerStats {
     fairwayMissedLeftPercentage: 25,
     fairwayMissedRightPercentage: 25,
     puttsPerRound: 2.2,
+    puttsHolesCount: 10,
     onePuttHoles: 3,
     threePlusPuttHoles: 2,
     penaltiesPerRound: 1.5,
@@ -293,7 +294,46 @@ describe("PlayerDashboardPage", () => {
 
       expect(await screen.findByText("2.1 putts/round")).toBeInTheDocument();
       expect(screen.getByText("Putting")).toBeInTheDocument();
-      // 2-putt = 10 - 3 - 2 = 5 holes -> 50%.
+      // 2-putt = puttsHolesCount(10) - 3 - 2 = 5 holes -> 50%.
+      expect(screen.getByText("50%")).toBeInTheDocument();
+    });
+
+    it("FIR shows its real empty state when there are approved rounds but no fairway-relevant holes (fairwayHitPercentage null) -- review fix, PR #184", async () => {
+      mock.onGet("/dashboard/player").reply(200, dashboardResponse({
+        stats: { data: statsFixture({ fairwayHitPercentage: null, fairwayMissedLeftPercentage: null, fairwayMissedRightPercentage: null }) },
+      }));
+
+      renderDashboard();
+
+      expect(await screen.findByText("No fairway data yet")).toBeInTheDocument();
+      // Not a broken "ready" render with a "--" headline and an empty bar.
+      expect(screen.queryByText("Fairways hit")).not.toBeInTheDocument();
+    });
+
+    it("Putting shows its real empty state when there are approved rounds but no putts recorded at all (puttsHolesCount 0) -- review fix, PR #184", async () => {
+      mock.onGet("/dashboard/player").reply(200, dashboardResponse({
+        stats: { data: statsFixture({ puttsPerRound: null, puttsHolesCount: 0, onePuttHoles: 0, threePlusPuttHoles: 0 }) },
+      }));
+
+      renderDashboard();
+
+      expect(await screen.findByText("No putting data yet")).toBeInTheDocument();
+      expect(screen.queryByText("putts/round", { exact: false })).not.toBeInTheDocument();
+    });
+
+    it("Putting's segment percentages are computed against puttsHolesCount, not holesCount -- review fix, PR #184 (a round with more holes than putts recorded would otherwise misreport)", async () => {
+      mock.onGet("/dashboard/player").reply(200, dashboardResponse({
+        // 18 real holes, but only 10 have putts recorded. If the
+        // denominator were holesCount (18), 1-putt would read ~17%
+        // instead of the real 30% (3 of 10 putts-holes).
+        stats: { data: statsFixture({ holesCount: 18, puttsHolesCount: 10, onePuttHoles: 3, threePlusPuttHoles: 2, puttsPerRound: 2.0, fairwayHitPercentage: 88 }) },
+      }));
+
+      renderDashboard();
+
+      expect(await screen.findByText("2 putts/round")).toBeInTheDocument();
+      // 1-putt: 3/10 -> 30%. 2-putt (remainder): (10-3-2)/10 -> 50%.
+      expect(screen.getByText("30%")).toBeInTheDocument();
       expect(screen.getByText("50%")).toBeInTheDocument();
     });
 

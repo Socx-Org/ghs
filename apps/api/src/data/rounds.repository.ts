@@ -222,6 +222,15 @@ export interface PlayerStats {
   fairwayMissedLeftPercentage: number | null;
   fairwayMissedRightPercentage: number | null;
   puttsPerRound: number | null;
+  // ghs#178 review fix: the real denominator for turning onePuttHoles/
+  // threePlusPuttHoles into percentages -- putts is nullable per hole
+  // (same as fairway_result), so holesCount overcounts whenever any
+  // hole has strokes recorded but no putts. Mirrors
+  // fairwayRelevantHoles's own existing reasoning below, just for putts
+  // instead of fairway_result. A consumer computing "2-putt %" as the
+  // remainder must divide by this, not holesCount, or a mostly-
+  // putts-less round would misreport as "100% 2-putt."
+  puttsHolesCount: number;
   onePuttHoles: number;
   threePlusPuttHoles: number;
   penaltiesPerRound: number | null;
@@ -800,6 +809,11 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         fairway_missed_left_holes: number;
         fairway_missed_right_holes: number;
         sand_holes: number;
+        // ghs#178 review fix: the real denominator for one_putt_holes/
+        // three_plus_putt_holes -- putts is nullable per hole, same as
+        // fairway_result, so a plain holes_count denominator overcounts
+        // whenever any hole has strokes but no putts recorded.
+        putts_holes_count: number;
         one_putt_holes: number;
         three_plus_putt_holes: number;
         total_putts: number;
@@ -815,6 +829,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
            count(*) FILTER (WHERE hs.fairway_result = 'missed_left')::int AS fairway_missed_left_holes,
            count(*) FILTER (WHERE hs.fairway_result = 'missed_right')::int AS fairway_missed_right_holes,
            count(*) FILTER (WHERE hs.in_sand)::int AS sand_holes,
+           count(*) FILTER (WHERE hs.putts IS NOT NULL)::int AS putts_holes_count,
            count(*) FILTER (WHERE hs.putts = 1)::int AS one_putt_holes,
            count(*) FILTER (WHERE hs.putts >= 3)::int AS three_plus_putt_holes,
            coalesce(sum(hs.putts) FILTER (WHERE hs.putts IS NOT NULL), 0)::int AS total_putts,
@@ -829,7 +844,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       const row = result.rows[0] ?? {
         rounds_count: 0, courses_count: 0, holes_count: 0, gir_holes: 0, fairway_relevant_holes: 0,
         fairway_hit_holes: 0, fairway_missed_left_holes: 0, fairway_missed_right_holes: 0,
-        sand_holes: 0, one_putt_holes: 0, three_plus_putt_holes: 0, total_putts: 0, total_penalties: 0,
+        sand_holes: 0, putts_holes_count: 0, one_putt_holes: 0, three_plus_putt_holes: 0, total_putts: 0, total_penalties: 0,
       };
 
       // Null rather than NaN/a misleading 0 whenever there's nothing to
@@ -857,7 +872,14 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         fairwayHitPercentage: percentage(row.fairway_hit_holes, row.fairway_relevant_holes),
         fairwayMissedLeftPercentage: percentage(row.fairway_missed_left_holes, row.fairway_relevant_holes),
         fairwayMissedRightPercentage: percentage(row.fairway_missed_right_holes, row.fairway_relevant_holes),
-        puttsPerRound: averagePerRound(row.total_putts),
+        // Review fix, ghs#178 PR #184: null when no hole has putts
+        // recorded at all, not just when roundsCount is 0 -- 0 total
+        // putts across real holes is impossible in real golf, so unlike
+        // penaltiesPerRound (where 0 is a genuine, common outcome),
+        // total_putts === 0 here always means "no data," never "really
+        // zero."
+        puttsPerRound: row.putts_holes_count === 0 ? null : averagePerRound(row.total_putts),
+        puttsHolesCount: row.putts_holes_count,
         onePuttHoles: row.one_putt_holes,
         threePlusPuttHoles: row.three_plus_putt_holes,
         penaltiesPerRound: averagePerRound(row.total_penalties),

@@ -39,9 +39,12 @@ function percentLabel(value: number | null): string {
 // folds a genuine 0-putt hole, e.g. a holed approach shot, into the
 // same bucket -- rare enough, and specific enough to WHS scoring, that
 // inventing a 4th segment for it isn't worth the added complexity the
-// design doc didn't ask for).
+// design doc didn't ask for). Denominator is puttsHolesCount, not
+// holesCount (review fix, PR #184) -- putts is nullable per hole, so a
+// holesCount-based remainder would silently absorb every hole with no
+// real putts data into "2-putt."
 function twoPuttHoles(stats: PlayerStats): number {
-  return Math.max(0, stats.holesCount - stats.onePuttHoles - stats.threePlusPuttHoles);
+  return Math.max(0, stats.puttsHolesCount - stats.onePuttHoles - stats.threePlusPuttHoles);
 }
 
 type SectionStatus = "loading" | "error" | "empty" | "ready";
@@ -76,6 +79,15 @@ export default function PlayerDashboardPage() {
   // object, so there's no scenario where one is empty/ready while
   // another is loading/errored.
   const statsStatus: SectionStatus = isLoading ? "loading" : statsError ? "error" : !stats || stats.roundsCount === 0 ? "empty" : "ready";
+  // Review fix, PR #184: FIR/Putting need their OWN empty condition on
+  // top of statsStatus -- a player can have real approved rounds
+  // (statsStatus "ready") while still having no fairway-relevant holes
+  // (fairwayHitPercentage null) or no putts recorded at all
+  // (puttsHolesCount 0). Rendering "ready" in either case would show a
+  // broken-looking "--" headline and a 0/0/0 bar instead of the real,
+  // specific empty state these widgets already have.
+  const firStatus: SectionStatus = statsStatus === "ready" && stats?.fairwayHitPercentage === null ? "empty" : statsStatus;
+  const puttingStatus: SectionStatus = statsStatus === "ready" && stats?.puttsHolesCount === 0 ? "empty" : statsStatus;
 
   return (
     <DashboardGrid className="mx-auto w-full max-w-[1680px] p-4 sm:p-6">
@@ -127,7 +139,7 @@ export default function PlayerDashboardPage() {
         title="Fairways in regulation"
         icon={Target}
         colSpan={{ md: 6 }}
-        status={statsStatus}
+        status={firStatus}
         errorMessage={isNetworkError ? networkErrorMessage : undefined}
         emptyState={<EmptyState title="No fairway data yet" description="Approved rounds with a recorded fairway result will show up here." />}
       >
@@ -148,7 +160,7 @@ export default function PlayerDashboardPage() {
         title="Putting"
         icon={CircleDot}
         colSpan={{ lg: 6 }}
-        status={statsStatus}
+        status={puttingStatus}
         errorMessage={isNetworkError ? networkErrorMessage : undefined}
         emptyState={<EmptyState title="No putting data yet" description="Approved rounds with recorded putts will show up here." />}
       >
@@ -156,9 +168,9 @@ export default function PlayerDashboardPage() {
           <SegmentedBar
             headline={stats.puttsPerRound === null ? "--" : `${stats.puttsPerRound} putts/round`}
             segments={[
-              { label: "1-putt", value: (stats.onePuttHoles / stats.holesCount) * 100, colorClass: "bg-success" },
-              { label: "2-putt", value: (twoPuttHoles(stats) / stats.holesCount) * 100, colorClass: "bg-primary" },
-              { label: "3+ putt", value: (stats.threePlusPuttHoles / stats.holesCount) * 100, colorClass: "bg-warning" },
+              { label: "1-putt", value: (stats.onePuttHoles / stats.puttsHolesCount) * 100, colorClass: "bg-success" },
+              { label: "2-putt", value: (twoPuttHoles(stats) / stats.puttsHolesCount) * 100, colorClass: "bg-primary" },
+              { label: "3+ putt", value: (stats.threePlusPuttHoles / stats.puttsHolesCount) * 100, colorClass: "bg-warning" },
             ]}
           />
         )}

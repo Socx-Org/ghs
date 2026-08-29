@@ -635,10 +635,50 @@ test("getPlayerStats (ghs#101/#176): real aggregation math over approved rounds'
   assert.equal(stats.fairwayMissedLeftPercentage, 20.0, "1 of 5 relevant holes -> 20%");
   assert.equal(stats.fairwayMissedRightPercentage, 20.0, "1 of 5 relevant holes -> 20%");
   assert.equal(stats.sandInteractionPercentage, 33.3, "2 of 6 holes had a sand interaction -> 33.3%, NOT a shot count");
+  assert.equal(stats.puttsHolesCount, 6, "every hole in this fixture has putts recorded");
   assert.equal(stats.onePuttHoles, 2);
   assert.equal(stats.threePlusPuttHoles, 2, "the putts=3 hole and the putts=4 hole both count");
   assert.equal(stats.puttsPerRound, 4.3, "(1+2+3+1+4+2)=13 putts over 3 rounds -> 4.333... -> 4.3");
   assert.equal(stats.penaltiesPerRound, 1.0, "(0+1+0+0+2+0)=3 penalties over 3 rounds -> 1.0");
+});
+
+test("getPlayerStats (ghs#178 review fix, PR #184): puttsHolesCount excludes holes with strokes but no putts recorded, and puttsPerRound is null (not a misleading 0) when NO hole has putts data", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const roundsRepo = createRoundsRepository(pool);
+  const players = createPlayersRepository(pool);
+
+  // A player whose rounds were entered without ever recording putts --
+  // a real, legitimate case (putts is optional per hole), not
+  // hypothetical. holesCount must still count these holes; puttsHolesCount
+  // must not.
+  const noPuttsPlayer = await players.create({ firstName: "NoPutts", lastName: "Player" });
+  const round = await roundsRepo.create({ playerId: noPuttsPlayer.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(round.id, { holeNumber: 1, strokes: 4, gir: true, fairwayResult: "hit", inSand: false, penalties: 0 });
+  await roundsRepo.addHoleScore(round.id, { holeNumber: 2, strokes: 5, gir: false, fairwayResult: "missed_left", inSand: false, penalties: 0 });
+  await roundsRepo.setStatus(round.id, "approved");
+
+  const noPuttsStats = await roundsRepo.getPlayerStats(noPuttsPlayer.id);
+  assert.equal(noPuttsStats.holesCount, 2, "the holes themselves are real and counted");
+  assert.equal(noPuttsStats.puttsHolesCount, 0, "but none of them have putts recorded");
+  assert.equal(noPuttsStats.puttsPerRound, null, "null, not 0 -- 0 total putts across real holes is never a genuine value");
+  assert.equal(noPuttsStats.onePuttHoles, 0);
+  assert.equal(noPuttsStats.threePlusPuttHoles, 0);
+
+  // A second player with a MIX -- some holes have putts, some don't --
+  // proving puttsHolesCount is the real per-hole count, not just an
+  // all-or-nothing flag.
+  const mixedPlayer = await players.create({ firstName: "Mixed", lastName: "Player" });
+  const mixedRound = await roundsRepo.create({ playerId: mixedPlayer.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(mixedRound.id, { holeNumber: 1, strokes: 4, putts: 2, penalties: 0 });
+  await roundsRepo.addHoleScore(mixedRound.id, { holeNumber: 2, strokes: 5, penalties: 0 });
+  await roundsRepo.addHoleScore(mixedRound.id, { holeNumber: 3, strokes: 3, putts: 1, penalties: 0 });
+  await roundsRepo.setStatus(mixedRound.id, "approved");
+
+  const mixedStats = await roundsRepo.getPlayerStats(mixedPlayer.id);
+  assert.equal(mixedStats.holesCount, 3);
+  assert.equal(mixedStats.puttsHolesCount, 2, "only holes 1 and 3 have putts recorded");
+  assert.equal(mixedStats.puttsPerRound, 3.0, "(2+1)=3 putts over 1 round -> 3.0, averaged per round not per putts-hole");
+  assert.equal(mixedStats.onePuttHoles, 1);
 });
 
 test("getPlayerStats (ghs#101): a player with no approved rounds gets real zeros/nulls, not an error", async () => {
@@ -651,6 +691,7 @@ test("getPlayerStats (ghs#101): a player with no approved rounds gets real zeros
   assert.equal(stats.roundsCount, 0);
   assert.equal(stats.coursesCount, 0);
   assert.equal(stats.holesCount, 0);
+  assert.equal(stats.puttsHolesCount, 0);
   assert.equal(stats.girPercentage, null, "null, not NaN or a misleading 0, when there's nothing to divide by");
   assert.equal(stats.fairwayHitPercentage, null);
   assert.equal(stats.puttsPerRound, null);

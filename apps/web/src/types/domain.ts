@@ -116,14 +116,16 @@ export interface PlayerRoundListItem {
 }
 
 // Mirrors apps/api/src/data/rounds.repository.ts's PlayerStats exactly
-// (ghs#101, coursesCount added by ghs#176) -- the shape
-// GET /players/:playerId/stats returns, pure aggregation over a
-// player's approved rounds' hole_scores. sandInteractionPercentage is
-// deliberately "% of holes with a sand interaction," not a shot count
-// -- in_sand is a per-hole boolean, not a count (see the backend's own
-// doc comment on PlayerStats). Every percentage/average is null when
-// there's nothing to divide by (e.g. roundsCount is 0) -- never NaN or
-// a misleading 0.
+// (ghs#101, coursesCount added by ghs#176, puttsHolesCount added by a
+// ghs#178 review fix) -- the shape GET /players/:playerId/stats
+// returns, pure aggregation over a player's approved rounds'
+// hole_scores. sandInteractionPercentage is deliberately "% of holes
+// with a sand interaction," not a shot count -- in_sand is a per-hole
+// boolean, not a count (see the backend's own doc comment on
+// PlayerStats). Every percentage/average is null when there's nothing
+// to divide by (e.g. roundsCount is 0, or -- for the fairway fields --
+// no hole has a real fairway_result, or -- for puttsPerRound -- no
+// hole has putts recorded at all) -- never NaN or a misleading 0.
 export interface PlayerStats {
   roundsCount: number;
   coursesCount: number;
@@ -133,6 +135,13 @@ export interface PlayerStats {
   fairwayMissedLeftPercentage: number | null;
   fairwayMissedRightPercentage: number | null;
   puttsPerRound: number | null;
+  // ghs#178 review fix: the real denominator for turning onePuttHoles/
+  // threePlusPuttHoles into percentages -- putts is nullable per hole,
+  // so holesCount overcounts whenever any hole has strokes but no
+  // putts recorded (e.g. a mostly-putts-less round would otherwise
+  // misreport as "100% 2-putt," the remainder bucket silently
+  // absorbing every hole with no real putts data).
+  puttsHolesCount: number;
   onePuttHoles: number;
   threePlusPuttHoles: number;
   penaltiesPerRound: number | null;
