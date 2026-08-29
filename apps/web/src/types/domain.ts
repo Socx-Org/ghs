@@ -115,6 +115,45 @@ export interface PlayerRoundListItem {
   status: RoundStatus;
 }
 
+// Mirrors apps/api/src/data/rounds.repository.ts's PlayerStats exactly
+// (ghs#101, coursesCount added by ghs#176) -- the shape
+// GET /players/:playerId/stats returns, pure aggregation over a
+// player's approved rounds' hole_scores. sandInteractionPercentage is
+// deliberately "% of holes with a sand interaction," not a shot count
+// -- in_sand is a per-hole boolean, not a count (see the backend's own
+// doc comment on PlayerStats). Every percentage/average is null when
+// there's nothing to divide by (e.g. roundsCount is 0) -- never NaN or
+// a misleading 0.
+export interface PlayerStats {
+  roundsCount: number;
+  coursesCount: number;
+  holesCount: number;
+  girPercentage: number | null;
+  fairwayHitPercentage: number | null;
+  fairwayMissedLeftPercentage: number | null;
+  fairwayMissedRightPercentage: number | null;
+  puttsPerRound: number | null;
+  onePuttHoles: number;
+  threePlusPuttHoles: number;
+  penaltiesPerRound: number | null;
+  sandInteractionPercentage: number | null;
+}
+
+// Mirrors apps/api/src/application/dashboard.service.ts's
+// DashboardSection<T>/PlayerDashboard exactly (ghs#176) -- GET
+// /dashboard/player's per-section failure-isolated response shape.
+// Each section is independently real-data-or-error, so one broken
+// section (e.g. a failed stats query) never takes the other two down
+// with it -- PlayerDashboardPage derives each widget's own status from
+// its own section only, never from the other two.
+export type DashboardSection<T> = { data: T } | { error: true };
+
+export interface PlayerDashboard {
+  handicapHistory: DashboardSection<HandicapHistoryRecord[]>;
+  recentRounds: DashboardSection<PlayerRoundListItem[]>;
+  stats: DashboardSection<PlayerStats>;
+}
+
 // Mirrors apps/api/src/data/rounds.repository.ts's PendingRoundQueueItem
 // exactly (ghs#61/#67) -- exactly the fields a queue row needs to
 // render (round id, player identity, course, tee configuration, played

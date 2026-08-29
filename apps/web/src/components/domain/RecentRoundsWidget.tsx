@@ -4,6 +4,7 @@ import { Button } from "../Button";
 import { EmptyState } from "../EmptyState";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "../Table";
 import { Widget } from "../Widget";
+import type { WidgetColSpan } from "../Widget";
 import { RoundStatusBadge } from "./RoundStatusBadge";
 import { EDITABLE_ROUND_STATUSES } from "../../types/domain";
 import type { PlayerRoundListItem } from "../../types/domain";
@@ -13,6 +14,10 @@ function formatPlayedAt(iso: string): string {
 }
 
 export interface RecentRoundsWidgetProps {
+  // ghs#178: forwarded straight to the inner Widget -- placement within
+  // a DashboardGrid is this widget's caller's concern, not something
+  // RecentRoundsWidget has any opinion about itself.
+  colSpan?: WidgetColSpan;
   // Review finding, PR #173: a prerequisite the caller depends on (e.g.
   // PlayerDashboardPage's own player profile) failed to load, and that
   // failure is already surfaced elsewhere on the page -- checked before
@@ -45,7 +50,7 @@ export interface RecentRoundsWidgetProps {
 // that), but "empty" is derived here, not passed in -- whether zero
 // rounds counts as "empty" is this widget's own domain knowledge, not
 // something every caller should have to recompute.
-export function RecentRoundsWidget({ isIdle, isLoading, isError, errorMessage, rounds, onContinue, actions }: RecentRoundsWidgetProps) {
+export function RecentRoundsWidget({ colSpan, isIdle, isLoading, isError, errorMessage, rounds, onContinue, actions }: RecentRoundsWidgetProps) {
   const recent = rounds.slice(0, 3);
   const status = isIdle ? "idle" : isLoading ? "loading" : isError ? "error" : recent.length === 0 ? "empty" : "ready";
 
@@ -53,6 +58,7 @@ export function RecentRoundsWidget({ isIdle, isLoading, isError, errorMessage, r
     <Widget
       title="Recent rounds"
       icon={Flag}
+      colSpan={colSpan}
       status={status}
       errorMessage={errorMessage}
       actions={actions}

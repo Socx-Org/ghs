@@ -4,6 +4,7 @@ import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import { EmptyState } from "../EmptyState";
 import { Skeleton } from "../Skeleton";
 import { Widget } from "../Widget";
+import type { WidgetColSpan } from "../Widget";
 import type { HandicapHistoryRecord } from "../../types/domain";
 
 // ghs#101/#117: calculationDate is a real backend timestamp
@@ -26,6 +27,9 @@ function formatDate(iso: string): string {
 }
 
 export interface HandicapTrendWidgetProps {
+  // ghs#178: forwarded straight to the inner Widget -- same reasoning
+  // as RecentRoundsWidget's own colSpan.
+  colSpan?: WidgetColSpan;
   // Same reasoning as RecentRoundsWidget's own isIdle (ghs#116 review
   // fix, PR #173): a prerequisite the caller depends on (e.g.
   // PlayerDashboardPage's own player profile) failed to load, already
@@ -56,7 +60,7 @@ export interface HandicapTrendWidgetProps {
 // messaging that distinguishes "no index established yet" (matches
 // PlayerDashboardPage's own existing empty-state wording for the same
 // underlying WHS eligibility rule) from "only one change so far."
-export function HandicapTrendWidget({ isIdle, isLoading, isError, errorMessage, history }: HandicapTrendWidgetProps) {
+export function HandicapTrendWidget({ colSpan, isIdle, isLoading, isError, errorMessage, history }: HandicapTrendWidgetProps) {
   const sorted = [...history].sort((a, b) => a.calculationDate.localeCompare(b.calculationDate));
   const status = isIdle ? "idle" : isLoading ? "loading" : isError ? "error" : sorted.length < 2 ? "empty" : "ready";
   const latest = sorted.at(-1);
@@ -72,6 +76,7 @@ export function HandicapTrendWidget({ isIdle, isLoading, isError, errorMessage, 
     <Widget
       title="Handicap trend"
       icon={TrendingUp}
+      colSpan={colSpan}
       status={status}
       errorMessage={errorMessage}
       secondaryMetric={latest ? `Current ${latest.handicapIndex.toFixed(1)}` : undefined}

@@ -99,6 +99,15 @@ describe("Widget", () => {
     expect(container.firstChild).toHaveClass("col-span-12", "md:col-span-6", "lg:col-span-8");
   });
 
+  it("colSpan supports a span of 2, needed by the Player Dashboard's Row 3 (GIR/Sand/Penalties, ghs#178 -- missing from ghs#175's original span set)", () => {
+    const { container } = render(
+      <Widget title="GIR" status="ready" colSpan={{ md: 4, lg: 2 }}>
+        Content
+      </Widget>,
+    );
+    expect(container.firstChild).toHaveClass("md:col-span-4", "lg:col-span-2");
+  });
+
   it("colSpan is a no-op when omitted", () => {
     const { container } = render(
       <Widget title="Recent rounds" status="ready">

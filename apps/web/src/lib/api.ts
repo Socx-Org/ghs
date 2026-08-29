@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { AccountProfile, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, DailyPcc, FairwayResult, HandicapHistoryRecord, HoleScore, PccCorrectionOutcome, PendingRoundQueueItem, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
+import type { AccountProfile, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, DailyPcc, FairwayResult, HandicapHistoryRecord, HoleScore, PccCorrectionOutcome, PendingRoundQueueItem, PlayerDashboard, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -332,6 +332,16 @@ export async function getPlayerRounds(playerId: string): Promise<PlayerRoundList
 // of this comment wrongly said the CALLER does this).
 export async function getPlayerHandicapHistory(playerId: string): Promise<HandicapHistoryRecord[]> {
   const { data } = await api.get<HandicapHistoryRecord[]>(`/players/${playerId}/handicap-history`);
+  return data;
+}
+
+// ghs#178: PlayerDashboardPage's one aggregate call, replacing the 3
+// independent queries above (getMyPlayerProfile + getPlayerHandicapHistory
+// + getPlayerRounds) it used before this issue. Always the caller's own
+// dashboard -- no playerId param, matching the backend route's own
+// resolution (GET /dashboard/player, not /players/:playerId/dashboard).
+export async function getPlayerDashboard(): Promise<PlayerDashboard> {
+  const { data } = await api.get<PlayerDashboard>("/dashboard/player");
   return data;
 }
 
