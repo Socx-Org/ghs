@@ -751,6 +751,16 @@ test("getRegistrationTrend (ghs#180): exactly `days` rows, oldest first, zero-fi
   assert.equal(trend.length, 7, "exactly 7 rows for a 7-day window, regardless of how many days had real registrations");
   // Oldest-first: the 6-days-ago slot is first, today is last.
   assert.equal(trend[0]!.date < trend[6]!.date, true, "oldest first");
+  // Review finding, PR #186: the last row's date string must be
+  // Postgres' own real CURRENT_DATE, not shifted by a day -- the exact
+  // bug the ::text cast fixes (node-postgres parses a bare DATE using
+  // the *local* timezone, so reading it back as a JS Date and calling
+  // .toISOString() can report the *previous* UTC calendar day). This
+  // assertion is what would have caught that regression; the ones below
+  // only check relative bucketing, which stays internally consistent
+  // even when every date is shifted by the same amount.
+  const realToday = await pool.query<{ today: string }>("SELECT CURRENT_DATE::text AS today");
+  assert.equal(trend[6]!.date, realToday.rows[0]!.today, "the last row is really today, not a day off");
   const byDate = new Map(trend.map((point) => [point.date, point.count]));
   const todayDate = trend[6]!.date;
   const twoDaysAgoDate = trend[4]!.date;

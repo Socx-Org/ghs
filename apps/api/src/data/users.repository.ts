@@ -215,8 +215,26 @@ export function createUsersRepository(pool: Pool): UsersRepository {
       // which a bar chart (design doc section C: recharts' BarChart, the
       // first real use of it in this app) would misread as a gap in the
       // data rather than a genuine zero.
-      const result = await pool.query<{ date: Date; count: number }>(
-        `SELECT gs.day::date AS date, coalesce(u.count, 0)::int AS count
+      //
+      // Review finding, PR #186: gs.day::date::text, not gs.day::date --
+      // node-postgres does parse a plain DATE column into a real JS
+      // Date (confirmed directly; the reviewer's own claim that it
+      // returns a string, and that .toISOString() therefore throws, is
+      // not what actually happens), but it does so using the *local*
+      // timezone, not UTC. now()::date in a UTC+2 session, for example,
+      // comes back as a Date whose own .toISOString() reads
+      // "...T22:00:00.000Z" -- the *previous* UTC calendar day -- so
+      // .slice(0, 10) reported a real registration under yesterday's
+      // date, one full day off from the truth. Confirmed directly
+      // against this repo's own real Postgres before writing this fix,
+      // not assumed from the review comment. Casting to ::text in SQL
+      // sidesteps the whole JS-Date/timezone question -- this
+      // codebase's own established fix for exactly this class of bug,
+      // same technique as pcc.repository.ts's `played_on::text AS
+      // played_on` (that file's own comment: "keeps played_on a plain,
+      // unambiguous 'YYYY-MM-DD' string end to end").
+      const result = await pool.query<{ date: string; count: number }>(
+        `SELECT gs.day::date::text AS date, coalesce(u.count, 0)::int AS count
          FROM generate_series(
            date_trunc('day', now()) - ($1::int - 1 || ' days')::interval,
            date_trunc('day', now()),
@@ -231,7 +249,7 @@ export function createUsersRepository(pool: Pool): UsersRepository {
          ORDER BY gs.day ASC`,
         [days],
       );
-      return result.rows.map((row) => ({ date: row.date.toISOString().slice(0, 10), count: row.count }));
+      return result.rows.map((row) => ({ date: row.date, count: row.count }));
     },
   };
 }
