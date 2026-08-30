@@ -650,15 +650,19 @@ test("recordHeartbeat (ghs#177): writes a real, current last_active_at", async (
 
   await s.authService.recordHeartbeat(created.userId);
 
-  const row = await pool.query<{ last_active_at: Date | null }>("SELECT last_active_at FROM users WHERE id = $1", [created.userId]);
+  // Review finding, PR #185 (second round): comparing a Postgres-written
+  // timestamp against Date.now() is a cross-clock comparison -- even
+  // Math.abs() doesn't fully fix that, since Node and Postgres can run
+  // on different hosts/containers with clock skew well past a few ms.
+  // The age itself is computed in SQL instead, entirely on Postgres'
+  // own clock, so the assertion never depends on the test process's.
+  const row = await pool.query<{ last_active_at: Date | null; age_ms: string | null }>(
+    "SELECT last_active_at, extract(epoch FROM (now() - last_active_at)) * 1000 AS age_ms FROM users WHERE id = $1",
+    [created.userId],
+  );
   assert.ok(row.rows[0]!.last_active_at, "a real timestamp was written");
-  // Review finding, PR #185: absolute delta, not ageMs >= 0 -- a real
-  // write can still legitimately produce a small negative ageMs if
-  // Postgres' clock is a few ms ahead of the Node test process's own
-  // (common across separate containers/hosts), which isn't a bug in
-  // the write itself.
-  const ageMs = Date.now() - row.rows[0]!.last_active_at!.getTime();
-  assert.ok(Math.abs(ageMs) < 5000, `expected a timestamp from just now, got one ${ageMs}ms away`);
+  const ageMs = Number(row.rows[0]!.age_ms);
+  assert.ok(Math.abs(ageMs) < 5000, `expected a timestamp from just now (Postgres' own clock), got one ${ageMs}ms away`);
 });
 
 test("countActiveNow (ghs#177): the 5-minute window's real boundary behaviour, not just a happy path -- includes a heartbeat 2 minutes ago, excludes one 10 minutes ago", async () => {

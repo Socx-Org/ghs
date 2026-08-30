@@ -1071,12 +1071,17 @@ test("POST /auth/heartbeat works for a plain player role -- explicitly not admin
     // last_active_at isn't part of the User DTO (deliberately never
     // exposed per-user, design doc's own "no UI indication of who is
     // active" non-scope) -- verified via a real column read, not
-    // through the repository's own public shape.
-    const row = await pool.query<{ last_active_at: Date | null }>("SELECT last_active_at FROM users WHERE id = $1", [player.user.id]);
+    // through the repository's own public shape. Age computed in SQL,
+    // entirely on Postgres' own clock -- see identity.integration.
+    // test.ts's own recordHeartbeat test for why that matters (review
+    // finding, PR #185, second round: comparing against Date.now() is a
+    // cross-clock comparison even with Math.abs()).
+    const row = await pool.query<{ last_active_at: Date | null; age_ms: string | null }>(
+      "SELECT last_active_at, extract(epoch FROM (now() - last_active_at)) * 1000 AS age_ms FROM users WHERE id = $1",
+      [player.user.id],
+    );
     assert.ok(row.rows[0]!.last_active_at, "a real timestamp was written");
-    // Review finding, PR #185: absolute delta, not ageMs >= 0 -- see
-    // identity.integration.test.ts's own recordHeartbeat test for why.
-    const ageMs = Date.now() - row.rows[0]!.last_active_at!.getTime();
-    assert.ok(Math.abs(ageMs) < 5000, `expected a timestamp from just now, got one ${ageMs}ms away`);
+    const ageMs = Number(row.rows[0]!.age_ms);
+    assert.ok(Math.abs(ageMs) < 5000, `expected a timestamp from just now (Postgres' own clock), got one ${ageMs}ms away`);
   });
 });

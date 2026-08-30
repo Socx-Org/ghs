@@ -13,4 +13,10 @@
 -- authenticated request path in the app.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMPTZ;
 
-CREATE INDEX IF NOT EXISTS idx_users_last_active_at ON users(last_active_at);
+-- Partial (review finding, PR #185): every user starts (and many stay)
+-- NULL until their first heartbeat, and countActiveNow's own query
+-- (`last_active_at > now() - INTERVAL '5 minutes'`) can only ever match
+-- a non-NULL row -- indexing the NULLs too would waste space for zero
+-- query coverage. Same convention as the admin-rounds partial indexes
+-- (015_admin_rounds_index.sql's own WHERE deleted_at IS NULL).
+CREATE INDEX IF NOT EXISTS idx_users_last_active_at ON users(last_active_at) WHERE last_active_at IS NOT NULL;
