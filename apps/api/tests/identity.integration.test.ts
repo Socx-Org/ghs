@@ -692,3 +692,75 @@ test("countActiveNow (ghs#177): the 5-minute window's real boundary behaviour, n
   const count = await s.users.countActiveNow();
   assert.equal(count, 1, "only the 2-minutes-ago heartbeat counts as active right now");
 });
+
+test("getRoleBreakdown (ghs#180): real counts per role, matching GET /admin/users' own no-status-filter default", async () => {
+  const s = buildServices();
+  await s.adminUsersService.adminCreateUser({
+    email: "role-breakdown-p1@example.com", password: "role-breakdown-pw-1", role: "player",
+    firstName: "P1", lastName: "Role", autoActivate: true,
+  });
+  await s.adminUsersService.adminCreateUser({
+    email: "role-breakdown-p2@example.com", password: "role-breakdown-pw-1", role: "player",
+    firstName: "P2", lastName: "Role", autoActivate: true,
+  });
+  await s.adminUsersService.adminCreateUser({
+    email: "role-breakdown-admin@example.com", password: "role-breakdown-pw-1", role: "admin",
+    firstName: "Admin", lastName: "Role", autoActivate: true,
+  });
+  const superAdmin = await s.adminUsersService.adminCreateUser({
+    email: "role-breakdown-super@example.com", password: "role-breakdown-pw-1", role: "super_admin",
+    firstName: "Super", lastName: "Role", autoActivate: true,
+  });
+  // Deleted status still counts -- same default GET /admin/users itself
+  // already uses (ghs#98's own "no default status filter" reasoning).
+  await s.adminUsersService.deleteUser(superAdmin.userId);
+
+  const breakdown = await s.users.getRoleBreakdown();
+  assert.deepEqual(breakdown, { total: 4, player: 2, admin: 1, superAdmin: 1 });
+});
+
+test("getRegistrationTrend (ghs#180): exactly `days` rows, oldest first, zero-filled for days with no registrations -- not silently skipped", async () => {
+  const s = buildServices();
+  // Today's own registration needs no created_at manipulation -- it
+  // already lands in today's bucket for free.
+  await s.adminUsersService.adminCreateUser({
+    email: "trend-today@example.com", password: "trend-pw-1", role: "player",
+    firstName: "Today", lastName: "Trend", autoActivate: true,
+  });
+  const twoDaysAgoA = await s.adminUsersService.adminCreateUser({
+    email: "trend-2days-a@example.com", password: "trend-pw-1", role: "player",
+    firstName: "TwoA", lastName: "Trend", autoActivate: true,
+  });
+  const twoDaysAgoB = await s.adminUsersService.adminCreateUser({
+    email: "trend-2days-b@example.com", password: "trend-pw-1", role: "player",
+    firstName: "TwoB", lastName: "Trend", autoActivate: true,
+  });
+  // Outside the 7-day window entirely -- must not appear at all, and
+  // must not be folded into the window's own oldest day.
+  const outsideWindow = await s.adminUsersService.adminCreateUser({
+    email: "trend-outside@example.com", password: "trend-pw-1", role: "player",
+    firstName: "Outside", lastName: "Trend", autoActivate: true,
+  });
+
+  await pool.query("UPDATE users SET created_at = date_trunc('day', now()) - INTERVAL '2 days' WHERE id = $1", [twoDaysAgoA.userId]);
+  await pool.query("UPDATE users SET created_at = date_trunc('day', now()) - INTERVAL '2 days' WHERE id = $1", [twoDaysAgoB.userId]);
+  await pool.query("UPDATE users SET created_at = date_trunc('day', now()) - INTERVAL '30 days' WHERE id = $1", [outsideWindow.userId]);
+
+  const trend = await s.users.getRegistrationTrend(7);
+
+  assert.equal(trend.length, 7, "exactly 7 rows for a 7-day window, regardless of how many days had real registrations");
+  // Oldest-first: the 6-days-ago slot is first, today is last.
+  assert.equal(trend[0]!.date < trend[6]!.date, true, "oldest first");
+  const byDate = new Map(trend.map((point) => [point.date, point.count]));
+  const todayDate = trend[6]!.date;
+  const twoDaysAgoDate = trend[4]!.date;
+  assert.equal(byDate.get(todayDate), 1, "today's real registration");
+  assert.equal(byDate.get(twoDaysAgoDate), 2, "both 2-days-ago registrations bucketed together");
+  // Every other day in the window is a genuine, real zero -- present as
+  // a row, not omitted (the entire point of the zero-fill).
+  const otherDays = trend.filter((point) => point.date !== todayDate && point.date !== twoDaysAgoDate);
+  assert.equal(otherDays.length, 5);
+  for (const day of otherDays) {
+    assert.equal(day.count, 0);
+  }
+});

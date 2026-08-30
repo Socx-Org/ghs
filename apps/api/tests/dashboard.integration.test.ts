@@ -90,7 +90,7 @@ function buildApp() {
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -183,5 +183,143 @@ test("GET /dashboard/player: real aggregated response, matching what the underly
     assert.deepEqual(dashboard.handicapHistory, { data: await historyResponse.json() });
     assert.deepEqual(dashboard.recentRounds, { data: await roundsResponse.json() });
     assert.deepEqual(dashboard.stats, { data: await statsResponse.json() });
+  });
+});
+
+test("GET /dashboard/admin requires authentication", async () => {
+  const { app } = buildApp();
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/v1/dashboard/admin`);
+    assert.equal(response.status, 401);
+  });
+});
+
+test("GET /dashboard/admin is admin/super_admin-gated -- a plain player is rejected", async () => {
+  const { app, adminUsersService, authService } = buildApp();
+  await withServer(app, async (baseUrl) => {
+    await adminUsersService.adminCreateUser({
+      email: "admin-dashboard-player@example.com", password: "player-pw-1", role: "player",
+      firstName: "Admin", lastName: "DashboardPlayer", autoActivate: true,
+    });
+    const login = await authService.login("admin-dashboard-player@example.com", "player-pw-1");
+    if (login.status !== "authenticated") throw new Error("unreachable");
+
+    const response = await fetch(`${baseUrl}/api/v1/dashboard/admin`, {
+      headers: { Authorization: `Bearer ${login.tokens.accessToken}` },
+    });
+    assert.equal(response.status, 403);
+  });
+});
+
+test("GET /dashboard/admin rejects an invalid period, and accepts every real one (7d/30d/90d)", async () => {
+  const { app, adminUsersService, authService } = buildApp();
+  await withServer(app, async (baseUrl) => {
+    await adminUsersService.adminCreateUser({
+      email: "admin-dashboard-period@example.com", password: "admin-pw-1", role: "admin",
+      firstName: "Admin", lastName: "Period", autoActivate: true,
+    });
+    const login = await authService.login("admin-dashboard-period@example.com", "admin-pw-1");
+    if (login.status !== "authenticated") throw new Error("unreachable");
+    const headers = { Authorization: `Bearer ${login.tokens.accessToken}` };
+
+    const invalid = await fetch(`${baseUrl}/api/v1/dashboard/admin?period=14d`, { headers });
+    assert.equal(invalid.status, 400);
+
+    for (const period of ["7d", "30d", "90d"]) {
+      const response = await fetch(`${baseUrl}/api/v1/dashboard/admin?period=${period}`, { headers });
+      assert.equal(response.status, 200, `period=${period} should be accepted`);
+      const body = await response.json() as { userTrends: { data: unknown[] } };
+      assert.equal(body.userTrends.data.length, Number(period.replace("d", "")), `period=${period} returns exactly that many days`);
+    }
+
+    // No ?period at all -- defaults to 30d.
+    const defaulted = await fetch(`${baseUrl}/api/v1/dashboard/admin`, { headers });
+    const defaultedBody = await defaulted.json() as { userTrends: { data: unknown[] } };
+    assert.equal(defaultedBody.userTrends.data.length, 30);
+  });
+});
+
+test("GET /dashboard/admin: real aggregated response, every section matching a manual calculation against the same seeded Postgres data", async () => {
+  const { app, players, coursesRepo, roundsRepo, adminUsersService, authService } = buildApp();
+  await withServer(app, async (baseUrl) => {
+    // Two courses, two players, a mix of approved and pending rounds --
+    // exactly the scenario getTopCourses/getMostActivePlayers' own
+    // integration tests already prove the underlying query for; this
+    // test's job is proving the HTTP layer wires it all together
+    // correctly, not re-deriving the aggregation math from scratch.
+    const courseA = await coursesRepo.create({
+      name: "Admin Dashboard Course A", country: "ES",
+      teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113, holes: [] }],
+    });
+    const courseB = await coursesRepo.create({
+      name: "Admin Dashboard Course B", country: "ES",
+      teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113, holes: [] }],
+    });
+
+    const playerXUser = await adminUsersService.adminCreateUser({
+      email: "admin-dashboard-x@example.com", password: "player-pw-1", role: "player",
+      firstName: "PlayerX", lastName: "Admin", autoActivate: true,
+    });
+    const playerYUser = await adminUsersService.adminCreateUser({
+      email: "admin-dashboard-y@example.com", password: "player-pw-1", role: "player",
+      firstName: "PlayerY", lastName: "Admin", autoActivate: true,
+    });
+    const admin = await adminUsersService.adminCreateUser({
+      email: "admin-dashboard-admin@example.com", password: "admin-pw-1", role: "admin",
+      firstName: "Admin", lastName: "Dashboard", autoActivate: true,
+    });
+    const playerX = await players.findByUserId(playerXUser.userId);
+    const playerY = await players.findByUserId(playerYUser.userId);
+
+    // 2 approved rounds on course A for player X, 1 approved on course B
+    // for player Y, 1 still-pending round on course A -- must not count
+    // toward totalRounds' own approved-implicit ranking queries, but
+    // DOES count toward the plain total/pending numbers.
+    for (let i = 0; i < 2; i++) {
+      const round = await roundsRepo.create({ playerId: playerX!.id, teeConfigurationId: courseA.teeConfigurations[0]!.id, playedAt: `2026-05-0${i + 1}T09:00:00.000Z` });
+      await roundsRepo.setStatus(round.id, "approved");
+    }
+    const roundB = await roundsRepo.create({ playerId: playerY!.id, teeConfigurationId: courseB.teeConfigurations[0]!.id, playedAt: "2026-05-10T09:00:00.000Z" });
+    await roundsRepo.setStatus(roundB.id, "approved");
+    const pendingRound = await roundsRepo.create({ playerId: playerX!.id, teeConfigurationId: courseA.teeConfigurations[0]!.id, playedAt: "2026-05-11T09:00:00.000Z" });
+    // A fresh round defaults to 'draft', not 'pending' (ghs#58's
+    // draft/in-progress lifecycle) -- set directly rather than going
+    // through the real submit workflow, which would also require a
+    // complete set of hole scores (ghs#92) this test has no other use
+    // for.
+    await roundsRepo.setStatus(pendingRound.id, "pending");
+
+    // Presence: playerX heartbeated 2 minutes ago (active), admin never
+    // did (last_active_at stays NULL).
+    await pool.query("UPDATE users SET last_active_at = now() - INTERVAL '2 minutes' WHERE id = $1", [playerX!.userId]);
+
+    const login = await authService.login("admin-dashboard-admin@example.com", "admin-pw-1");
+    if (login.status !== "authenticated") throw new Error("unreachable");
+    const response = await fetch(`${baseUrl}/api/v1/dashboard/admin`, {
+      headers: { Authorization: `Bearer ${login.tokens.accessToken}` },
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json() as {
+      totalUsers: { data: { total: number; player: number; admin: number; superAdmin: number } };
+      totalCourses: { data: number };
+      totalRounds: { data: { total: number; pending: number } };
+      topCourses: { data: Array<{ courseId: string; courseName: string; roundsCount: number }> };
+      mostActivePlayers: { data: Array<{ playerId: string; roundsCount: number; handicapIndex: number | null }> };
+      activeRightNow: { data: number };
+      userTrends: { data: unknown[] };
+    };
+
+    assert.deepEqual(body.totalUsers.data, { total: 3, player: 2, admin: 1, superAdmin: 0 });
+    assert.equal(body.totalCourses.data, 2);
+    assert.deepEqual(body.totalRounds.data, { total: 4, pending: 1 }, "4 rounds total (3 approved + 1 pending), 1 pending");
+    assert.deepEqual(body.topCourses.data, [
+      { courseId: courseA.id, courseName: "Admin Dashboard Course A", roundsCount: 2 },
+      { courseId: courseB.id, courseName: "Admin Dashboard Course B", roundsCount: 1 },
+    ]);
+    assert.equal(body.mostActivePlayers.data.length, 2);
+    assert.equal(body.mostActivePlayers.data[0]!.playerId, playerX!.id);
+    assert.equal(body.mostActivePlayers.data[0]!.roundsCount, 2);
+    assert.equal(body.activeRightNow.data, 1, "only playerX heartbeated within the last 5 minutes");
+    assert.equal(body.userTrends.data.length, 30, "default period");
   });
 });

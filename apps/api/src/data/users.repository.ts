@@ -25,6 +25,28 @@ export interface ListUsersPage {
   total: number;
 }
 
+// ghs#180: the Admin Dashboard's Total Users widget -- total plus a
+// role breakdown, matching design doc section C's "not a donut" call
+// (a KPI headline + compact inline breakdown instead). No status
+// filter, same default GET /admin/users itself already uses (ghs#98) --
+// "how many accounts does the system have" counts every status, not
+// just active ones.
+export interface UserRoleBreakdown {
+  total: number;
+  player: number;
+  admin: number;
+  superAdmin: number;
+}
+
+// ghs#180: the Admin Dashboard's User Trends widget -- one row per day
+// in the requested window, oldest first, zero-filled for any day with
+// no registrations (a bar chart with silently-skipped zero days would
+// misread as missing data, not "genuinely zero that day").
+export interface RegistrationTrendPoint {
+  date: string;
+  count: number;
+}
+
 export interface UsersRepository {
   create(input: { email: string; passwordHash: string; role: UserRole; status: UserStatus }): Promise<User>;
   findByEmail(email: string): Promise<User | null>;
@@ -50,6 +72,13 @@ export interface UsersRepository {
   // more sensitive) feature from a bare count, so there's nothing here
   // for a future caller to accidentally misuse into that shape.
   countActiveNow(): Promise<number>;
+  // ghs#180: the Admin Dashboard's Total Users widget.
+  getRoleBreakdown(): Promise<UserRoleBreakdown>;
+  // ghs#180: the Admin Dashboard's User Trends widget -- days is the
+  // real window size (7/30/90, validated at the HTTP boundary in
+  // dashboard.ts, not re-validated here), always returning exactly that
+  // many rows, oldest first, ending today.
+  getRegistrationTrend(days: number): Promise<RegistrationTrendPoint[]>;
 }
 
 interface UserRow {
@@ -165,6 +194,44 @@ export function createUsersRepository(pool: Pool): UsersRepository {
         "SELECT count(*)::text AS count FROM users WHERE last_active_at > now() - INTERVAL '5 minutes'",
       );
       return Number(result.rows[0]!.count);
+    },
+
+    async getRoleBreakdown() {
+      const result = await pool.query<{ total: number; player: number; admin: number; super_admin: number }>(
+        `SELECT
+           count(*)::int AS total,
+           count(*) FILTER (WHERE role = 'player')::int AS player,
+           count(*) FILTER (WHERE role = 'admin')::int AS admin,
+           count(*) FILTER (WHERE role = 'super_admin')::int AS super_admin
+         FROM users`,
+      );
+      const row = result.rows[0]!;
+      return { total: row.total, player: row.player, admin: row.admin, superAdmin: row.super_admin };
+    },
+
+    async getRegistrationTrend(days) {
+      // generate_series + LEFT JOIN, not a bare GROUP BY -- a plain
+      // aggregation would silently omit any day with zero registrations,
+      // which a bar chart (design doc section C: recharts' BarChart, the
+      // first real use of it in this app) would misread as a gap in the
+      // data rather than a genuine zero.
+      const result = await pool.query<{ date: Date; count: number }>(
+        `SELECT gs.day::date AS date, coalesce(u.count, 0)::int AS count
+         FROM generate_series(
+           date_trunc('day', now()) - ($1::int - 1 || ' days')::interval,
+           date_trunc('day', now()),
+           interval '1 day'
+         ) AS gs(day)
+         LEFT JOIN (
+           SELECT date_trunc('day', created_at) AS day, count(*) AS count
+           FROM users
+           WHERE created_at >= date_trunc('day', now()) - ($1::int - 1 || ' days')::interval
+           GROUP BY date_trunc('day', created_at)
+         ) u ON u.day = gs.day
+         ORDER BY gs.day ASC`,
+        [days],
+      );
+      return result.rows.map((row) => ({ date: row.date.toISOString().slice(0, 10), count: row.count }));
     },
   };
 }

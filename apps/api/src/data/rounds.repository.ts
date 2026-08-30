@@ -237,6 +237,33 @@ export interface PlayerStats {
   sandInteractionPercentage: number | null;
 }
 
+// ghs#180 (design doc sections C/E): the Admin Dashboard's Top Courses
+// widget -- rounds grouped by course, the first real GROUP BY query in
+// this codebase (getPlayerStats's own FILTER-based aggregation is the
+// closest precedent, but groups nothing). share/percentage-of-total is
+// NOT computed here -- RankingList's own contract (ghs#175) derives
+// each row's proportional bar relative to the *list's own top value*,
+// which the frontend already has once it has this array; a backend
+// "share" field would just be a second, redundant way to express the
+// same ratio.
+export interface CourseRoundRanking {
+  courseId: string;
+  courseName: string;
+  roundsCount: number;
+}
+
+// ghs#180: the Admin Dashboard's Most Active Players widget -- same
+// rounds-grouped-by-X shape as CourseRoundRanking, grouped by player
+// instead, with each player's current (cached) handicap index alongside
+// the count per the design doc's own recommended secondary line.
+export interface PlayerRoundRanking {
+  playerId: string;
+  playerFirstName: string;
+  playerLastName: string;
+  roundsCount: number;
+  handicapIndex: number | null;
+}
+
 // The minimal shape a workflow transition (approve/reject/delete/reopen)
 // actually needs to decide what to do and what to recalculate --
 // deliberately narrower than Round (no hole_scores fetch, which a
@@ -305,6 +332,13 @@ export interface RoundsRepository {
   // no WHS-engine business logic (see PlayerStats's own doc comment for
   // the sand-metric naming decision this issue explicitly requires).
   getPlayerStats(playerId: string): Promise<PlayerStats>;
+  // ghs#180: the Admin Dashboard's Top Courses / Most Active Players
+  // widgets -- approved rounds grouped by course/player, ranked, capped
+  // to `limit`. Deterministic ordering (a count-only ORDER BY has real
+  // ties, e.g. every course with 0 rounds) via a real tie-breaker, same
+  // reasoning as listPendingQueue's own r.id tie-breaker.
+  getTopCourses(limit: number): Promise<CourseRoundRanking[]>;
+  getMostActivePlayers(limit: number): Promise<PlayerRoundRanking[]>;
   // SELECT ... FOR UPDATE -- requires a real transaction client (same
   // reasoning as HandicapHistoryRepository.getCurrentIndexForUpdate,
   // ghs#24: a lock taken outside an explicit transaction is meaningless).
@@ -885,6 +919,48 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         penaltiesPerRound: averagePerRound(row.total_penalties),
         sandInteractionPercentage: percentage(row.sand_holes, row.holes_count),
       };
+    },
+
+    async getTopCourses(limit) {
+      const result = await pool.query<{ course_id: string; course_name: string; rounds_count: number }>(
+        `SELECT c.id AS course_id, c.name AS course_name, count(*)::int AS rounds_count
+         FROM rounds r
+         JOIN tee_configurations tc ON tc.id = r.tee_configuration_id
+         JOIN courses c ON c.id = tc.course_id
+         WHERE r.status = 'approved' AND r.deleted_at IS NULL AND c.deleted_at IS NULL
+         GROUP BY c.id, c.name
+         ORDER BY rounds_count DESC, c.name ASC, c.id ASC
+         LIMIT $1`,
+        [limit],
+      );
+      return result.rows.map((row) => ({ courseId: row.course_id, courseName: row.course_name, roundsCount: row.rounds_count }));
+    },
+
+    async getMostActivePlayers(limit) {
+      const result = await pool.query<{
+        player_id: string;
+        player_first_name: string;
+        player_last_name: string;
+        handicap_index: string | null;
+        rounds_count: number;
+      }>(
+        `SELECT p.id AS player_id, p.first_name AS player_first_name, p.last_name AS player_last_name,
+                p.handicap_index, count(*)::int AS rounds_count
+         FROM rounds r
+         JOIN players p ON p.id = r.player_id
+         WHERE r.status = 'approved' AND r.deleted_at IS NULL AND p.deleted_at IS NULL
+         GROUP BY p.id, p.first_name, p.last_name, p.handicap_index
+         ORDER BY rounds_count DESC, p.last_name ASC, p.first_name ASC, p.id ASC
+         LIMIT $1`,
+        [limit],
+      );
+      return result.rows.map((row) => ({
+        playerId: row.player_id,
+        playerFirstName: row.player_first_name,
+        playerLastName: row.player_last_name,
+        roundsCount: row.rounds_count,
+        handicapIndex: row.handicap_index === null ? null : Number(row.handicap_index),
+      }));
     },
 
     async getForUpdate(id, client) {

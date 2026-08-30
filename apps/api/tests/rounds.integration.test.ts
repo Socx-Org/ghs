@@ -230,7 +230,7 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -377,7 +377,7 @@ test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole u
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -496,7 +496,7 @@ test("HTTP: submitting a round computes its real score immediately, before any a
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -699,4 +699,118 @@ test("getPlayerStats (ghs#101): a player with no approved rounds gets real zeros
   assert.equal(stats.sandInteractionPercentage, null);
   assert.equal(stats.onePuttHoles, 0);
   assert.equal(stats.threePlusPuttHoles, 0);
+});
+
+test("getTopCourses (ghs#180): real GROUP BY ranking over approved rounds, ordered by count, excluding pending rounds and soft-deleted courses", async () => {
+  const courses = createCoursesRepository(pool);
+  const roundsRepo = createRoundsRepository(pool);
+  const players = createPlayersRepository(pool);
+
+  const courseA = await courses.create({
+    name: "Top Courses A", country: "ES",
+    teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113, holes: [] }],
+  });
+  const courseB = await courses.create({
+    name: "Top Courses B", country: "ES",
+    teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113, holes: [] }],
+  });
+  const courseC = await courses.create({
+    name: "Top Courses C (soft-deleted)", country: "ES",
+    teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113, holes: [] }],
+  });
+  const teeA = courseA.teeConfigurations[0]!.id;
+  const teeB = courseB.teeConfigurations[0]!.id;
+  const teeC = courseC.teeConfigurations[0]!.id;
+
+  const player = await players.create({ firstName: "Ranking", lastName: "Player" });
+
+  // Course A: 3 approved rounds.
+  for (let i = 0; i < 3; i++) {
+    const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId: teeA, playedAt: `2026-05-0${i + 1}T09:00:00.000Z` });
+    await roundsRepo.setStatus(round.id, "approved");
+  }
+  // Course B: 1 approved round.
+  const roundB = await roundsRepo.create({ playerId: player.id, teeConfigurationId: teeB, playedAt: "2026-05-10T09:00:00.000Z" });
+  await roundsRepo.setStatus(roundB.id, "approved");
+  // Course A: 1 more round, still pending -- must not count.
+  await roundsRepo.create({ playerId: player.id, teeConfigurationId: teeA, playedAt: "2026-05-11T09:00:00.000Z" });
+
+  // Course C: a real approved round, but the COURSE itself is
+  // soft-deleted afterward -- courses.delete() itself refuses this
+  // (CourseHasRoundsError, by design), so the ledger's own soft-delete
+  // state is set directly, same "manipulate real state in Postgres, not
+  // assumed" convention this file's own pending-round test above uses.
+  const roundC = await roundsRepo.create({ playerId: player.id, teeConfigurationId: teeC, playedAt: "2026-05-12T09:00:00.000Z" });
+  await roundsRepo.setStatus(roundC.id, "approved");
+  await pool.query("UPDATE courses SET deleted_at = now() WHERE id = $1", [courseC.id]);
+
+  const top = await roundsRepo.getTopCourses(5);
+
+  assert.deepEqual(top, [
+    { courseId: courseA.id, courseName: "Top Courses A", roundsCount: 3 },
+    { courseId: courseB.id, courseName: "Top Courses B", roundsCount: 1 },
+  ], "course C is excluded (soft-deleted), and the pending round on course A doesn't inflate its count");
+});
+
+test("getTopCourses: limit caps the result set to the real top N", async () => {
+  const courses = createCoursesRepository(pool);
+  const roundsRepo = createRoundsRepository(pool);
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Limit", lastName: "Player" });
+
+  for (const [name, roundsCount] of [["Limit A", 3], ["Limit B", 2], ["Limit C", 1]] as const) {
+    const course = await courses.create({
+      name, country: "ES",
+      teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113, holes: [] }],
+    });
+    for (let i = 0; i < roundsCount; i++) {
+      const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId: course.teeConfigurations[0]!.id, playedAt: `2026-06-0${i + 1}T09:00:00.000Z` });
+      await roundsRepo.setStatus(round.id, "approved");
+    }
+  }
+
+  const top = await roundsRepo.getTopCourses(2);
+  assert.equal(top.length, 2, "only the top 2, not all 3 courses with real rounds");
+  assert.equal(top[0]!.courseName, "Limit A");
+  assert.equal(top[1]!.courseName, "Limit B");
+});
+
+test("getMostActivePlayers (ghs#180): real GROUP BY ranking over approved rounds, including each player's current handicap index, excluding soft-deleted players", async () => {
+  const courses = createCoursesRepository(pool);
+  const roundsRepo = createRoundsRepository(pool);
+  const players = createPlayersRepository(pool);
+
+  const course = await courses.create({
+    name: "Most Active Players Course", country: "ES",
+    teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113, holes: [] }],
+  });
+  const teeId = course.teeConfigurations[0]!.id;
+
+  const playerX = await players.create({ firstName: "Alice", lastName: "Whitfield" });
+  const playerY = await players.create({ firstName: "Ben", lastName: "Okafor" });
+  const playerZ = await players.create({ firstName: "Carys", lastName: "Deleted" });
+
+  await pool.query("UPDATE players SET handicap_index = 12.4 WHERE id = $1", [playerX.id]);
+  await pool.query("UPDATE players SET handicap_index = 8.1 WHERE id = $1", [playerY.id]);
+
+  for (let i = 0; i < 3; i++) {
+    const round = await roundsRepo.create({ playerId: playerX.id, teeConfigurationId: teeId, playedAt: `2026-07-0${i + 1}T09:00:00.000Z` });
+    await roundsRepo.setStatus(round.id, "approved");
+  }
+  const roundY = await roundsRepo.create({ playerId: playerY.id, teeConfigurationId: teeId, playedAt: "2026-07-10T09:00:00.000Z" });
+  await roundsRepo.setStatus(roundY.id, "approved");
+
+  // playerZ has a real approved round, but the player row is
+  // soft-deleted afterward (direct SQL -- players has no repository
+  // method that would refuse this the way courses.delete() does).
+  const roundZ = await roundsRepo.create({ playerId: playerZ.id, teeConfigurationId: teeId, playedAt: "2026-07-11T09:00:00.000Z" });
+  await roundsRepo.setStatus(roundZ.id, "approved");
+  await pool.query("UPDATE players SET deleted_at = now() WHERE id = $1", [playerZ.id]);
+
+  const ranking = await roundsRepo.getMostActivePlayers(5);
+
+  assert.deepEqual(ranking, [
+    { playerId: playerX.id, playerFirstName: "Alice", playerLastName: "Whitfield", roundsCount: 3, handicapIndex: 12.4 },
+    { playerId: playerY.id, playerFirstName: "Ben", playerLastName: "Okafor", roundsCount: 1, handicapIndex: 8.1 },
+  ], "playerZ is excluded (soft-deleted)");
 });
