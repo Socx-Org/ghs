@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import type {
+  CourseRoundRanking,
   CreateHoleScoreInput,
   CreateRoundInput,
   HoleScore,
@@ -7,6 +8,7 @@ import type {
   ListAdminRoundsResult,
   PendingRoundQueueItem,
   PlayerRoundListItem,
+  PlayerRoundRanking,
   PlayerStats,
   Round,
   RoundForUpdate,
@@ -72,6 +74,10 @@ export interface RoundsService {
   // same thin pass-through reasoning as listAdminRounds above (pure SQL
   // aggregation, no business logic belongs at this layer).
   getPlayerStats(playerId: string): Promise<PlayerStats>;
+  // ghs#180: the Admin Dashboard's Top Courses / Most Active Players
+  // widgets -- same thin pass-through reasoning as above.
+  getTopCourses(limit: number): Promise<CourseRoundRanking[]>;
+  getMostActivePlayers(limit: number): Promise<PlayerRoundRanking[]>;
 
   // draft|rejected|amending -> pending (ghs#58). The explicit moment a
   // round actually becomes visible to the admin pending-queue -- never
@@ -558,6 +564,14 @@ export function createRoundsService(
 
     async getPlayerStats(playerId) {
       return repository.getPlayerStats(playerId);
+    },
+
+    async getTopCourses(limit) {
+      return repository.getTopCourses(limit);
+    },
+
+    async getMostActivePlayers(limit) {
+      return repository.getMostActivePlayers(limit);
     },
 
     async submitForReview(id, submittedByRole) {

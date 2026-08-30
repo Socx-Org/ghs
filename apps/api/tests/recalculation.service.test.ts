@@ -29,6 +29,8 @@ function fakeRoundsRepository(differentialsByPlayer: Record<string, RoundDiffere
     async listPendingQueue() { throw new Error("not used by these tests"); },
     async listAdminRounds() { throw new Error("not used by these tests"); },
     async getPlayerStats() { throw new Error("not used by these tests"); },
+    async getTopCourses() { throw new Error("not used by these tests"); },
+    async getMostActivePlayers() { throw new Error("not used by these tests"); },
     async getCreatedByRole() { throw new Error("not used by these tests"); },
     async listApprovedDifferentialsForPlayer(playerId) {
       return differentialsByPlayer[playerId] ?? [];

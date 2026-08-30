@@ -339,6 +339,8 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
     async listPendingQueue() { throw new Error("not used by these tests"); },
     async listAdminRounds() { throw new Error("not used by these tests"); },
     async getPlayerStats() { throw new Error("not used by these tests"); },
+    async getTopCourses() { throw new Error("not used by these tests"); },
+    async getMostActivePlayers() { throw new Error("not used by these tests"); },
     async getCreatedByRole(id: string) {
       return createdByRoleById.get(id) ?? null;
     },

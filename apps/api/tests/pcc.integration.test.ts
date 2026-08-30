@@ -203,7 +203,7 @@ test("HTTP: admin can calculate/override PCC for a tee-configuration/day; a play
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,

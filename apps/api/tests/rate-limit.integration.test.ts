@@ -100,7 +100,7 @@ function buildApp(rateLimitOverrides?: AppDeps["rateLimitOverrides"]) {
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, logger);
 
   return createApp({
     logger, clubsService, coursesService, authService, mfaService,
