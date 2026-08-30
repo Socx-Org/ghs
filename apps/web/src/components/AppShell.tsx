@@ -10,6 +10,7 @@ import { Tooltip } from "./Tooltip";
 import { AccountMenu } from "./navigation/AccountMenu";
 import { MobileNav } from "./navigation/MobileNav";
 import { Sidebar } from "./navigation/Sidebar";
+import { useHeartbeat } from "../hooks/useHeartbeat";
 
 export interface AppShellProps {
   // ghs#102: optional so a non-route consumer (the authenticated branch
@@ -30,6 +31,9 @@ export interface AppShellProps {
 // per the design doc's own literal CSS sketch.
 export default function AppShell({ children }: AppShellProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // ghs#179: the one place every authenticated route mounts through, so
+  // the natural home for this page-independent global behaviour.
+  useHeartbeat();
 
   return (
     <div className="flex h-screen overflow-hidden">
