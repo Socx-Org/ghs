@@ -216,6 +216,12 @@ export function createUsersRepository(pool: Pool): UsersRepository {
       // first real use of it in this app) would misread as a gap in the
       // data rather than a genuine zero.
       //
+      // The WHERE created_at >= ... filter below is supported by
+      // idx_users_created_at (017_users_created_at_index.sql, review
+      // finding, PR #186) -- this query runs on every admin dashboard
+      // load, so a sequential scan over the whole users table as it
+      // grows isn't a hypothetical concern.
+      //
       // Review finding, PR #186: gs.day::date::text, not gs.day::date --
       // node-postgres does parse a plain DATE column into a real JS
       // Date (confirmed directly; the reviewer's own claim that it
