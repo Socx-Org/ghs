@@ -111,6 +111,11 @@ export interface AuthService {
   // reasoning rather than assuming it can never happen.
   getMe(userId: string): Promise<AccountProfile | null>;
   changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void>;
+  // ghs#177: POST /auth/heartbeat's own real work -- a bare timestamp
+  // write, no return value. Lives here (not a new, one-method service)
+  // because it's an ordinary auth-adjacent action on the caller's own
+  // account, the same shape as changePassword/getMe above.
+  recordHeartbeat(userId: string): Promise<void>;
 }
 
 export function createAuthService(deps: AuthServiceDeps): AuthService {
@@ -320,6 +325,16 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
 
       const passwordHash = await hashPassword(newPassword);
       await users.setPasswordHash(userId, passwordHash);
+    },
+
+    async recordHeartbeat(userId) {
+      // No status/existence check -- unlike changePassword, a stale
+      // heartbeat write against a since-deleted/disabled account row is
+      // harmless (it only ever feeds an aggregate count, never a
+      // per-user display, and the row still exists for soft-deleted
+      // accounts). requireAuth already guarantees a currently-valid
+      // access token got this far, which is all this endpoint needs.
+      await users.updateLastActiveAt(userId);
     },
   };
 }

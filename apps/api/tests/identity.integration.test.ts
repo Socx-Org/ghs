@@ -640,3 +640,55 @@ test("changePassword: rejects a disabled account, even with the correct current 
   const loginResult = await s.authService.login("change-pw-disabled@example.com", "original-password");
   assert.equal(loginResult.status, "authenticated", "the original password must still be the real one -- the rejected attempt made no change");
 });
+
+test("recordHeartbeat (ghs#177): writes a real, current last_active_at", async () => {
+  const s = buildServices();
+  const created = await s.adminUsersService.adminCreateUser({
+    email: "heartbeat@example.com", password: "heartbeat-pw-1", role: "player",
+    firstName: "Heartbeat", lastName: "Player", autoActivate: true,
+  });
+
+  await s.authService.recordHeartbeat(created.userId);
+
+  // Review finding, PR #185 (second round): comparing a Postgres-written
+  // timestamp against Date.now() is a cross-clock comparison -- even
+  // Math.abs() doesn't fully fix that, since Node and Postgres can run
+  // on different hosts/containers with clock skew well past a few ms.
+  // The age itself is computed in SQL instead, entirely on Postgres'
+  // own clock, so the assertion never depends on the test process's.
+  const row = await pool.query<{ last_active_at: Date | null; age_ms: string | null }>(
+    "SELECT last_active_at, extract(epoch FROM (now() - last_active_at)) * 1000 AS age_ms FROM users WHERE id = $1",
+    [created.userId],
+  );
+  assert.ok(row.rows[0]!.last_active_at, "a real timestamp was written");
+  const ageMs = Number(row.rows[0]!.age_ms);
+  assert.ok(Math.abs(ageMs) < 5000, `expected a timestamp from just now (Postgres' own clock), got one ${ageMs}ms away`);
+});
+
+test("countActiveNow (ghs#177): the 5-minute window's real boundary behaviour, not just a happy path -- includes a heartbeat 2 minutes ago, excludes one 10 minutes ago", async () => {
+  const s = buildServices();
+  const recent = await s.adminUsersService.adminCreateUser({
+    email: "active-recent@example.com", password: "active-recent-pw-1", role: "player",
+    firstName: "Recent", lastName: "Active", autoActivate: true,
+  });
+  const stale = await s.adminUsersService.adminCreateUser({
+    email: "active-stale@example.com", password: "active-stale-pw-1", role: "player",
+    firstName: "Stale", lastName: "Active", autoActivate: true,
+  });
+  // Never sent a heartbeat at all -- last_active_at stays NULL, must not
+  // be miscounted as "active since the beginning of time" by a naive
+  // NULL-inclusive comparison.
+  await s.adminUsersService.adminCreateUser({
+    email: "active-never@example.com", password: "active-never-pw-1", role: "player",
+    firstName: "Never", lastName: "Active", autoActivate: true,
+  });
+
+  // Real timestamps written directly, same "manipulate real state in
+  // Postgres, don't assume timing" convention this file already uses
+  // for token expiry (see the ActivationTokenExpiredError test above).
+  await pool.query("UPDATE users SET last_active_at = now() - INTERVAL '2 minutes' WHERE id = $1", [recent.userId]);
+  await pool.query("UPDATE users SET last_active_at = now() - INTERVAL '10 minutes' WHERE id = $1", [stale.userId]);
+
+  const count = await s.users.countActiveNow();
+  assert.equal(count, 1, "only the 2-minutes-ago heartbeat counts as active right now");
+});

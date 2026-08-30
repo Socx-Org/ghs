@@ -1047,3 +1047,41 @@ test("GET /players/me is not shadowed by GET /players/:id -- registering /me fir
     assert.equal(body.id, playerProfile.id);
   });
 });
+
+// ---------------------------------------------------------------------
+// ghs#177: POST /auth/heartbeat.
+// ---------------------------------------------------------------------
+
+test("POST /auth/heartbeat requires authentication", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const res = await fetch(`${baseUrl}/api/v1/auth/heartbeat`, { method: "POST" });
+    assert.equal(res.status, 401);
+  });
+});
+
+test("POST /auth/heartbeat works for a plain player role -- explicitly not admin-gated (design doc: presence applies to every user)", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const player = await createUserWithRole(ctx, "player");
+
+    const res = await fetch(`${baseUrl}/api/v1/auth/heartbeat`, { method: "POST", headers: authHeader(player.token) });
+    assert.equal(res.status, 204);
+
+    // last_active_at isn't part of the User DTO (deliberately never
+    // exposed per-user, design doc's own "no UI indication of who is
+    // active" non-scope) -- verified via a real column read, not
+    // through the repository's own public shape. Age computed in SQL,
+    // entirely on Postgres' own clock -- see the recordHeartbeat test in
+    // identity.integration.test.ts for why that matters (review finding,
+    // PR #185, second round: comparing against Date.now() is a
+    // cross-clock comparison even with Math.abs()).
+    const row = await pool.query<{ last_active_at: Date | null; age_ms: string | null }>(
+      "SELECT last_active_at, extract(epoch FROM (now() - last_active_at)) * 1000 AS age_ms FROM users WHERE id = $1",
+      [player.user.id],
+    );
+    assert.ok(row.rows[0]!.last_active_at, "a real timestamp was written");
+    const ageMs = Number(row.rows[0]!.age_ms);
+    assert.ok(Math.abs(ageMs) < 5000, `expected a timestamp from just now (Postgres' own clock), got one ${ageMs}ms away`);
+  });
+});
