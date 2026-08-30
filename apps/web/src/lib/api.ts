@@ -258,6 +258,12 @@ export async function changePassword(currentPassword: string, newPassword: strin
   return data;
 }
 
+// ghs#177/#179. No request or response body -- the backend derives the
+// user from the bearer token itself and returns a bare 204.
+export async function heartbeat(): Promise<void> {
+  await api.post("/auth/heartbeat");
+}
+
 export interface CreateUserRequest {
   email: string;
   password: string;
