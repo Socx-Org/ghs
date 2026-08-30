@@ -37,7 +37,11 @@ export const teeConfigurationSchema = z.object({
   courseRating: z.preprocess(numberOrUndefined, z.number({ error: "Enter a course rating" }).min(0.1, "Enter a course rating")),
   slopeRating: z.preprocess(
     numberOrUndefined,
-    z.number({ error: "Enter a slope rating" }).min(55, "Slope rating must be 55-155").max(155, "Slope rating must be 55-155"),
+    z
+      .number({ error: "Enter a slope rating" })
+      .int("Slope rating must be a whole number")
+      .min(55, "Slope rating must be 55-155")
+      .max(155, "Slope rating must be 55-155"),
   ),
   holes: z.array(holeSchema),
 });
