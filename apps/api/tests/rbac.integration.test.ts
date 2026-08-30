@@ -275,6 +275,32 @@ for (const [label, body] of [["null", "null"], ["a string", '"oops"'], ["a numbe
 }
 
 // ---------------------------------------------------------------------
+// ghs#187: a fractional slopeRating (e.g. course/slope rating fields
+// swapped by mistake in the UI, producing a decimal like 68.5) passed
+// parseTeeConfiguration's old type+range check and reached the
+// slope_rating SMALLINT column, where Postgres threw a raw, unhandled
+// type-coercion error instead of this route's own intended clean 400.
+// ---------------------------------------------------------------------
+
+test("POST /courses returns 400, not a raw 500, for a tee configuration with a fractional slopeRating", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+
+    const res = await fetch(`${baseUrl}/api/v1/courses`, {
+      method: "POST",
+      headers: authHeader(admin.token),
+      body: JSON.stringify({
+        name: "Fractional Slope Rating Test Course",
+        teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 71.2, slopeRating: 68.5, holes: [] }],
+      }),
+    });
+
+    assert.equal(res.status, 400);
+  });
+});
+
+// ---------------------------------------------------------------------
 // POST /admin/users: the confirmed gap and its fix -- only super_admin
 // may create/promote to admin or super_admin.
 // ---------------------------------------------------------------------

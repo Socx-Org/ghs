@@ -57,6 +57,17 @@ describe("TeeConfigurationForm", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("rejects a fractional slope rating -- ghs#187, a slope_rating column is a Postgres SMALLINT so a decimal value like the course rating must never reach it", async () => {
+    const { onSubmit } = renderForm();
+    await userEvent.type(screen.getByLabelText("Name"), "White");
+    await userEvent.type(screen.getByLabelText("Course rating"), "71.2");
+    await userEvent.type(screen.getByLabelText("Slope rating"), "68.5");
+    await userEvent.click(screen.getByRole("button", { name: "Add tee configuration" }));
+
+    expect(await screen.findByText("Slope rating must be a whole number")).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("submits the correctly-shaped payload for a complete 9-hole configuration", async () => {
     const { onSubmit } = renderForm();
     await userEvent.type(screen.getByLabelText("Name"), "White");

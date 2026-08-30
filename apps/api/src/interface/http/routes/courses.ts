@@ -37,7 +37,11 @@ export function parseTeeConfiguration(value: unknown): CreateTeeConfigurationInp
     typeof t.name !== "string" || t.name.trim().length === 0 ||
     typeof t.holeCount !== "number" || (t.holeCount !== 9 && t.holeCount !== 18) ||
     typeof t.courseRating !== "number" || t.courseRating <= 0 ||
-    typeof t.slopeRating !== "number" || t.slopeRating < 55 || t.slopeRating > 155 ||
+    // slope_rating is a Postgres SMALLINT (ghs#187): a fractional value
+    // like 68.5 passes the range check below but throws a raw,
+    // unhandled type-coercion error at the database layer instead of
+    // the clean 400 this validator exists to produce.
+    typeof t.slopeRating !== "number" || !Number.isInteger(t.slopeRating) || t.slopeRating < 55 || t.slopeRating > 155 ||
     !Array.isArray(t.holes)
   ) {
     return null;
