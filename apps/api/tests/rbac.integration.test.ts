@@ -1072,9 +1072,9 @@ test("POST /auth/heartbeat works for a plain player role -- explicitly not admin
     // exposed per-user, design doc's own "no UI indication of who is
     // active" non-scope) -- verified via a real column read, not
     // through the repository's own public shape. Age computed in SQL,
-    // entirely on Postgres' own clock -- see identity.integration.
-    // test.ts's own recordHeartbeat test for why that matters (review
-    // finding, PR #185, second round: comparing against Date.now() is a
+    // entirely on Postgres' own clock -- see the recordHeartbeat test in
+    // identity.integration.test.ts for why that matters (review finding,
+    // PR #185, second round: comparing against Date.now() is a
     // cross-clock comparison even with Math.abs()).
     const row = await pool.query<{ last_active_at: Date | null; age_ms: string | null }>(
       "SELECT last_active_at, extract(epoch FROM (now() - last_active_at)) * 1000 AS age_ms FROM users WHERE id = $1",
