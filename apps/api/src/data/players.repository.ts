@@ -35,8 +35,9 @@ export interface PlayersRepository {
   // ghs#191: admin account-edit's own name-correction field. Takes the
   // player's own id, not a userId -- same shape as get() above, and the
   // caller (admin-users.service.ts) already has the player row in hand
-  // by the time it needs this.
-  updateName(id: string, firstName: string, lastName: string): Promise<void>;
+  // by the time it needs this. Optional client so updateUser can run
+  // this alongside its users-table writes in one transaction.
+  updateName(id: string, firstName: string, lastName: string, client?: PoolClient): Promise<void>;
 }
 
 interface PlayerRow {
@@ -109,8 +110,9 @@ export function createPlayersRepository(pool: Pool): PlayersRepository {
       return result.rows[0] ? toPlayer(result.rows[0]) : null;
     },
 
-    async updateName(id, firstName, lastName) {
-      await pool.query(
+    async updateName(id, firstName, lastName, client) {
+      const runner = client ?? pool;
+      await runner.query(
         "UPDATE players SET first_name = $2, last_name = $3, updated_at = now() WHERE id = $1",
         [id, firstName, lastName],
       );

@@ -211,8 +211,8 @@ export function createAdminUsersService(
 
       const currentPlayer = await players.findByUserId(userId);
 
-      // Every domain rule validated up front, before any write --
-      // an invalid request must leave nothing partially applied.
+      // Domain rules that don't depend on a live transaction are
+      // validated up front, before any write.
       if (input.role !== undefined && input.role !== currentUser.role) {
         const currentIsPlayer = currentUser.role === "player";
         const nextIsPlayer = input.role === "player";
@@ -225,20 +225,52 @@ export function createAdminUsersService(
         throw new NameRequiresPlayerAccountError("name can only be set for a player account");
       }
 
-      if (input.email !== undefined && input.email !== currentUser.email) {
-        const existing = await users.findByEmail(input.email);
-        if (existing && existing.id !== userId) {
-          throw new EmailAlreadyInUseError("email already in use");
+      // Review finding, PR #192: up to 3 writes (email/name/role) --
+      // a real transaction, same BEGIN/COMMIT/ROLLBACK pattern as
+      // adminCreateUser above, so a later failure partway through
+      // (e.g. a transient DB error between the email and role writes)
+      // can't leave a half-applied update either.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+
+        if (input.email !== undefined && input.email !== currentUser.email) {
+          const existing = await users.findByEmail(input.email);
+          if (existing && existing.id !== userId) {
+            throw new EmailAlreadyInUseError("email already in use");
+          }
+          try {
+            await users.updateEmail(userId, input.email, client);
+          } catch (err) {
+            // Review finding, PR #192: the findByEmail check above is a
+            // real TOCTOU race under concurrency -- a second request
+            // could take the same email between that check and this
+            // UPDATE. The CITEXT UNIQUE constraint is the real
+            // backstop; a raw 23505 here is translated to the same
+            // clean domain error the common case already produces,
+            // not left to surface as an unhandled 500.
+            const pgErr = err as { code?: string };
+            if (pgErr.code === "23505") {
+              throw new EmailAlreadyInUseError("email already in use");
+            }
+            throw err;
+          }
         }
-        await users.updateEmail(userId, input.email);
-      }
 
-      if (input.firstName !== undefined && input.lastName !== undefined) {
-        await players.updateName(currentPlayer!.id, input.firstName, input.lastName);
-      }
+        if (input.firstName !== undefined && input.lastName !== undefined) {
+          await players.updateName(currentPlayer!.id, input.firstName, input.lastName, client);
+        }
 
-      if (input.role !== undefined && input.role !== currentUser.role) {
-        await users.updateRole(userId, input.role);
+        if (input.role !== undefined && input.role !== currentUser.role) {
+          await users.updateRole(userId, input.role, client);
+        }
+
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
       }
 
       const refreshedUser = await users.findById(userId);

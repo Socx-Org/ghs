@@ -564,6 +564,41 @@ test("a duplicate email is rejected with a clean 409, not a raw constraint-viola
   });
 });
 
+// Note: this exercises two genuinely concurrent requests, but two fast
+// local requests don't reliably land inside each other's actual
+// findByEmail-to-UPDATE window -- it can't force the exact TOCTOU race
+// deterministically. That specific race (the repository's updateEmail
+// throwing a raw 23505, mid-transaction) is instead verified directly,
+// deterministically, in admin-users.service.test.ts (review finding,
+// PR #192). This test is still worth keeping as a real end-to-end
+// sanity check: two requests contesting the same email must never both
+// succeed, whichever code path actually catches the conflict.
+test("two concurrent requests contesting the same not-yet-used email never both succeed -- one gets a clean 409, the other 200", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+    const targetA = await createUserWithRole(ctx, "player");
+    const targetB = await createUserWithRole(ctx, "player");
+    const contestedEmail = `race-${Date.now()}@example.com`;
+
+    const [resA, resB] = await Promise.all([
+      fetch(`${baseUrl}/api/v1/admin/users/${targetA.user.id}`, {
+        method: "PATCH",
+        headers: authHeader(admin.token),
+        body: JSON.stringify({ email: contestedEmail }),
+      }),
+      fetch(`${baseUrl}/api/v1/admin/users/${targetB.user.id}`, {
+        method: "PATCH",
+        headers: authHeader(admin.token),
+        body: JSON.stringify({ email: contestedEmail }),
+      }),
+    ]);
+
+    const statuses = [resA.status, resB.status].sort();
+    assert.deepEqual(statuses, [200, 409], "one request succeeds, the other gets a clean 409 -- never [200, 200] (impossible under the real UNIQUE constraint) and never a 500");
+  });
+});
+
 test("PATCH /admin/users/:id returns 404 for a genuinely nonexistent user", async () => {
   const ctx = buildApp();
   await withServer(ctx.app, async (baseUrl) => {
