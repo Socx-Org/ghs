@@ -5,6 +5,7 @@ import { useAuth } from "./hooks/useAuth";
 import ActivationPage from "./pages/ActivationPage";
 import AdminAccountsPage from "./pages/AdminAccountsPage";
 import AdminCreateUserPage from "./pages/AdminCreateUserPage";
+import AdminDashboardPage from "./pages/AdminDashboardPage";
 import AdminPendingQueuePage from "./pages/AdminPendingQueuePage";
 import AdminRoundReviewPage from "./pages/AdminRoundReviewPage";
 import AdminRoundsListPage from "./pages/AdminRoundsListPage";
@@ -13,7 +14,6 @@ import CourseDetailPage from "./pages/CourseDetailPage";
 import CourseListPage from "./pages/CourseListPage";
 import CreateCoursePage from "./pages/CreateCoursePage";
 import DailyPccPage from "./pages/DailyPccPage";
-import DashboardPlaceholder from "./pages/DashboardPlaceholder";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import LoginPage from "./pages/LoginPage";
 import MyRoundsPage from "./pages/MyRoundsPage";
@@ -29,14 +29,13 @@ import { RedirectIfAuthenticated } from "./routes/RedirectIfAuthenticated";
 import { RequireAdmin } from "./routes/RequireAdmin";
 import { RequireAuth } from "./routes/RequireAuth";
 
-// ghs#65: player is the only role with a real landing screen so far --
-// admin/super_admin still get DashboardPlaceholder (its own Admin nav
-// entry point is all they need today; a real admin dashboard is future
-// scope, not invented here). A small dispatcher rather than two
-// separate routes, since both live at the same "/" path.
+// ghs#65/#181: a small dispatcher rather than two separate routes,
+// since both live at the same "/" path -- player gets PlayerDashboardPage,
+// admin/super_admin get the real AdminDashboardPage (#181, replacing
+// the former DashboardPlaceholder).
 function HomeRoute() {
   const { user } = useAuth();
-  return user?.role === "player" ? <PlayerDashboardPage /> : <DashboardPlaceholder />;
+  return user?.role === "player" ? <PlayerDashboardPage /> : <AdminDashboardPage />;
 }
 
 // ghs#102: the catch-all route can't simply nest under RequireAuth's

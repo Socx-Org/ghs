@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { AccountProfile, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, DailyPcc, FairwayResult, HandicapHistoryRecord, HoleScore, PccCorrectionOutcome, PendingRoundQueueItem, PlayerDashboard, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
+import type { AccountProfile, AdminDashboard, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, DailyPcc, FairwayResult, HandicapHistoryRecord, HoleScore, PccCorrectionOutcome, PendingRoundQueueItem, PlayerDashboard, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -348,6 +348,16 @@ export async function getPlayerHandicapHistory(playerId: string): Promise<Handic
 // resolution (GET /dashboard/player, not /players/:playerId/dashboard).
 export async function getPlayerDashboard(): Promise<PlayerDashboard> {
   const { data } = await api.get<PlayerDashboard>("/dashboard/player");
+  return data;
+}
+
+// ghs#181. period matches the backend's own literal 7d/30d/90d
+// vocabulary (dashboard.ts) -- translated to a day count only at the
+// HTTP boundary server-side, never on this side.
+export type AdminDashboardPeriod = "7d" | "30d" | "90d";
+
+export async function getAdminDashboard(period: AdminDashboardPeriod): Promise<AdminDashboard> {
+  const { data } = await api.get<AdminDashboard>("/dashboard/admin", { params: { period } });
   return data;
 }
 
