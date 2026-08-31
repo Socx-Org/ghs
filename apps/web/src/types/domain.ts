@@ -163,6 +163,54 @@ export interface PlayerDashboard {
   stats: DashboardSection<PlayerStats>;
 }
 
+// Mirrors apps/api/src/data/users.repository.ts's UserRoleBreakdown
+// exactly (ghs#180).
+export interface UserRoleBreakdown {
+  total: number;
+  player: number;
+  admin: number;
+  superAdmin: number;
+}
+
+// Mirrors apps/api/src/data/rounds.repository.ts's CourseRoundRanking
+// exactly (ghs#180) -- the Admin Dashboard's Top Courses widget.
+export interface CourseRoundRanking {
+  courseId: string;
+  courseName: string;
+  roundsCount: number;
+}
+
+// Mirrors apps/api/src/data/rounds.repository.ts's PlayerRoundRanking
+// exactly (ghs#180) -- the Admin Dashboard's Most Active Players widget.
+export interface PlayerRoundRanking {
+  playerId: string;
+  playerFirstName: string;
+  playerLastName: string;
+  roundsCount: number;
+  handicapIndex: number | null;
+}
+
+// Mirrors apps/api/src/data/users.repository.ts's RegistrationTrendPoint
+// exactly (ghs#180) -- one zero-filled point per day in the requested
+// window, per that repository method's own generate_series technique.
+export interface RegistrationTrendPoint {
+  date: string;
+  count: number;
+}
+
+// Mirrors apps/api/src/application/dashboard.service.ts's AdminDashboard
+// exactly (ghs#180) -- GET /dashboard/admin's per-section failure-
+// isolated response shape, same pattern as PlayerDashboard above.
+export interface AdminDashboard {
+  totalUsers: DashboardSection<UserRoleBreakdown>;
+  totalCourses: DashboardSection<number>;
+  totalRounds: DashboardSection<{ total: number; pending: number }>;
+  topCourses: DashboardSection<CourseRoundRanking[]>;
+  mostActivePlayers: DashboardSection<PlayerRoundRanking[]>;
+  activeRightNow: DashboardSection<number>;
+  userTrends: DashboardSection<RegistrationTrendPoint[]>;
+}
+
 // Mirrors apps/api/src/data/rounds.repository.ts's PendingRoundQueueItem
 // exactly (ghs#61/#67) -- exactly the fields a queue row needs to
 // render (round id, player identity, course, tee configuration, played

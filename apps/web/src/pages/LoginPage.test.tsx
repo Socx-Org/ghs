@@ -137,9 +137,11 @@ describe("LoginPage", () => {
     await userEvent.type(screen.getByLabelText("Authentication code"), "123456");
     await userEvent.click(screen.getByRole("button", { name: "Verify" }));
 
-    await waitFor(() => expect(screen.getByText(/Signed in as/)).toBeInTheDocument());
-    // ghs#96: AccountMenu's own trigger also shows the email now
-    // (a second real element, not a bug) -- getAllByText, not getByText.
+    // AppShell's AccountMenu trigger is present regardless of which
+    // dashboard this admin role lands on (ghs#181: AdminDashboardPage,
+    // not the former DashboardPlaceholder) -- same role-agnostic marker
+    // as the player-login test above.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Account menu" })).toBeInTheDocument());
     expect(screen.getAllByText("mfa@example.com", { exact: false }).length).toBeGreaterThan(0);
   });
 
@@ -264,9 +266,11 @@ describe("LoginPage", () => {
     // discouraged), the request that was already in flight completes
     // normally and navigates through -- the fix closes the race without
     // leaving the form stuck or the request orphaned.
-    await waitFor(() => expect(screen.getByText(/Signed in as/)).toBeInTheDocument());
-    // ghs#96: AccountMenu's own trigger also shows the email now
-    // (a second real element, not a bug) -- getAllByText, not getByText.
+    // AppShell's AccountMenu trigger is present regardless of which
+    // dashboard this admin role lands on (ghs#181: AdminDashboardPage,
+    // not the former DashboardPlaceholder) -- same role-agnostic marker
+    // as the player-login test above.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Account menu" })).toBeInTheDocument());
     expect(screen.getAllByText("mfa@example.com", { exact: false }).length).toBeGreaterThan(0);
   });
 });
