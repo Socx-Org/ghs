@@ -1,7 +1,10 @@
 import { useState } from "react";
-import { Ban, CircleCheck, Plus, Trash2, X } from "lucide-react";
+import { Ban, CircleCheck, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import {
   AccountStatusBadge,
   Alert,
@@ -10,16 +13,20 @@ import {
   Card,
   CardBody,
   EmptyState,
+  FormField,
+  Input,
   ListView,
   Modal,
   RoleBadge,
+  Select,
   Skeleton,
   TableCell,
   TableHeaderCell,
   Tooltip,
   useToast,
 } from "../components";
-import { ApiError, deleteUser, listUsers, setUserStatus } from "../lib/api";
+import { ApiError, deleteUser, listUsers, setUserStatus, updateUser } from "../lib/api";
+import type { UpdateUserRequest } from "../lib/api";
 import { ACCOUNT_STATUS_OPTIONS, ROLE_OPTIONS } from "../lib/domain-labels";
 import { useAuth } from "../hooks/useAuth";
 import type { AdminUserListItem } from "../types/domain";
@@ -49,14 +56,134 @@ function describeQueryError(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
 
+// ghs#191. firstName/lastName only required when actually rendered
+// (a player account, see canEditName below) -- react-hook-form still
+// populates them with a real (non-undefined) value whenever the field
+// is mounted at all, so .min(1) correctly rejects an empty submission
+// either way. role is restricted to admin/super_admin here -- crossing
+// the player boundary is deliberately unsupported (see the issue's own
+// Explicit Non-Scope), so "player" is never a selectable option.
+const editAccountSchema = z.object({
+  email: z.string().email("Enter a valid email address"),
+  firstName: z.string().min(1, "First name is required").optional(),
+  lastName: z.string().min(1, "Last name is required").optional(),
+  role: z.enum(["admin", "super_admin"]).optional(),
+});
+type EditAccountFormValues = z.infer<typeof editAccountSchema>;
+
+interface EditAccountFormProps {
+  target: AdminUserListItem;
+  canEditRole: boolean;
+  onSubmit: (input: UpdateUserRequest) => Promise<void>;
+  onCancel: () => void;
+}
+
+function EditAccountForm({ target, canEditRole, onSubmit, onCancel }: EditAccountFormProps) {
+  // null firstName/lastName (no players row, ghs#98) means there's
+  // nothing to edit -- the account is admin/super_admin, matching
+  // AdminUserListItem's own established null-for-non-player contract.
+  const canEditName = target.firstName !== null && target.lastName !== null;
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<EditAccountFormValues>({
+    resolver: zodResolver(editAccountSchema),
+    defaultValues: {
+      email: target.email,
+      firstName: target.firstName ?? undefined,
+      lastName: target.lastName ?? undefined,
+      role: target.role === "player" ? undefined : target.role,
+    },
+  });
+
+  async function submit(values: EditAccountFormValues) {
+    // Only fields this form actually offered are sent -- presence, not
+    // truthiness, matches PATCH /admin/users/:id's own convention
+    // (an omitted field is left untouched server-side, not cleared).
+    const input: UpdateUserRequest = { email: values.email };
+    if (canEditName) {
+      input.firstName = values.firstName;
+      input.lastName = values.lastName;
+    }
+    if (canEditRole) {
+      input.role = values.role;
+    }
+    try {
+      await onSubmit(input);
+    } catch {
+      // Deliberately swallowed here -- the caller's own mutation
+      // onError already shows the real error via a toast (and, unlike
+      // a delete confirmation, deliberately leaves this modal open so
+      // the admin can fix and resubmit, e.g. a duplicate-email 409).
+      // This catch exists only to keep isSubmitting resolving cleanly
+      // without an unhandled rejection.
+    }
+  }
+
+  return (
+    <form className="flex flex-col gap-6" onSubmit={handleSubmit(submit)} noValidate>
+      <FormField label="Email address" error={errors.email?.message}>
+        <Input type="email" autoComplete="off" {...register("email")} />
+      </FormField>
+
+      {canEditName && (
+        <div className="grid grid-cols-2 gap-4">
+          <FormField label="First name" error={errors.firstName?.message}>
+            <Input type="text" autoComplete="off" {...register("firstName")} />
+          </FormField>
+          <FormField label="Last name" error={errors.lastName?.message}>
+            <Input type="text" autoComplete="off" {...register("lastName")} />
+          </FormField>
+        </div>
+      )}
+
+      {canEditRole && (
+        <FormField label="Role" error={errors.role?.message}>
+          <Select {...register("role")}>
+            <option value="admin">Admin</option>
+            <option value="super_admin">Super admin</option>
+          </Select>
+        </FormField>
+      )}
+
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button type="button" variant="secondary" icon={<X aria-hidden="true" className="h-4 w-4" />} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" icon={<Save aria-hidden="true" className="h-4 w-4" />} isLoading={isSubmitting}>
+          Save changes
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 export default function AdminAccountsPage() {
   const navigate = useNavigate();
   const { user: caller } = useAuth();
   const { show } = useToast();
   const queryClient = useQueryClient();
   const [deleteTarget, setDeleteTarget] = useState<AdminUserListItem | null>(null);
+  const [editTarget, setEditTarget] = useState<AdminUserListItem | null>(null);
 
   const usersQuery = useQuery({ queryKey: ["admin", "users"], queryFn: () => listUsers() });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateUserRequest }) => updateUser(id, input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+      show({ variant: "success", message: "Account updated.", duration: 2500 });
+      setEditTarget(null);
+    },
+    // Modal deliberately stays open on error (unlike delete's own
+    // success-only close) -- a real, actionable failure here (most
+    // concretely a duplicate email, 409) is something the admin can
+    // fix and resubmit without losing what they'd already typed.
+    onError: (error) => {
+      show({ variant: "error", message: describeQueryError(error, "Couldn't update the account. Try again.") });
+    },
+  });
 
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: "active" | "disabled" }) => setUserStatus(id, status),
@@ -102,8 +229,12 @@ export default function AdminAccountsPage() {
     // source of truth, not a second copy that can drift.
     const statusLabel = `${isDisabling ? "Disable" : "Enable"} ${item.email}`;
     const deleteLabel = `Delete ${item.email}`;
+    const editLabel = `Edit ${item.email}`;
     return (
       <div className="flex flex-wrap items-center gap-2">
+        <Tooltip content={editLabel}>
+          <Button variant="secondary" size="sm" icon={<Pencil aria-hidden="true" className="h-4 w-4" />} aria-label={editLabel} onClick={() => setEditTarget(item)} />
+        </Tooltip>
         {showStatusToggle && (
           <Tooltip content={statusLabel}>
             <Button
@@ -209,6 +340,25 @@ export default function AdminAccountsPage() {
           )}
         </CardBody>
       </Card>
+
+      {/* Conditionally rendered, not just open={editTarget !== null} on an
+          always-mounted Modal -- Modal never unmounts its children when
+          closed, so EditAccountForm's own useForm state would otherwise
+          persist across a close/reopen instead of resetting to fresh
+          defaults for whichever row was clicked next (same pattern as
+          CourseDetailPage's tee-configuration edit modal). */}
+      {editTarget && (
+        <Modal open={Boolean(editTarget)} onClose={() => setEditTarget(null)} title="Edit account">
+          <EditAccountForm
+            target={editTarget}
+            canEditRole={caller?.role === "super_admin" && editTarget.id !== caller.sub && editTarget.role !== "player"}
+            onSubmit={async (input) => {
+              await updateMutation.mutateAsync({ id: editTarget.id, input });
+            }}
+            onCancel={() => setEditTarget(null)}
+          />
+        </Modal>
+      )}
 
       <Modal
         open={deleteTarget !== null}

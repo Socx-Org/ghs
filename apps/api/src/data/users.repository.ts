@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 export type UserStatus = "pending_verification" | "active" | "disabled" | "deleted";
 export type UserRole = "player" | "admin" | "super_admin";
@@ -54,6 +54,15 @@ export interface UsersRepository {
   markEmailVerified(id: string): Promise<void>;
   setStatus(id: string, status: UserStatus): Promise<void>;
   setPasswordHash(id: string, passwordHash: string): Promise<void>;
+  // ghs#191: admin account-edit's own two fields. Narrow, single-purpose
+  // methods, same style as setStatus/setPasswordHash above -- callers
+  // (admin-users.service.ts) already validate uniqueness/role-transition
+  // rules themselves before calling either; these are bare writes.
+  // Optional client so updateUser can run all of its writes (this,
+  // updateRole, players.updateName) in one transaction -- same
+  // client-or-pool pattern as players.repository.ts's own create().
+  updateEmail(id: string, email: string, client?: PoolClient): Promise<void>;
+  updateRole(id: string, role: UserRole, client?: PoolClient): Promise<void>;
   // ghs#98: no default status filter (unlike players'/courses' deleted_at
   // IS NULL convention) -- status here is a first-class enum value, not a
   // separate soft-delete gate, and an admin listing accounts needs
@@ -151,6 +160,22 @@ export function createUsersRepository(pool: Pool): UsersRepository {
       await pool.query(
         "UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1",
         [id, passwordHash],
+      );
+    },
+
+    async updateEmail(id, email, client) {
+      const runner = client ?? pool;
+      await runner.query(
+        "UPDATE users SET email = $2, updated_at = now() WHERE id = $1",
+        [id, email],
+      );
+    },
+
+    async updateRole(id, role, client) {
+      const runner = client ?? pool;
+      await runner.query(
+        "UPDATE users SET role = $2, updated_at = now() WHERE id = $1",
+        [id, role],
       );
     },
 

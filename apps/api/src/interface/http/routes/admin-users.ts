@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { AdminUsersService } from "../../../application/admin-users.service.ts";
+import { EmailAlreadyInUseError, NameRequiresPlayerAccountError, RoleTransitionNotSupportedError, UserNotFoundError } from "../../../application/admin-users.service.ts";
 import type { MfaService } from "../../../application/mfa.service.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth, requireRole } from "../middleware/require-auth.ts";
@@ -123,6 +124,82 @@ export function adminUsersRouter(service: AdminUsersService, mfaService: MfaServ
       const result = await service.listUsers({ role: resolvedRole, status: resolvedStatus, limit: resolvedLimit, offset: resolvedOffset });
       res.status(200).json(result);
     } catch (err) {
+      next(err);
+    }
+  });
+
+  // ghs#191: general account-edit -- email/name open to any admin,
+  // role restricted to super_admin (matches POST /admin/users' own
+  // "only super_admin may create/promote to admin/super_admin" rule).
+  // Presence-checked, not truthiness-checked (matches PATCH
+  // /courses/:id's own convention): an omitted field is left
+  // untouched, not cleared.
+  router.patch("/admin/users/:id", ...requireAdmin, async (req, res, next) => {
+    try {
+      if (typeof req.body !== "object" || req.body === null || Array.isArray(req.body)) {
+        res.status(400).json({ error: "request body must be a JSON object" });
+        return;
+      }
+      const body = req.body as Record<string, unknown>;
+      const targetId = String(req.params.id);
+      const input: { email?: string; firstName?: string; lastName?: string; role?: (typeof VALID_ROLES)[number] } = {};
+
+      if ("email" in body) {
+        if (typeof body.email !== "string" || body.email.trim().length === 0) {
+          res.status(400).json({ error: "email must be a non-empty string" });
+          return;
+        }
+        input.email = body.email.trim().toLowerCase();
+      }
+
+      // firstName/lastName required together -- a name is a single
+      // semantic unit, same requirement POST /admin/users already
+      // enforces at creation time.
+      if ("firstName" in body || "lastName" in body) {
+        if (typeof body.firstName !== "string" || typeof body.lastName !== "string" || body.firstName.trim().length === 0 || body.lastName.trim().length === 0) {
+          res.status(400).json({ error: "firstName and lastName are required together" });
+          return;
+        }
+        input.firstName = body.firstName.trim();
+        input.lastName = body.lastName.trim();
+      }
+
+      if ("role" in body) {
+        if (typeof body.role !== "string" || !VALID_ROLES.includes(body.role as (typeof VALID_ROLES)[number])) {
+          res.status(400).json({ error: "role must be one of: player, admin, super_admin" });
+          return;
+        }
+        // Self-role-change rejected outright, regardless of whether the
+        // new value would actually differ -- no ambiguity about
+        // whether a no-op self-request is "safe" (review discipline
+        // already applied to DELETE /admin/users/:id's own self-delete
+        // guard above).
+        if (targetId === req.identity!.sub) {
+          res.status(400).json({ error: "cannot change your own role" });
+          return;
+        }
+        if (req.identity!.ghsRole !== "super_admin") {
+          res.status(403).json({ error: "only super_admin may change a user's role" });
+          return;
+        }
+        input.role = body.role as (typeof VALID_ROLES)[number];
+      }
+
+      const updated = await service.updateUser(targetId, input);
+      res.status(200).json(updated);
+    } catch (err) {
+      if (err instanceof UserNotFoundError) {
+        res.status(404).json({ error: "user not found" });
+        return;
+      }
+      if (err instanceof EmailAlreadyInUseError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
+      if (err instanceof RoleTransitionNotSupportedError || err instanceof NameRequiresPlayerAccountError) {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       next(err);
     }
   });

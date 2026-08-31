@@ -31,12 +31,25 @@ const PLAYER_TOKENS = {
   expiresIn: 900,
 };
 
+// sub "user-1" -- same id as ADMIN_TOKENS above, so "self" is a
+// super_admin here instead of a plain admin (ghs#191's own edit-modal
+// tests need both: role editing is super_admin-only).
+const SUPER_ADMIN_TOKENS = {
+  accessToken: makeAccessToken({ sub: "user-1", email: "admin@example.com", ghs_role: "super_admin" }),
+  refreshToken: "refresh-3",
+  expiresIn: 900,
+};
+
 const ACCOUNTS: AdminUserListItem[] = [
   { id: "user-1", email: "admin@example.com", role: "admin", status: "active", createdAt: "2026-08-01T00:00:00.000Z", firstName: null, lastName: null, playerId: null },
   { id: "user-2", email: "alice@example.com", role: "player", status: "active", createdAt: "2026-08-02T00:00:00.000Z", firstName: "Alice", lastName: "Whitfield", playerId: "player-2" },
   { id: "user-3", email: "ben@example.com", role: "player", status: "disabled", createdAt: "2026-08-03T00:00:00.000Z", firstName: "Ben", lastName: "Okafor", playerId: "player-3" },
   { id: "user-4", email: "gone@example.com", role: "player", status: "deleted", createdAt: "2026-08-04T00:00:00.000Z", firstName: "Gone", lastName: "User", playerId: "player-4" },
   { id: "user-5", email: "pending@example.com", role: "player", status: "pending_verification", createdAt: "2026-08-05T00:00:00.000Z", firstName: "Pending", lastName: "User", playerId: "player-5" },
+  // ghs#191: a second, non-self admin/super_admin row -- the role
+  // selector's own tests need a target that isn't "self" and has no
+  // players row.
+  { id: "user-6", email: "carol@example.com", role: "admin", status: "active", createdAt: "2026-08-06T00:00:00.000Z", firstName: null, lastName: null, playerId: null },
 ];
 
 let mock: MockAdapter;
@@ -220,5 +233,169 @@ describe("AdminAccountsPage", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(mock.history.delete?.length ?? 0).toBe(0);
+  });
+
+  describe("Edit account (ghs#191)", () => {
+    it("opens a modal pre-filled with the account's current email and name", async () => {
+      setTokens(ADMIN_TOKENS);
+      mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+      renderPage();
+      await screen.findByText("alice@example.com");
+
+      const aliceRow = rowFor("alice@example.com");
+      await userEvent.click(within(aliceRow).getByRole("button", { name: "Edit alice@example.com" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Edit account" });
+      expect(within(dialog).getByLabelText("Email address")).toHaveValue("alice@example.com");
+      expect(within(dialog).getByLabelText("First name")).toHaveValue("Alice");
+      expect(within(dialog).getByLabelText("Last name")).toHaveValue("Whitfield");
+    });
+
+    it("shows no name fields for an account with no linked player (admin/super_admin)", async () => {
+      setTokens(SUPER_ADMIN_TOKENS);
+      mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+      renderPage();
+      await screen.findByText("carol@example.com");
+
+      const carolRow = rowFor("carol@example.com");
+      await userEvent.click(within(carolRow).getByRole("button", { name: "Edit carol@example.com" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Edit account" });
+      expect(within(dialog).queryByLabelText("First name")).not.toBeInTheDocument();
+    });
+
+    it("shows no role selector for a plain admin caller, even on an admin/super_admin target", async () => {
+      setTokens(ADMIN_TOKENS);
+      mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+      renderPage();
+      await screen.findByText("carol@example.com");
+
+      const carolRow = rowFor("carol@example.com");
+      await userEvent.click(within(carolRow).getByRole("button", { name: "Edit carol@example.com" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Edit account" });
+      expect(within(dialog).queryByLabelText("Role")).not.toBeInTheDocument();
+    });
+
+    it("shows no role selector when a super_admin edits their own row", async () => {
+      setTokens(SUPER_ADMIN_TOKENS);
+      mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+      renderPage();
+      // Waits for a table-only marker, not "admin@example.com" itself --
+      // AccountMenu's own trigger shows the same email immediately
+      // (no query dependency), so findByText could otherwise resolve
+      // against that before the table has actually loaded.
+      await screen.findByText("alice@example.com");
+
+      const ownRow = rowFor("admin@example.com");
+      await userEvent.click(within(ownRow).getByRole("button", { name: "Edit admin@example.com" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Edit account" });
+      expect(within(dialog).queryByLabelText("Role")).not.toBeInTheDocument();
+    });
+
+    it("shows no role selector for a player-role target, even for a super_admin caller -- crossing the player boundary is unsupported", async () => {
+      setTokens(SUPER_ADMIN_TOKENS);
+      mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+      renderPage();
+      await screen.findByText("alice@example.com");
+
+      const aliceRow = rowFor("alice@example.com");
+      await userEvent.click(within(aliceRow).getByRole("button", { name: "Edit alice@example.com" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Edit account" });
+      expect(within(dialog).queryByLabelText("Role")).not.toBeInTheDocument();
+    });
+
+    it("a super_admin editing another admin/super_admin's row sees a role selector, and submitting sends the selected role", async () => {
+      setTokens(SUPER_ADMIN_TOKENS);
+      mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+      mock.onPatch("/admin/users/user-6").reply(200, { ...ACCOUNTS[5]!, role: "super_admin" });
+      renderPage();
+      await screen.findByText("carol@example.com");
+
+      const carolRow = rowFor("carol@example.com");
+      await userEvent.click(within(carolRow).getByRole("button", { name: "Edit carol@example.com" }));
+
+      const dialog = await screen.findByRole("dialog", { name: "Edit account" });
+      expect(within(dialog).getByLabelText("Role")).toHaveValue("admin");
+      await userEvent.selectOptions(within(dialog).getByLabelText("Role"), "super_admin");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(mock.history.patch?.length).toBe(1));
+      expect(JSON.parse(mock.history.patch![0]!.data)).toEqual({ email: "carol@example.com", role: "super_admin" });
+      expect(await screen.findByText("Account updated.")).toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("submitting an email/name edit on a player account sends both, with no role key at all", async () => {
+      setTokens(ADMIN_TOKENS);
+      mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+      mock.onPatch("/admin/users/user-2").reply(200, { ...ACCOUNTS[1]!, email: "alice2@example.com" });
+      renderPage();
+      await screen.findByText("alice@example.com");
+
+      const aliceRow = rowFor("alice@example.com");
+      await userEvent.click(within(aliceRow).getByRole("button", { name: "Edit alice@example.com" }));
+      const dialog = await screen.findByRole("dialog", { name: "Edit account" });
+
+      const emailInput = within(dialog).getByLabelText("Email address");
+      await userEvent.clear(emailInput);
+      await userEvent.type(emailInput, "alice2@example.com");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(mock.history.patch?.length).toBe(1));
+      expect(JSON.parse(mock.history.patch![0]!.data)).toEqual({ email: "alice2@example.com", firstName: "Alice", lastName: "Whitfield" });
+    });
+
+    it("shows a client-side validation error for an invalid email, without calling the API", async () => {
+      setTokens(ADMIN_TOKENS);
+      mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+      renderPage();
+      await screen.findByText("alice@example.com");
+
+      const aliceRow = rowFor("alice@example.com");
+      await userEvent.click(within(aliceRow).getByRole("button", { name: "Edit alice@example.com" }));
+      const dialog = await screen.findByRole("dialog", { name: "Edit account" });
+
+      const emailInput = within(dialog).getByLabelText("Email address");
+      await userEvent.clear(emailInput);
+      await userEvent.type(emailInput, "not-an-email");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+
+      expect(await within(dialog).findByText("Enter a valid email address")).toBeInTheDocument();
+      expect(mock.history.patch?.length ?? 0).toBe(0);
+    });
+
+    it("keeps the modal open and shows an error toast on failure (e.g. a duplicate email, 409) -- the admin can fix and resubmit", async () => {
+      setTokens(ADMIN_TOKENS);
+      mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+      mock.onPatch("/admin/users/user-2").reply(409, { error: "email already in use" });
+      renderPage();
+      await screen.findByText("alice@example.com");
+
+      const aliceRow = rowFor("alice@example.com");
+      await userEvent.click(within(aliceRow).getByRole("button", { name: "Edit alice@example.com" }));
+      const dialog = await screen.findByRole("dialog", { name: "Edit account" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+
+      expect(await screen.findByText("email already in use")).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Edit account" })).toBeInTheDocument();
+    });
+
+    it("cancelling closes the modal without calling the API", async () => {
+      setTokens(ADMIN_TOKENS);
+      mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+      renderPage();
+      await screen.findByText("alice@example.com");
+
+      const aliceRow = rowFor("alice@example.com");
+      await userEvent.click(within(aliceRow).getByRole("button", { name: "Edit alice@example.com" }));
+      const dialog = await screen.findByRole("dialog", { name: "Edit account" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(mock.history.patch?.length ?? 0).toBe(0);
+    });
   });
 });

@@ -313,6 +313,21 @@ export async function setUserStatus(userId: string, status: Extract<UserStatus, 
   await api.patch(`/admin/users/${userId}/status`, { status });
 }
 
+// ghs#191. Every field independently optional -- presence, not
+// truthiness, matches PATCH /admin/users/:id's own convention (an
+// omitted field is left untouched server-side, not cleared).
+export interface UpdateUserRequest {
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  role?: UserRole;
+}
+
+export async function updateUser(userId: string, input: UpdateUserRequest): Promise<AdminUserListItem> {
+  const { data } = await api.patch<AdminUserListItem>(`/admin/users/${userId}`, input);
+  return data;
+}
+
 export async function deleteUser(userId: string): Promise<void> {
   await api.delete(`/admin/users/${userId}`);
 }
