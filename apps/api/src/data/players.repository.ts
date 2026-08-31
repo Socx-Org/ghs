@@ -32,6 +32,11 @@ export interface PlayersRepository {
   // row of a paginated user list without an N+1 query per row.
   findByUserIds(userIds: string[]): Promise<Player[]>;
   get(id: string): Promise<Player | null>;
+  // ghs#191: admin account-edit's own name-correction field. Takes the
+  // player's own id, not a userId -- same shape as get() above, and the
+  // caller (admin-users.service.ts) already has the player row in hand
+  // by the time it needs this.
+  updateName(id: string, firstName: string, lastName: string): Promise<void>;
 }
 
 interface PlayerRow {
@@ -102,6 +107,13 @@ export function createPlayersRepository(pool: Pool): PlayersRepository {
         [id],
       );
       return result.rows[0] ? toPlayer(result.rows[0]) : null;
+    },
+
+    async updateName(id, firstName, lastName) {
+      await pool.query(
+        "UPDATE players SET first_name = $2, last_name = $3, updated_at = now() WHERE id = $1",
+        [id, firstName, lastName],
+      );
     },
   };
 }

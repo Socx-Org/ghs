@@ -382,7 +382,7 @@ test("PATCH /admin/users/:id/status ignores a smuggled role field -- only status
     assert.equal(res.status, 200);
 
     const reloaded = await ctx.users.findById(player.user.id);
-    assert.equal(reloaded!.role, "player", "a role field smuggled into the status-update body must have no effect -- no role-mutation endpoint exists at all, by design");
+    assert.equal(reloaded!.role, "player", "a role field smuggled into the status-update body must have no effect -- role changes are a real endpoint (PATCH /admin/users/:id, ghs#191), but not through this one");
   });
 });
 
@@ -411,6 +411,169 @@ test("a role field smuggled into an unrelated endpoint (round creation) has no e
 
     const reloadedUser = await ctx.users.findById(player.user.id);
     assert.equal(reloadedUser!.role, "player", "the caller's own persisted role is completely unaffected by any request body field");
+  });
+});
+
+// ---------------------------------------------------------------------
+// ghs#191: PATCH /admin/users/:id -- email/name editable by any admin,
+// role restricted to super_admin, crossing the player/non-player
+// boundary rejected outright.
+// ---------------------------------------------------------------------
+
+test("super_admin may promote a plain admin to super_admin, and demote back", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const target = await createUserWithRole(ctx, "admin");
+
+    const promote = await fetch(`${baseUrl}/api/v1/admin/users/${target.user.id}`, {
+      method: "PATCH",
+      headers: authHeader(superAdmin.token),
+      body: JSON.stringify({ role: "super_admin" }),
+    });
+    assert.equal(promote.status, 200);
+    assert.equal((await promote.json()).role, "super_admin");
+    assert.equal((await ctx.users.findById(target.user.id))!.role, "super_admin");
+
+    const demote = await fetch(`${baseUrl}/api/v1/admin/users/${target.user.id}`, {
+      method: "PATCH",
+      headers: authHeader(superAdmin.token),
+      body: JSON.stringify({ role: "admin" }),
+    });
+    assert.equal(demote.status, 200);
+    assert.equal((await ctx.users.findById(target.user.id))!.role, "admin");
+  });
+});
+
+test("a plain admin CANNOT change another account's role -- 403", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+    const target = await createUserWithRole(ctx, "admin");
+
+    const res = await fetch(`${baseUrl}/api/v1/admin/users/${target.user.id}`, {
+      method: "PATCH",
+      headers: authHeader(admin.token),
+      body: JSON.stringify({ role: "super_admin" }),
+    });
+    assert.equal(res.status, 403);
+    assert.equal((await ctx.users.findById(target.user.id))!.role, "admin");
+  });
+});
+
+test("a super_admin cannot change their own role -- 400, regardless of whether the value would actually differ", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+
+    const toAdmin = await fetch(`${baseUrl}/api/v1/admin/users/${superAdmin.user.id}`, {
+      method: "PATCH",
+      headers: authHeader(superAdmin.token),
+      body: JSON.stringify({ role: "admin" }),
+    });
+    assert.equal(toAdmin.status, 400);
+
+    const sameValue = await fetch(`${baseUrl}/api/v1/admin/users/${superAdmin.user.id}`, {
+      method: "PATCH",
+      headers: authHeader(superAdmin.token),
+      body: JSON.stringify({ role: "super_admin" }),
+    });
+    assert.equal(sameValue.status, 400, "rejected outright even when the request wouldn't actually change anything");
+
+    assert.equal((await ctx.users.findById(superAdmin.user.id))!.role, "super_admin");
+  });
+});
+
+test("changing role to/from player is rejected -- crossing that boundary is deliberately unsupported (ghs#191)", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const superAdmin = await createUserWithRole(ctx, "super_admin");
+    const player = await createUserWithRole(ctx, "player");
+    const admin = await createUserWithRole(ctx, "admin");
+
+    const playerToAdmin = await fetch(`${baseUrl}/api/v1/admin/users/${player.user.id}`, {
+      method: "PATCH",
+      headers: authHeader(superAdmin.token),
+      body: JSON.stringify({ role: "admin" }),
+    });
+    assert.equal(playerToAdmin.status, 400);
+    assert.equal((await ctx.users.findById(player.user.id))!.role, "player");
+
+    const adminToPlayer = await fetch(`${baseUrl}/api/v1/admin/users/${admin.user.id}`, {
+      method: "PATCH",
+      headers: authHeader(superAdmin.token),
+      body: JSON.stringify({ role: "player" }),
+    });
+    assert.equal(adminToPlayer.status, 400);
+    assert.equal((await ctx.users.findById(admin.user.id))!.role, "admin");
+  });
+});
+
+test("any admin (not just super_admin) may update email and name on a player account", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+    const player = await createUserWithRole(ctx, "player");
+    await ctx.players.create({ userId: player.user.id, firstName: "Old", lastName: "Name" });
+
+    const res = await fetch(`${baseUrl}/api/v1/admin/users/${player.user.id}`, {
+      method: "PATCH",
+      headers: authHeader(admin.token),
+      body: JSON.stringify({ email: "corrected@example.com", firstName: "New", lastName: "Name" }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.email, "corrected@example.com");
+    assert.equal(body.firstName, "New");
+
+    assert.equal((await ctx.users.findById(player.user.id))!.email, "corrected@example.com");
+    const reloadedPlayer = await ctx.players.findByUserId(player.user.id);
+    assert.equal(reloadedPlayer!.firstName, "New");
+  });
+});
+
+test("name cannot be set on an account with no players row -- 400, not silently ignored", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+    const target = await createUserWithRole(ctx, "admin");
+
+    const res = await fetch(`${baseUrl}/api/v1/admin/users/${target.user.id}`, {
+      method: "PATCH",
+      headers: authHeader(admin.token),
+      body: JSON.stringify({ firstName: "First", lastName: "Last" }),
+    });
+    assert.equal(res.status, 400);
+  });
+});
+
+test("a duplicate email is rejected with a clean 409, not a raw constraint-violation 500", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+    const existing = await createUserWithRole(ctx, "player");
+    const target = await createUserWithRole(ctx, "player");
+
+    const res = await fetch(`${baseUrl}/api/v1/admin/users/${target.user.id}`, {
+      method: "PATCH",
+      headers: authHeader(admin.token),
+      body: JSON.stringify({ email: existing.user.email }),
+    });
+    assert.equal(res.status, 409);
+    assert.equal((await ctx.users.findById(target.user.id))!.email, target.user.email, "the target's own email is unchanged after the rejected update");
+  });
+});
+
+test("PATCH /admin/users/:id returns 404 for a genuinely nonexistent user", async () => {
+  const ctx = buildApp();
+  await withServer(ctx.app, async (baseUrl) => {
+    const admin = await createUserWithRole(ctx, "admin");
+    const res = await fetch(`${baseUrl}/api/v1/admin/users/00000000-0000-0000-0000-000000000000`, {
+      method: "PATCH",
+      headers: authHeader(admin.token),
+      body: JSON.stringify({ email: "doesnt-matter@example.com" }),
+    });
+    assert.equal(res.status, 404);
   });
 });
 

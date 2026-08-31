@@ -1,13 +1,32 @@
 import type { Pool } from "pg";
 import type { Logger } from "../logger.ts";
-import type { UsersRepository, UserRole, UserStatus } from "../data/users.repository.ts";
-import type { PlayersRepository } from "../data/players.repository.ts";
+import type { User, UsersRepository, UserRole, UserStatus } from "../data/users.repository.ts";
+import type { Player, PlayersRepository } from "../data/players.repository.ts";
 import type { ActivationTokenRepository } from "../data/activation-tokens.repository.ts";
 import type { NotificationsRepository } from "../data/notifications.repository.ts";
 import { hashPassword } from "../lib/password.ts";
 import { generateToken, hashToken } from "../lib/tokens.ts";
 
 const ACTIVATION_TOKEN_TTL_HOURS = 24;
+
+// ghs#191: admin account-edit's own domain errors -- same "route owns
+// authorization, service owns domain validation" split as everywhere
+// else in this file (adminCreateUser's role-elevation check lives in
+// admin-users.ts, not here).
+export class UserNotFoundError extends Error {}
+export class EmailAlreadyInUseError extends Error {}
+// Thrown for any role change that would cross the player/non-player
+// boundary (player -> admin/super_admin, or the reverse) -- deliberately
+// unsupported for now (see this issue's own Explicit Non-Scope): the
+// players row's fate (keep/orphan its rounds/handicap history?) and
+// where a name comes from for a newly-created player row are real
+// questions, not ones to guess an answer to here.
+export class RoleTransitionNotSupportedError extends Error {}
+// Thrown when firstName/lastName is provided for an account with no
+// players row (i.e. not currently role === "player") -- there's
+// nowhere for a name to be written; explicitly rejected rather than
+// silently ignored.
+export class NameRequiresPlayerAccountError extends Error {}
 
 export interface AdminCreateUserInput {
   email: string;
@@ -55,15 +74,50 @@ export interface ListUsersResult {
   total: number;
 }
 
+// ghs#191: every field independently optional and presence-checked by
+// the caller (admin-users.ts), matching PATCH /courses/:id's own
+// "presence, not truthiness" convention -- an omitted field is simply
+// not touched, not cleared.
+export interface UpdateUserInput {
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  role?: UserRole;
+}
+
 export interface AdminUsersService {
   adminCreateUser(input: AdminCreateUserInput): Promise<{ userId: string }>;
   setUserStatus(userId: string, status: Extract<UserStatus, "active" | "disabled">): Promise<void>;
   listUsers(input: ListUsersInput): Promise<ListUsersResult>;
+  // ghs#191: returns the refreshed row so the caller (the route) can
+  // hand the frontend back exactly what it needs to update its own
+  // local state, without a second GET.
+  updateUser(userId: string, input: UpdateUserInput): Promise<AdminUserListItem>;
   // ghs#98: soft-delete only (status='deleted', already a reserved value
   // in the schema's own CHECK constraint) -- the players row, if any,
   // deliberately survives untouched, since rounds/handicap history must
   // remain queryable regardless of account deletion.
   deleteUser(userId: string): Promise<void>;
+}
+
+// Built field-by-field, not a spread of the raw User row -- that row
+// still carries passwordHash, and this is the one place a silent
+// future field addition to User could otherwise leak straight into an
+// admin-facing response (same discipline as players.ts's own
+// toPlayerProfileResponse for userId). Shared by listUsers and
+// updateUser (ghs#191) -- one definition of "what an admin sees for a
+// user row" to keep in sync, not two.
+function toAdminUserListItem(user: User, player: Player | null): AdminUserListItem {
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    createdAt: user.createdAt,
+    firstName: player?.firstName ?? null,
+    lastName: player?.lastName ?? null,
+    playerId: player?.id ?? null,
+  };
 }
 
 export function createAdminUsersService(
@@ -142,30 +196,54 @@ export function createAdminUsersService(
       const playerRows = await players.findByUserIds(userRows.map((u) => u.id));
       const playersByUserId = new Map(playerRows.filter((p) => p.userId !== null).map((p) => [p.userId as string, p]));
 
-      // Built field-by-field, not a spread of the raw User row -- that
-      // row still carries passwordHash, and this is the one place a
-      // silent future field addition to User could otherwise leak
-      // straight into an admin-listing response (same discipline as
-      // players.ts's toPlayerProfileResponse for userId).
-      const items: AdminUserListItem[] = userRows.map((u) => {
-        const player = playersByUserId.get(u.id);
-        return {
-          id: u.id,
-          email: u.email,
-          role: u.role,
-          status: u.status,
-          createdAt: u.createdAt,
-          firstName: player?.firstName ?? null,
-          lastName: player?.lastName ?? null,
-          playerId: player?.id ?? null,
-        };
-      });
+      const items: AdminUserListItem[] = userRows.map((u) => toAdminUserListItem(u, playersByUserId.get(u.id) ?? null));
 
       return { items, total };
     },
 
     async deleteUser(userId) {
       await users.setStatus(userId, "deleted");
+    },
+
+    async updateUser(userId, input) {
+      const currentUser = await users.findById(userId);
+      if (!currentUser) throw new UserNotFoundError("user not found");
+
+      const currentPlayer = await players.findByUserId(userId);
+
+      // Every domain rule validated up front, before any write --
+      // an invalid request must leave nothing partially applied.
+      if (input.role !== undefined && input.role !== currentUser.role) {
+        const currentIsPlayer = currentUser.role === "player";
+        const nextIsPlayer = input.role === "player";
+        if (currentIsPlayer !== nextIsPlayer) {
+          throw new RoleTransitionNotSupportedError("changing role to/from player is not supported yet");
+        }
+      }
+
+      if ((input.firstName !== undefined || input.lastName !== undefined) && !currentPlayer) {
+        throw new NameRequiresPlayerAccountError("name can only be set for a player account");
+      }
+
+      if (input.email !== undefined && input.email !== currentUser.email) {
+        const existing = await users.findByEmail(input.email);
+        if (existing && existing.id !== userId) {
+          throw new EmailAlreadyInUseError("email already in use");
+        }
+        await users.updateEmail(userId, input.email);
+      }
+
+      if (input.firstName !== undefined && input.lastName !== undefined) {
+        await players.updateName(currentPlayer!.id, input.firstName, input.lastName);
+      }
+
+      if (input.role !== undefined && input.role !== currentUser.role) {
+        await users.updateRole(userId, input.role);
+      }
+
+      const refreshedUser = await users.findById(userId);
+      const refreshedPlayer = await players.findByUserId(userId);
+      return toAdminUserListItem(refreshedUser!, refreshedPlayer);
     },
   };
 }
