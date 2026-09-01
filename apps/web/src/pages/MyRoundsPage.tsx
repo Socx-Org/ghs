@@ -5,7 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, Tooltip, useToast } from "../components";
 import { ApiError, deleteRound, getMyPlayerProfile, getPlayerRounds } from "../lib/api";
 import { ROUND_STATUS_OPTIONS } from "../lib/domain-labels";
-import { EDITABLE_ROUND_STATUSES } from "../types/domain";
+import { AMENDABLE_ROUND_STATUSES, EDITABLE_ROUND_STATUSES } from "../types/domain";
 import type { PlayerRoundListItem } from "../types/domain";
 
 // ghs#147: the player's own "My Rounds" screen -- a real, browsable
@@ -20,17 +20,19 @@ import type { PlayerRoundListItem } from "../types/domain";
 // - View: each row's course name links to RoundDetailsPage
 //   (/rounds/:id/details, new) -- works for any status.
 // - Create: unchanged, reuses NewRoundPage (linked from the header).
-// - Edit: unchanged, reuses RoundEntryPage's existing edit flow
-//   (/rounds/:id) -- offered only while the round is still editable
-//   (EDITABLE_ROUND_STATUSES), matching PlayerDashboardPage's own
-//   Continue-button gating.
-// - Delete: real confirmation Modal, offered only while editable too --
-//   rounds.service.ts's own deleteRound rejects a player attempting to
-//   delete an already-pending/approved round with 409 (platform-owner
-//   decision, ghs#147: only admin may remove those, matching #115's own
-//   unrestricted delete). Matching, not merely tolerating, that server
-//   rule by not offering the action at all once it would just be
-//   rejected.
+// - Edit: reuses RoundEntryPage's existing edit flow (/rounds/:id) --
+//   offered while the round is still amendable (AMENDABLE_ROUND_STATUSES,
+//   ghs#193 -- now also 'pending', matching PlayerDashboardPage's own
+//   Continue-button gating).
+// - Delete: real confirmation Modal, offered only while editable in the
+//   NARROWER sense (EDITABLE_ROUND_STATUSES, unchanged by ghs#193 --
+//   player-initiated delete of a pending round was explicit non-scope
+//   there) -- rounds.service.ts's own deleteRound rejects a player
+//   attempting to delete an already-pending/approved round with 409
+//   (platform-owner decision, ghs#147: only admin may remove those,
+//   matching #115's own unrestricted delete). Matching, not merely
+//   tolerating, that server rule by not offering the action at all once
+//   it would just be rejected.
 
 function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -82,7 +84,16 @@ export default function MyRoundsPage() {
   });
 
   function renderActions(item: PlayerRoundListItem) {
-    if (!EDITABLE_ROUND_STATUSES.has(item.status)) return null;
+    // ghs#193: Edit and Delete now have genuinely different eligibility
+    // -- Edit broadened to AMENDABLE_ROUND_STATUSES (a player may correct
+    // a pending round's hole scores too), Delete stays the narrower,
+    // unchanged EDITABLE_ROUND_STATUSES (player-initiated delete of a
+    // pending round was explicit non-scope for that issue). Neither
+    // renders at all once a round is 'approved', so this still returns
+    // null outright in that case rather than an empty action row.
+    const canEdit = AMENDABLE_ROUND_STATUSES.has(item.status);
+    const canDelete = EDITABLE_ROUND_STATUSES.has(item.status);
+    if (!canEdit && !canDelete) return null;
     // ghs#134: icon-only within this ListView -- see AdminAccountsPage's
     // own renderActions for the same reasoning.
     // ghs#166: content mirrors each button's own aria-label -- single
@@ -91,12 +102,16 @@ export default function MyRoundsPage() {
     const deleteLabel = `Delete round at ${item.courseName}`;
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <Tooltip content={editLabel}>
-          <Button variant="secondary" size="sm" icon={<Pencil aria-hidden="true" className="h-4 w-4" />} aria-label={editLabel} onClick={() => navigate(`/rounds/${item.id}`)} />
-        </Tooltip>
-        <Tooltip content={deleteLabel}>
-          <Button variant="destructive" size="sm" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} aria-label={deleteLabel} onClick={() => setDeleteTarget(item)} />
-        </Tooltip>
+        {canEdit && (
+          <Tooltip content={editLabel}>
+            <Button variant="secondary" size="sm" icon={<Pencil aria-hidden="true" className="h-4 w-4" />} aria-label={editLabel} onClick={() => navigate(`/rounds/${item.id}`)} />
+          </Tooltip>
+        )}
+        {canDelete && (
+          <Tooltip content={deleteLabel}>
+            <Button variant="destructive" size="sm" icon={<Trash2 aria-hidden="true" className="h-4 w-4" />} aria-label={deleteLabel} onClick={() => setDeleteTarget(item)} />
+          </Tooltip>
+        )}
       </div>
     );
   }

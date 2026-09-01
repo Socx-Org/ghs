@@ -157,10 +157,10 @@ export interface RoundsService {
   // triggered here either.
   reopenForAmendment(id: string, reason: string): Promise<RoundWorkflowResult>;
 
-  // ghs#169: draft/pending/rejected/amending only -- see
-  // isDateEditableStatus's own comment for the full reasoning, including
-  // why this doesn't copy deleteRound's admin-unrestricted-by-status
-  // asymmetry. No recalculation is ever triggered here -- none of the
+  // ghs#169: every status except 'approved' -- see isNotYetApprovedStatus's
+  // own comment for the full reasoning, including why this doesn't copy
+  // deleteRound's admin-unrestricted-by-status asymmetry. No
+  // recalculation is ever triggered here -- none of the
   // four eligible statuses carries a differential that currently counts
   // toward handicap calculation (an 'amending' round's own stale
   // score_differential/pcc from its prior approval is deliberately left
@@ -244,29 +244,37 @@ export function createRoundsService(
     }
   }
 
-  // ghs#58: the set of statuses a player may still write hole scores
-  // into, and the exact same set submitForReview accepts as a valid
-  // source status -- one shared definition, not two independently
-  // maintained lists that could drift apart.
+  // ghs#193: the set of statuses a round can still be *submitted for
+  // review* from, and (for a non-admin caller) deleted from -- narrower
+  // than isNotYetApprovedStatus below on purpose. Resubmitting an
+  // already-pending round makes no sense (it's already under review),
+  // and player-initiated delete was never part of this issue's own
+  // ask ("editable," not "deletable") -- both stay restricted to
+  // draft/rejected/amending. Was also hole scores' own gate before
+  // ghs#193; see isNotYetApprovedStatus below for why that moved.
   function isEditableStatus(status: RoundStatus): boolean {
     return status === "draft" || status === "rejected" || status === "amending";
   }
 
-  // ghs#169: deliberately broader than isEditableStatus above -- also
-  // true for 'pending'. A wrong played date is a data-entry slip a
-  // player should be able to self-correct without needing an admin to
-  // reject the round first, unlike hole scores (which stay locked while
-  // a round is under active review). The only status excluded is
-  // 'approved', the only one a round's own score_differential is ever
-  // read from for handicap calculation (RoundsRepository.
-  // listApprovedDifferentialsForPlayer). Same boundary for a player and
-  // an admin/super_admin caller alike -- unlike deleteRound's admin-
-  // unrestricted-by-status precedent, changing an approved round's date
+  // ghs#169, broadened by ghs#193: every status except 'approved' --
+  // the only one a round's own score_differential is ever read from for
+  // handicap calculation (RoundsRepository.listApprovedDifferentialsForPlayer).
+  // Originally just the played date (ghs#169: "a wrong played date is a
+  // data-entry slip a player should be able to self-correct"); ghs#193
+  // extends the exact same reasoning to hole scores themselves -- a
+  // pending round is still awaiting a human decision, not yet locked in,
+  // so a player correcting a mis-entered score is the same kind of
+  // self-correction, not a new category of risk. (The previous "hole
+  // scores stay locked while under active review" stance is the
+  // decision ghs#193 deliberately reverses -- confirmed with the
+  // requester, not an oversight.) Same boundary for a player and an
+  // admin/super_admin caller alike -- unlike deleteRound's admin-
+  // unrestricted-by-status precedent, changing an approved round at all
   // is "amend this round," which reopenForAmendment already exists to
   // do safely; this doesn't invent a second way to edit an approved
   // round directly.
-  function isDateEditableStatus(status: RoundStatus): boolean {
-    return status === "draft" || status === "pending" || status === "rejected" || status === "amending";
+  function isNotYetApprovedStatus(status: RoundStatus): boolean {
+    return status !== "approved";
   }
 
   // ghs#168 review of every "scoreDifferential === null" assumption in
@@ -515,17 +523,21 @@ export function createRoundsService(
       // already gives every other status-sensitive round operation in
       // this file, found missing here in review (PR #73).
       const client = await pool.connect();
+      let holeScore: HoleScore;
+      let statusAtWrite: RoundStatus;
       try {
         await client.query("BEGIN");
         const locked = await repository.getForUpdate(roundId, client);
         if (!locked) throw new RoundNotFoundError(`round ${roundId} not found`);
-        if (!isEditableStatus(locked.status)) {
+        // ghs#193: broadened from isEditableStatus to isNotYetApprovedStatus
+        // -- a player may now edit hole scores on a pending round too, the
+        // same self-correction ghs#169 already allows for the played date.
+        if (!isNotYetApprovedStatus(locked.status)) {
           throw new InvalidRoundTransitionError(`cannot add a hole score to a round in status '${locked.status}'`);
         }
-        const holeScore = await repository.addHoleScore(roundId, { ...input, netDoubleBogeyAdjusted }, client);
+        holeScore = await repository.addHoleScore(roundId, { ...input, netDoubleBogeyAdjusted }, client);
         await client.query("COMMIT");
-        logger.info("hole score recorded", { roundId, holeNumber: holeScore.holeNumber });
-        return holeScore;
+        statusAtWrite = locked.status;
       } catch (err) {
         try {
           await client.query("ROLLBACK");
@@ -538,6 +550,30 @@ export function createRoundsService(
       } finally {
         client.release();
       }
+
+      logger.info("hole score recorded", { roundId, holeNumber: holeScore.holeNumber });
+
+      // ghs#193: a pending round already carries a real, submission-time
+      // score/differential (ghs#168) -- rescored immediately, after the
+      // transaction above has fully closed (same "can't run inside an
+      // existing transaction, needs its own connection" reason every
+      // other rescoreRound call site in this file already follows), so
+      // it never sits stale while still pending. approveRoundInternal's
+      // own unconditional pre-approval rescore already guarantees
+      // correctness AT approval regardless of this; this instead keeps
+      // anything reading the round *while still pending* -- e.g. the
+      // Daily PCC screen -- honest too. Not applied to rejected/amending
+      // -- unchanged, pre-existing behavior (ghs#169's own precedent
+      // already limits immediate rescoring on a date edit to pending/
+      // rejected; this narrows further to pending only for a hole-score
+      // edit, since that's the one new case ghs#193 introduces --
+      // rejected/amending's existing "rescore at resubmission/approval"
+      // behavior isn't revisited here).
+      if (statusAtWrite === "pending") {
+        await rescoreRound(roundId);
+      }
+
+      return holeScore;
     },
 
     async updateScores(id, update) {
@@ -785,7 +821,7 @@ export function createRoundsService(
       const result = await runWorkflowTransition(
         id,
         (existing) => {
-          if (!isDateEditableStatus(existing.status)) {
+          if (!isNotYetApprovedStatus(existing.status)) {
             throw new InvalidRoundTransitionError(`cannot change the played date of a round in status '${existing.status}'`);
           }
         },

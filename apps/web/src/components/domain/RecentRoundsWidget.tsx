@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } fro
 import { Widget } from "../Widget";
 import type { WidgetColSpan } from "../Widget";
 import { RoundStatusBadge } from "./RoundStatusBadge";
-import { EDITABLE_ROUND_STATUSES } from "../../types/domain";
+import { AMENDABLE_ROUND_STATUSES } from "../../types/domain";
 import type { PlayerRoundListItem } from "../../types/domain";
 
 function formatPlayedAt(iso: string): string {
@@ -82,7 +82,7 @@ export function RecentRoundsWidget({ colSpan, isIdle, isLoading, isError, errorM
                 <RoundStatusBadge status={round.status} />
               </TableCell>
               <TableCell>
-                {EDITABLE_ROUND_STATUSES.has(round.status) && (
+                {AMENDABLE_ROUND_STATUSES.has(round.status) && (
                   <Button variant="ghost" size="sm" onClick={() => onContinue(round.id)}>
                     Continue
                   </Button>

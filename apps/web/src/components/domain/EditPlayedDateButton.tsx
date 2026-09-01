@@ -17,21 +17,23 @@ export interface EditPlayedDateButtonProps {
 }
 
 // ghs#169: one shared "Edit date" affordance -- a button opening a small
-// modal with a single date field -- used on both RoundEntryPage
-// (draft/rejected/amending) and RoundDetailsPage (all four editable
-// statuses, including pending -- RoundEntryPage never even renders a
-// form for a pending round at all, so RoundDetailsPage is the only place
-// that status's edit affordance can live; see this issue's own
-// discovery notes). One shared component rather than two independent
+// modal with a single date field -- used on both RoundEntryPage and
+// RoundDetailsPage. One shared component rather than two independent
 // implementations, so the action isn't inconsistently a modal on one
 // screen and something else on the other depending on which a player
 // happens to be viewing.
+//
+// ghs#193: RoundEntryPage now also renders its hole-entry form for a
+// pending round (a player may correct hole scores while still under
+// review, the same self-correction this button already allowed for the
+// played date) -- this button is no longer RoundDetailsPage's exclusive
+// route to editing a pending round's date.
 //
 // Self-contained: owns its own open/form/mutation state and invalidates
 // ["rounds", roundId] on success -- the one cache key both pages already
 // read this round through -- so neither caller needs any wiring beyond
 // rendering this component while the round's status allows the edit
-// (DATE_EDITABLE_ROUND_STATUSES, types/domain.ts).
+// (AMENDABLE_ROUND_STATUSES, types/domain.ts).
 export function EditPlayedDateButton({ roundId, playedAt, size = "sm" }: EditPlayedDateButtonProps) {
   const [open, setOpen] = useState(false);
   const [dateValue, setDateValue] = useState(() => isoStringToDateInputValue(playedAt));

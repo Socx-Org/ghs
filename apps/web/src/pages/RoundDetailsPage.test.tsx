@@ -125,7 +125,7 @@ describe("RoundDetailsPage", () => {
     expect(await screen.findByRole("button", { name: "Edit round" })).toBeInTheDocument();
   });
 
-  it("offers no Edit action for a non-editable (approved/pending) round", async () => {
+  it("offers no Edit round action once a round is approved", async () => {
     mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "approved" }));
     renderAsRole("player");
 
@@ -145,21 +145,22 @@ describe("RoundDetailsPage", () => {
   // reached through RoundEntryPage at all (it renders a plain
   // "already submitted" card there), so this screen is the only place
   // its played date can ever be edited.
-  it("offers Edit date for a pending round, even though it offers no Edit round action at all for one", async () => {
+  it("ghs#193: offers both Edit date AND Edit round for a pending round -- a player may now correct hole scores while still under review, the same self-correction already allowed for the played date", async () => {
     mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "pending" }));
     renderAsRole("player");
 
     await screen.findByText("Blue");
     expect(screen.getByRole("button", { name: "Edit date" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Edit round" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit round" })).toBeInTheDocument();
   });
 
-  it("offers no Edit date action once a round is approved", async () => {
+  it("offers neither Edit date nor Edit round once a round is approved -- the one genuinely locked status", async () => {
     mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "approved" }));
     renderAsRole("player");
 
     await screen.findByText("Blue");
     expect(screen.queryByRole("button", { name: "Edit date" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit round" })).not.toBeInTheDocument();
   });
 
   it("changes a pending round's played date and reflects it after refetch", async () => {

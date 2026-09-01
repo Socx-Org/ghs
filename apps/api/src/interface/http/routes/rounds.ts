@@ -213,11 +213,11 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
         res.status(400).json({ error: err.message });
         return;
       }
-      // ghs#58: addHoleScore now rejects an attempt to edit a round that
-      // isn't draft/rejected/amending (e.g. pending, under active
-      // review) -- same 409 treatment as every other invalid workflow
-      // transition below, not left to fall through to the generic 500
-      // handler.
+      // ghs#58, broadened by ghs#193: addHoleScore rejects an attempt to
+      // edit an already-approved round -- every other status (draft/
+      // pending/rejected/amending) is fair game -- same 409 treatment as
+      // every other invalid workflow transition below, not left to fall
+      // through to the generic 500 handler.
       if (err instanceof InvalidRoundTransitionError) {
         res.status(409).json({ error: err.message });
         return;

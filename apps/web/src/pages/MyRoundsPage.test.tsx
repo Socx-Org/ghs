@@ -104,6 +104,19 @@ describe("MyRoundsPage", () => {
     expect(screen.getAllByRole("button", { name: "Delete round at St Andrews Links" })).toHaveLength(1);
   });
 
+  it("ghs#193: offers Edit but not Delete for a pending round -- a player may correct hole scores while under review, but not delete an already-submitted round", async () => {
+    const pendingRound = {
+      id: "round-3", playerId: "player-1", courseId: "course-3", courseName: "Carnoustie Golf Links",
+      teeConfigurationId: "tee-3", teeConfigurationName: "Championship", playedAt: "2026-05-03T00:00:00.000Z", status: "pending",
+    };
+    mock.onGet("/players/player-1/rounds").reply(200, [...ROUNDS, pendingRound]);
+    renderAsRole("player");
+
+    await screen.findByText("Carnoustie Golf Links");
+    expect(screen.getByRole("button", { name: "Edit round at Carnoustie Golf Links" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete round at Carnoustie Golf Links" })).not.toBeInTheDocument();
+  });
+
   it("Edit navigates to the existing edit/resume screen (/rounds/:id)", async () => {
     mock.onGet("/players/player-1/rounds").reply(200, ROUNDS);
     mock.onGet("/rounds/round-2").reply(200, { id: "round-2", playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T00:00:00.000Z", status: "draft", holeScores: [], playingHandicap: null, grossScore: null, adjustedGrossScore: null, scoreDifferential: null, pcc: null, totalPutts: null, totalGir: null, totalFairwaysHit: null, totalPenalties: null, isTournament: false, is9Hole: false, rejectionReason: null });
