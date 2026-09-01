@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { Pool, PoolClient } from "pg";
 import { createRoundsService, IncompleteRoundError, InvalidRoundTransitionError, RoundNotFoundError } from "../src/application/rounds.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
+import type { ScoringService } from "../src/application/scoring.service.ts";
 import { createLogger } from "../src/logger.ts";
 import type {
   CreateHoleScoreInput,
@@ -473,16 +474,118 @@ test("addHoleScore is permitted while draft, rejected, or amending -- the player
   }
 });
 
-test("addHoleScore is rejected while pending or approved -- an admin may be actively reviewing it, or it's already decided", async () => {
+test("ghs#193: addHoleScore succeeds on a pending round -- a player may correct hole scores while a round is still awaiting review, the same self-correction ghs#169 already allows for the played date", async () => {
+  const repo = fakeRepository();
+  // A working, not throwing, PCC fake -- addHoleScore on a pending round
+  // now triggers an immediate rescore (recomputeRoundAggregates), which
+  // unconditionally calls getOrCreateDailyPcc, same reason approveRound's
+  // own tests already need this (see zeroPccService's own comment).
+  const service = roundsService(repo, undefined, zeroPccService());
+
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.setStatus(round.id, "pending");
+
+  const holeScore = await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+  assert.ok(holeScore.id, "adding a hole score while 'pending' must succeed");
+});
+
+test("addHoleScore is rejected only once a round is approved -- the one genuinely locked status (ghs#193 narrows this from also rejecting 'pending')", async () => {
   const repo = fakeRepository();
   const service = roundsService(repo);
 
-  for (const sourceStatus of ["pending", "approved"] as const) {
-    const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
-    await repo.setStatus(round.id, sourceStatus);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.setStatus(round.id, "approved");
 
-    await assert.rejects(() => service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 }), InvalidRoundTransitionError, `adding a hole score while '${sourceStatus}' must be rejected`);
-  }
+  await assert.rejects(() => service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 }), InvalidRoundTransitionError, "adding a hole score once approved must be rejected");
+});
+
+test("ghs#193: editing a hole score on a pending round immediately rescores it, so its cached score never sits stale while still pending", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo, undefined, zeroPccService());
+
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+  await repo.setStatus(round.id, "pending");
+  const beforeEdit = await repo.get(round.id);
+  // Never rescored yet at this point -- the addHoleScore call above ran
+  // while the round was still 'draft' (no rescore there, nothing to keep
+  // honest yet), so the cached gross score is still whatever create()
+  // left it as (null), not yet reflecting the hole recorded above.
+  assert.equal(beforeEdit!.grossScore, null);
+
+  await service.addHoleScore(round.id, { holeNumber: 1, strokes: 9 });
+
+  const afterEdit = await repo.get(round.id);
+  assert.equal(afterEdit!.grossScore, 9, "the cached gross score reflects the edit immediately (the round's one hole, corrected to 9 strokes), not only at the next resubmission/approval");
+});
+
+test("ghs#193: editing a hole score on a draft round does NOT trigger a rescore -- unchanged, pre-existing behavior (nothing has ever been scored yet)", async () => {
+  const repo = fakeRepository();
+  // Deliberately the throwing PCC fake -- if this test needed a real
+  // rescore to pass, unusedPccService's own throw would surface it; its
+  // absence here is the actual assertion.
+  const service = roundsService(repo);
+
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  const holeScore = await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+  assert.ok(holeScore.id);
+});
+
+test("review finding, PR #194: two overlapping rescores of the SAME round are serialized, never interleaved -- the second never starts its own read until the first has fully finished writing", async () => {
+  // A custom, fully-controlled fake ScoringService (not the real
+  // createScoringService the roundsService() helper above builds) --
+  // needed to force the exact interleaving a missing serialization fix
+  // would allow: the first call deliberately gated open until after the
+  // second call would have already started, if the two weren't queued
+  // behind one another.
+  const repo = fakeRepository();
+  const courses = fakeCoursesRepository();
+  const callLog: string[] = [];
+  let resolveFirstCall!: () => void;
+  const firstCallGate = new Promise<void>((resolve) => {
+    resolveFirstCall = resolve;
+  });
+
+  const scoring: ScoringService = {
+    computeHoleAdjustment: () => 0,
+    async recomputeRoundAggregates(roundId) {
+      const isFirstCall = callLog.length === 0;
+      callLog.push(isFirstCall ? "first-start" : "second-start");
+      if (isFirstCall) {
+        // Held open until explicitly released below -- if rescoreRound
+        // didn't serialize, the second call's own "second-start" would
+        // already be in callLog by the time this resolves.
+        await firstCallGate;
+      }
+      callLog.push(isFirstCall ? "first-end" : "second-end");
+      return (await repo.get(roundId))!;
+    },
+  };
+
+  const service = createRoundsService(
+    fakePool(), repo, courses, scoring, fakeRecalculationOrchestrator(), fakeNotificationsRepository(), fakePlayersRepository(), fakeSystemSettingsService(), silentLogger,
+  );
+
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.setStatus(round.id, "pending");
+
+  const firstEdit = service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+  // Lets the first call's own addHoleScore transaction commit and its
+  // rescore reach the gate above before firing the second.
+  await new Promise((resolve) => setImmediate(resolve));
+  const secondEdit = service.addHoleScore(round.id, { holeNumber: 1, strokes: 9 });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(callLog, ["first-start"], "the second rescore must still be queued -- it must not have started while the first is still gated open");
+
+  resolveFirstCall();
+  await Promise.all([firstEdit, secondEdit]);
+
+  assert.deepEqual(
+    callLog,
+    ["first-start", "first-end", "second-start", "second-end"],
+    "the two rescores never overlap -- the second only starts once the first has fully finished (read, computed, and written)",
+  );
 });
 
 test("approveRound writes a round_approved notification, and rejectRound writes a round_rejected notification with the reason (ghs#25)", async () => {

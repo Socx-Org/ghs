@@ -2,7 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, BackButton, Button, Card, CardBody, CardHeader, EditPlayedDateButton, HolesTable, RoundStatusBadge, Skeleton, Stat } from "../components";
 import { ApiError, getPlayerRounds, getRound, getTeeConfiguration } from "../lib/api";
-import { DATE_EDITABLE_ROUND_STATUSES, EDITABLE_ROUND_STATUSES } from "../types/domain";
+import { AMENDABLE_ROUND_STATUSES } from "../types/domain";
 
 // ghs#147: the player's own read-only round-detail view -- reached from
 // My Rounds (MyRoundsPage), works for any status. A separate screen
@@ -57,12 +57,13 @@ export default function RoundDetailsPage() {
   const round = roundQuery.data;
   const teeConfiguration = teeQuery.data;
   const courseName = roundsListQuery.data?.find((item) => item.id === id)?.courseName;
-  const isEditable = round ? EDITABLE_ROUND_STATUSES.has(round.status) : false;
-  // ghs#169: deliberately a different, broader check than isEditable
-  // above -- also true while 'pending'. This is the only screen a
-  // pending round's played date can be edited from at all; RoundEntryPage
-  // never renders a form for one (see that issue's own discovery notes).
-  const isDateEditable = round ? DATE_EDITABLE_ROUND_STATUSES.has(round.status) : false;
+  // ghs#169, ghs#193: every status except 'approved' -- both the played
+  // date and (since ghs#193) the "Edit round" link into RoundEntryPage's
+  // hole-entry form share this one boundary now. Previously two
+  // separately-named checks (isEditable/isDateEditable) with genuinely
+  // different sets; ghs#193 made them identical, so this page no longer
+  // needs two names for the same thing.
+  const isAmendable = round ? AMENDABLE_ROUND_STATUSES.has(round.status) : false;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 sm:p-6">
@@ -94,7 +95,7 @@ export default function RoundDetailsPage() {
             <CardBody className="flex flex-wrap gap-8">
               <div className="flex items-end gap-2">
                 <Stat label="Played" value={formatPlayedAt(round.playedAt)} />
-                {isDateEditable && <EditPlayedDateButton roundId={round.id} playedAt={round.playedAt} />}
+                {isAmendable && <EditPlayedDateButton roundId={round.id} playedAt={round.playedAt} />}
               </div>
               {/* ghs#168: scoring now happens at submission, so a pending
                   round already carries a real, non-null score -- withheld
@@ -122,7 +123,7 @@ export default function RoundDetailsPage() {
             </CardBody>
           </Card>
 
-          {isEditable && (
+          {isAmendable && (
             <Card>
               <CardBody className="flex justify-end">
                 <Button onClick={() => navigate(`/rounds/${round.id}`)}>Edit round</Button>

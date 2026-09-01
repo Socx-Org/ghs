@@ -7,23 +7,34 @@
 // a bug to fix, not an intentional frontend-only variation.
 export type RoundStatus = "draft" | "pending" | "approved" | "rejected" | "amending";
 
-// ghs#147: a single shared source for "which statuses can still be
-// edited" -- previously redefined independently as EDITABLE_STATUSES
-// (RoundEntryPage) and RESUMABLE_STATUSES (PlayerDashboardPage), both
-// identical; a third copy for MyRoundsPage's own Edit/Delete-button
-// gating was the point this stopped being a coincidence worth
-// tolerating. Mirrors rounds.service.ts's own isEditableStatus exactly.
+// ghs#147: a single shared source for "which statuses a player may still
+// submit for review, or (for a non-admin caller) delete" -- previously
+// redefined independently as EDITABLE_STATUSES (RoundEntryPage) and
+// RESUMABLE_STATUSES (PlayerDashboardPage), both identical; a third copy
+// for MyRoundsPage's own Delete-button gating was the point this stopped
+// being a coincidence worth tolerating. Mirrors rounds.service.ts's own
+// isEditableStatus exactly.
+//
+// ghs#193 narrowed this constant's remaining real purpose: hole-score
+// entry, "Continue"/Edit-button gating, and RoundEntryPage's own
+// form-render gate all moved to the broader AMENDABLE_ROUND_STATUSES
+// below (a player may now correct hole scores on a pending round, the
+// same self-correction ghs#169 already allowed for the played date).
+// This narrower set survives only where "already submitted" genuinely
+// means something different from "still editable": resubmitting an
+// already-pending round makes no sense, and player-initiated delete of
+// a pending round was explicitly out of scope for ghs#193.
 export const EDITABLE_ROUND_STATUSES = new Set<RoundStatus>(["draft", "rejected", "amending"]);
 
-// ghs#169: a deliberately DIFFERENT, broader set -- also includes
-// 'pending'. Do not merge this into EDITABLE_ROUND_STATUSES above; the
-// four screens that already depend on that one meaning exactly
-// draft/rejected/amending (hole-score entry, "Continue"/Edit/Delete
-// gating) would otherwise start offering those actions on a pending
-// round too, which the backend still correctly rejects for anything
-// except the played date. Mirrors rounds.service.ts's own
-// isDateEditableStatus exactly.
-export const DATE_EDITABLE_ROUND_STATUSES = new Set<RoundStatus>(["draft", "pending", "rejected", "amending"]);
+// ghs#169, broadened by ghs#193: every status except 'approved' -- the
+// only one a round's own score_differential is ever read from for
+// handicap calculation. Originally just the played date ("a wrong played
+// date is a data-entry slip a player should be able to self-correct");
+// ghs#193 extends the exact same reasoning to hole scores and the
+// "Edit"/"Continue" actions that lead to entering them -- a pending
+// round is still awaiting a human decision, not yet locked in. Mirrors
+// rounds.service.ts's own isNotYetApprovedStatus exactly.
+export const AMENDABLE_ROUND_STATUSES = new Set<RoundStatus>(["draft", "pending", "rejected", "amending"]);
 
 export type UserRole = "player" | "admin" | "super_admin";
 

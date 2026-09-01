@@ -369,8 +369,8 @@ export interface RoundsRepository {
   // ghs#169: bare column update only -- no recalculation (none of the
   // statuses this is ever called from carry a differential that counts
   // toward handicap calculation; see rounds.service.ts's own
-  // isDateEditableStatus). client: same row-locked-transaction threading
-  // convention as setStatus above.
+  // isNotYetApprovedStatus). client: same row-locked-transaction
+  // threading convention as setStatus above.
   updatePlayedAt(id: string, playedAt: string, client?: PoolClient): Promise<void>;
   // Soft delete (rounds.deleted_at), matching the players/clubs
   // convention. No return value -- callers already have the round's

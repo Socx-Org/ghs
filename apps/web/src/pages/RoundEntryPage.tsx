@@ -3,12 +3,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { Alert, BackButton, Button, Card, CardBody, CardHeader, EditPlayedDateButton, HoleEntryCard, RoundHoleCsvImportForm, RoundStatusBadge, Skeleton, Stat, ToggleGroup, useToast } from "../components";
 import { ApiError, getRound, getTeeConfiguration, submitRound } from "../lib/api";
-import { EDITABLE_ROUND_STATUSES } from "../types/domain";
+import { AMENDABLE_ROUND_STATUSES, EDITABLE_ROUND_STATUSES } from "../types/domain";
 import type { Round, TeeConfiguration } from "../types/domain";
 
-// ghs#94: the hole-by-hole entry (and resume-in-progress) screen.
-// Editable statuses only (draft/rejected/amending) -- viewing a
-// submitted round's result is a later epic item, not this one.
+// ghs#94: the hole-by-hole entry (and resume-in-progress) screen. Every
+// not-yet-approved status renders this form (AMENDABLE_ROUND_STATUSES,
+// ghs#193) -- viewing an APPROVED round's result is a later epic item,
+// not this one. A pending round renders the same form (a player may now
+// correct hole scores while still under review, ghs#193) but with its
+// "Submit for review" action hidden -- resubmitting an already-pending
+// round makes no sense, and the backend still correctly rejects it
+// (EDITABLE_ROUND_STATUSES, narrower on purpose).
 //
 // ghs#68: edit/resubmit for a rejected/amending round already worked
 // via EDITABLE_ROUND_STATUSES below -- the real gap this issue closes
@@ -24,13 +29,16 @@ function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-function AlreadySubmitted({ round, onBack }: { round: Round; onBack: () => void }) {
+// ghs#193: renders only for 'approved' now -- the one status
+// AMENDABLE_ROUND_STATUSES below excludes. Every other status (including
+// 'pending') renders the real hole-entry form instead.
+function AlreadyApproved({ round, onBack }: { round: Round; onBack: () => void }) {
   return (
     <Card>
       <CardBody className="flex flex-col items-center gap-3 py-10 text-center">
         <RoundStatusBadge status={round.status} />
         <p className="text-sm text-text-muted">
-          This round was played on {formatPlayedAt(round.playedAt)} and has already been submitted -- it can no longer be edited here.
+          This round was played on {formatPlayedAt(round.playedAt)} and has already been approved -- it can no longer be edited here.
         </p>
         <Button variant="secondary" size="sm" onClick={onBack}>
           Back to dashboard
@@ -57,6 +65,11 @@ function HoleEntryForm({
   const recordedCount = round.holeScores.length;
   const runningGross = round.holeScores.reduce((sum, hole) => sum + hole.strokes, 0);
   const canSubmit = recordedCount >= requiredCount;
+  // ghs#193: a pending round already reached this form (the outer gate
+  // broadened to AMENDABLE_ROUND_STATUSES), but resubmitting an
+  // already-pending round makes no sense -- EDITABLE_ROUND_STATUSES
+  // stays the narrower, unchanged set for this specific action.
+  const canSubmitForReview = EDITABLE_ROUND_STATUSES.has(round.status);
   // ghs#160: available whenever manual entry is, not gated on zero holes
   // recorded yet -- a CSV can bulk-fill some holes and leave the rest for
   // manual entry, or re-import a corrected file, exactly like re-editing
@@ -121,19 +134,33 @@ function HoleEntryForm({
         <RoundHoleCsvImportForm roundId={round.id} holeCount={teeConfiguration.holes.length} />
       )}
 
-      <Card>
-        <CardBody className="flex flex-col gap-3">
-          {submitFeedback && <Alert variant="error">{submitFeedback}</Alert>}
-          {!canSubmit && (
+      {canSubmitForReview ? (
+        <Card>
+          <CardBody className="flex flex-col gap-3">
+            {submitFeedback && <Alert variant="error">{submitFeedback}</Alert>}
+            {!canSubmit && (
+              <p className="text-sm text-text-muted">
+                Record {requiredCount - recordedCount} more hole{requiredCount - recordedCount === 1 ? "" : "s"} before submitting.
+              </p>
+            )}
+            <Button onClick={onSubmit} isLoading={isSubmitting} disabled={!canSubmit} className="w-full">
+              Submit for review
+            </Button>
+          </CardBody>
+        </Card>
+      ) : (
+        // ghs#193: a pending round has already been submitted -- nothing
+        // to resubmit. Each HoleEntryCard above already saves on its own
+        // "Save hole" action; no second, whole-round submit step applies
+        // here.
+        <Card>
+          <CardBody>
             <p className="text-sm text-text-muted">
-              Record {requiredCount - recordedCount} more hole{requiredCount - recordedCount === 1 ? "" : "s"} before submitting.
+              This round is already submitted and awaiting review. Hole score corrections above take effect as soon as you save them.
             </p>
-          )}
-          <Button onClick={onSubmit} isLoading={isSubmitting} disabled={!canSubmit} className="w-full">
-            Submit for review
-          </Button>
-        </CardBody>
-      </Card>
+          </CardBody>
+        </Card>
+      )}
     </>
   );
 }
@@ -210,8 +237,8 @@ export default function RoundEntryPage() {
         // `teeConfiguration` to defined below (caught by `tsc -b`,
         // stricter than this app's --noEmit typecheck).
         null
-      ) : !EDITABLE_ROUND_STATUSES.has(round.status) ? (
-        <AlreadySubmitted round={round} onBack={() => navigate("/")} />
+      ) : !AMENDABLE_ROUND_STATUSES.has(round.status) ? (
+        <AlreadyApproved round={round} onBack={() => navigate("/")} />
       ) : (
         <HoleEntryForm
           round={round}

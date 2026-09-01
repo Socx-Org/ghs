@@ -207,20 +207,30 @@ describe("RoundEntryPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("round has 1 of 2 required hole scores recorded");
   });
 
-  it("shows a read-only state for an already-submitted round, no hole cards", async () => {
-    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "pending" }));
+  it("shows a read-only state for an approved round, no hole cards -- the one genuinely locked status (ghs#193)", async () => {
+    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "approved" }));
 
     renderEntry();
 
-    expect(await screen.findByText(/already been submitted/)).toBeInTheDocument();
+    expect(await screen.findByText(/already been approved/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Strokes")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Submit for review" })).not.toBeInTheDocument();
   });
 
-  // ghs#169: the played date is now editable via a shared modal, for
-  // every status this screen itself renders a form for (draft/rejected/
-  // amending -- pending never reaches this screen at all, see
-  // RoundDetailsPage.test.tsx for that case).
+  it("ghs#193: a pending round renders the real hole-entry form (a player may correct hole scores while still under review), but with no Submit for review action -- it's already submitted", async () => {
+    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "pending", holeScores: [{ id: "hs-1", holeNumber: 1, strokes: 4, putts: null, gir: false, fairwayResult: null, inSand: false, penalties: 0, netDoubleBogeyAdjusted: 0 }] }));
+
+    renderEntry();
+
+    await screen.findByText("White");
+    expect(screen.getAllByLabelText("Strokes").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Submit for review" })).not.toBeInTheDocument();
+    expect(screen.getByText(/already submitted and awaiting review/)).toBeInTheDocument();
+  });
+
+  // ghs#169, broadened by ghs#193: the played date is editable via a
+  // shared modal, for every status this screen itself renders a form
+  // for -- draft/rejected/amending, and (since ghs#193) pending too.
   describe("played date", () => {
     it("shows the Edit date button for a draft round", async () => {
       mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "draft" }));

@@ -44,7 +44,7 @@ describe("RecentRoundsWidget", () => {
     expect(rows).toHaveLength(4);
   });
 
-  it("offers Continue only for editable-status rounds, and calls onContinue with the right id", async () => {
+  it("offers Continue for every not-yet-approved round, never for an approved one, and calls onContinue with the right id", async () => {
     const onContinue = vi.fn();
     const rounds = [round("r-draft", "2026-05-02T09:00:00.000Z", "draft"), round("r-approved", "2026-05-01T09:00:00.000Z", "approved")];
     render(<RecentRoundsWidget isLoading={false} isError={false} rounds={rounds} onContinue={onContinue} />);
@@ -54,6 +54,13 @@ describe("RecentRoundsWidget", () => {
 
     await userEvent.click(continueButtons[0]!);
     expect(onContinue).toHaveBeenCalledWith("r-draft");
+  });
+
+  it("ghs#193: offers Continue for a pending round too -- a player may correct its hole scores while still under review", async () => {
+    const rounds = [round("r-pending", "2026-05-02T09:00:00.000Z", "pending")];
+    render(<RecentRoundsWidget isLoading={false} isError={false} rounds={rounds} onContinue={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
   });
 
   it("renders header actions (e.g. New round) regardless of state", () => {

@@ -198,6 +198,32 @@ test("addHoleScore's editable-status check is genuinely atomic with the write --
   assert.equal(holeScore.holeNumber, 1, "proceeds correctly, using a fresh locked read, once the held lock is released");
 });
 
+test("ghs#193: addHoleScore succeeds on a pending round against a real database, and immediately rescores it -- verified by deliberately reverting the fix and confirming this fails first", async () => {
+  const courses = createCoursesRepository(pool);
+  const course = await courses.create({
+    name: "Pending Edit Rescore Test Course",
+    country: "ES",
+    teeConfigurations: [{
+      name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113,
+      holes: [{ holeNumber: 1, distanceYards: 380, par: 4, strokeIndex: 7 }],
+    }],
+  });
+  const teeConfigurationId = course.teeConfigurations[0]!.id;
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Pending", lastName: "Editor" });
+  const { roundsRepo, roundsService } = buildServices();
+
+  const round = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsService.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+  await roundsRepo.setStatus(round.id, "pending");
+
+  const holeScore = await roundsService.addHoleScore(round.id, { holeNumber: 1, strokes: 9 });
+  assert.equal(holeScore.strokes, 9, "editing a hole score on a pending round succeeds against a real database, not just a fake");
+
+  const reloaded = await roundsRepo.get(round.id);
+  assert.equal(reloaded!.grossScore, 9, "the round's own cached gross score reflects the correction immediately -- rescored as part of the edit, not deferred to the next resubmission/approval");
+});
+
 test("submitForReview rescores AFTER its own locked transition commits, not before it opens -- a hole score that lands while submission is blocked on the row lock is still reflected in the final persisted score (ghs#168 review fix)", async () => {
   const courses = createCoursesRepository(pool);
   const course = await courses.create({
