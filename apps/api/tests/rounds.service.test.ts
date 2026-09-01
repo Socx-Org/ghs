@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { Pool, PoolClient } from "pg";
 import { createRoundsService, IncompleteRoundError, InvalidRoundTransitionError, RoundNotFoundError } from "../src/application/rounds.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
+import type { ScoringService } from "../src/application/scoring.service.ts";
 import { createLogger } from "../src/logger.ts";
 import type {
   CreateHoleScoreInput,
@@ -528,6 +529,63 @@ test("ghs#193: editing a hole score on a draft round does NOT trigger a rescore 
   const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
   const holeScore = await service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
   assert.ok(holeScore.id);
+});
+
+test("review finding, PR #194: two overlapping rescores of the SAME round are serialized, never interleaved -- the second never starts its own read until the first has fully finished writing", async () => {
+  // A custom, fully-controlled fake ScoringService (not the real
+  // createScoringService the roundsService() helper above builds) --
+  // needed to force the exact interleaving a missing serialization fix
+  // would allow: the first call deliberately gated open until after the
+  // second call would have already started, if the two weren't queued
+  // behind one another.
+  const repo = fakeRepository();
+  const courses = fakeCoursesRepository();
+  const callLog: string[] = [];
+  let resolveFirstCall!: () => void;
+  const firstCallGate = new Promise<void>((resolve) => {
+    resolveFirstCall = resolve;
+  });
+
+  const scoring: ScoringService = {
+    computeHoleAdjustment: () => 0,
+    async recomputeRoundAggregates(roundId) {
+      const isFirstCall = callLog.length === 0;
+      callLog.push(isFirstCall ? "first-start" : "second-start");
+      if (isFirstCall) {
+        // Held open until explicitly released below -- if rescoreRound
+        // didn't serialize, the second call's own "second-start" would
+        // already be in callLog by the time this resolves.
+        await firstCallGate;
+      }
+      callLog.push(isFirstCall ? "first-end" : "second-end");
+      return (await repo.get(roundId))!;
+    },
+  };
+
+  const service = createRoundsService(
+    fakePool(), repo, courses, scoring, fakeRecalculationOrchestrator(), fakeNotificationsRepository(), fakePlayersRepository(), fakeSystemSettingsService(), silentLogger,
+  );
+
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.setStatus(round.id, "pending");
+
+  const firstEdit = service.addHoleScore(round.id, { holeNumber: 1, strokes: 4 });
+  // Lets the first call's own addHoleScore transaction commit and its
+  // rescore reach the gate above before firing the second.
+  await new Promise((resolve) => setImmediate(resolve));
+  const secondEdit = service.addHoleScore(round.id, { holeNumber: 1, strokes: 9 });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(callLog, ["first-start"], "the second rescore must still be queued -- it must not have started while the first is still gated open");
+
+  resolveFirstCall();
+  await Promise.all([firstEdit, secondEdit]);
+
+  assert.deepEqual(
+    callLog,
+    ["first-start", "first-end", "second-start", "second-end"],
+    "the two rescores never overlap -- the second only starts once the first has fully finished (read, computed, and written)",
+  );
 });
 
 test("approveRound writes a round_approved notification, and rejectRound writes a round_rejected notification with the reason (ghs#25)", async () => {

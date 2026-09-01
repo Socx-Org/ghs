@@ -207,19 +207,18 @@ export function createRoundsService(
     if (!player?.userId) return;
     await notifications.record({ userId: player.userId, eventType, payload }, client, options);
   }
+
   // recomputeRoundAggregates runs as its own, separate step before
   // whichever locked transition follows it -- never threaded into the
   // same client. This mirrors the precedent PccService.calculateOrOverride
   // (ghs#19) already set (reading round inputs outside its own bulk-update
-  // transaction): an admin-driven, low-concurrency workflow, where the
-  // cost of fully threading a client through ScoringService's own chain
-  // of repository calls (RoundsRepository.get, CoursesRepository.
-  // getTeeConfiguration, PccService.getOrCreateDailyPcc, RoundsRepository.
-  // updateScores) would be real, ongoing complexity for a race window
-  // that's already acceptably small in practice. The genuinely atomic
-  // unit -- state transition + recalculation -- is what the workflow's
-  // own acceptance criteria actually requires, and that part is fully
-  // transactional below.
+  // transaction): the cost of fully threading a client through
+  // ScoringService's own chain of repository calls (RoundsRepository.get,
+  // CoursesRepository.getTeeConfiguration, PccService.getOrCreateDailyPcc,
+  // RoundsRepository.updateScores) would be real, ongoing complexity the
+  // workflow's own acceptance criteria don't actually require -- the
+  // genuinely atomic unit is state transition + recalculation, and
+  // that part is fully transactional below.
   //
   // ghs#168: originally only called before approval (hence the old name,
   // rescoreBeforeApproval) -- now also called before an ordinary
@@ -231,8 +230,54 @@ export function createRoundsService(
   // re-approved directly (never re-submitted), so this is still the only
   // rescore that path ever gets. Redundant-but-harmless for the ordinary
   // pending -> approved path, genuinely necessary for amending -> approved.
+  //
+  // Review finding, PR #194: recomputeRoundAggregates reads a round's
+  // hole scores and later writes computed aggregates back, with no lock
+  // held across that window -- deliberately, per the "not worth
+  // threading a client through" reasoning just above. Two overlapping
+  // calls for the SAME round could previously interleave: the one that
+  // finishes its read-compute-write cycle LAST wins, regardless of
+  // which one actually read fresher data, silently discarding the
+  // other's contribution to the cached score. Before ghs#193 this needed
+  // real bad luck to hit in practice (only an admin approving right as a
+  // player edited the played date could race); ghs#193 makes every
+  // hole-score edit on a pending round its own rescore trigger, which a
+  // player can fire in quick succession just by saving several holes
+  // close together -- no longer "acceptably small in practice" on its
+  // own. Serialized per-round here (not globally -- different rounds'
+  // own rescores stay fully concurrent, and this still doesn't thread a
+  // client through anything): each call now waits for whatever's
+  // already in flight for the SAME roundId to fully finish before its
+  // own read even starts, so no two recompute cycles for one round can
+  // ever overlap.
+  const rescoreChains = new Map<string, Promise<unknown>>();
+
   async function rescoreRound(roundId: string): Promise<void> {
-    await scoring.recomputeRoundAggregates(roundId);
+    const previous = rescoreChains.get(roundId) ?? Promise.resolve();
+    // This call's own real outcome -- awaited below, so a genuine
+    // failure still propagates to ITS caller exactly as before.
+    const thisCall = previous.catch(() => undefined).then(() => scoring.recomputeRoundAggregates(roundId));
+    // The version published for the NEXT caller to chain behind --
+    // never rejects, so one failed rescore can't permanently wedge
+    // every later rescore of this round behind a rejected promise.
+    // Captured once in a local, not recomputed at cleanup time below:
+    // .catch() always returns a new Promise instance, so comparing
+    // against a freshly-called `.catch()` there would never match what
+    // was actually stored in the map.
+    const published = thisCall.catch(() => undefined);
+    rescoreChains.set(roundId, published);
+    try {
+      await thisCall;
+    } finally {
+      // Only remove this call's own entry, and only if nothing newer
+      // has queued behind it in the meantime -- otherwise a later
+      // caller's own cleanup already owns removing the (by then
+      // different) map entry, and removing it here would drop that
+      // later call's own link to whatever comes after it.
+      if (rescoreChains.get(roundId) === published) {
+        rescoreChains.delete(roundId);
+      }
+    }
   }
 
   // Shared by approveRound's pre-rescore check and runWorkflowTransition's
