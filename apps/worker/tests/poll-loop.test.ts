@@ -70,6 +70,7 @@ function noopPresenceSnapshotsRepository(): PresenceSnapshotsRepository {
   return {
     async insertSnapshot() { /* not reached -- presenceSnapshotIntervalMs never elapses in these tests */ },
     async getSeries() { throw new Error("not used by these tests"); },
+    async hasAnySnapshot() { throw new Error("not used by these tests"); },
   };
 }
 
