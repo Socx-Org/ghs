@@ -60,15 +60,19 @@ function fakeSystemSettings(getPollIntervalSeconds: () => number): SystemSetting
 
 // ghs#195: presenceSnapshot's own no-op fakes -- these poll-loop tests
 // are about scheduling/interrupt behaviour, not about presence snapshots
-// specifically, so a very long presenceSnapshotIntervalMs below keeps
-// runPresenceSnapshot from ever actually firing during them.
+// specifically. lastPresenceSnapshotAt starts at 0 (same as
+// lastRetentionAt above), so runPresenceSnapshot DOES fire on the very
+// first cycle regardless of presenceSnapshotIntervalMs -- the long
+// interval below only prevents a SECOND firing within these tests' own
+// short lifetime, matching noopRetentionRepository's own harmless-no-op
+// framing rather than claiming these methods are never called at all.
 function noopUsersRepository(): UsersRepository {
   return { async countActiveNow() { return 0; } } as UsersRepository;
 }
 
 function noopPresenceSnapshotsRepository(): PresenceSnapshotsRepository {
   return {
-    async insertSnapshot() { /* not reached -- presenceSnapshotIntervalMs never elapses in these tests */ },
+    async insertSnapshot() { /* called once, on cycle 1 -- a harmless no-op */ },
     async getSeries() { throw new Error("not used by these tests"); },
     async hasAnySnapshot() { throw new Error("not used by these tests"); },
   };

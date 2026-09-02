@@ -9,7 +9,7 @@ import type { WidgetColSpan } from "../Widget";
 import type { ActiveUsersChartPeriod, ActiveUsersSeriesPoint } from "../../types/domain";
 
 const PERIOD_LABELS: Record<ActiveUsersChartPeriod, string> = {
-  "24h": "24 hours",
+  "24h": "24h",
   week: "week",
   month: "month",
 };
@@ -106,7 +106,7 @@ export function ActiveUsersSparklineWidget({
             </div>
           </>
         ) : (
-          <p className="text-xs text-text-muted">Collecting history for this chart -- it'll start filling in within a day.</p>
+          <p className="text-xs text-text-muted">Collecting history for this chart -- it'll appear once the first snapshot is recorded, within 15 minutes.</p>
         )}
       </div>
 

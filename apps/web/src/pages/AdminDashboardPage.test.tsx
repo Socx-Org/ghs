@@ -173,7 +173,7 @@ describe("AdminDashboardPage", () => {
 
     expect(await screen.findByText("17")).toBeInTheDocument();
     expect(screen.queryByText(/Collecting history for this chart/)).not.toBeInTheDocument();
-    const table = screen.getByText("Active users: this 24 hours compared with the previous 24 hours").closest("table")!;
+    const table = screen.getByText("Active users: this 24h compared with the previous 24h").closest("table")!;
     expect(within(table).getByText("4")).toBeInTheDocument();
     expect(within(table).getByText("6")).toBeInTheDocument();
     expect(within(table).getByText("1")).toBeInTheDocument();
