@@ -14,6 +14,7 @@ import { createPasswordResetTokenRepository } from "../src/data/password-reset-t
 import { createRefreshTokensRepository } from "../src/data/refresh-tokens.repository.ts";
 import { createMfaRepository } from "../src/data/mfa.repository.ts";
 import { createSystemSettingsRepository } from "../src/data/system-settings.repository.ts";
+import { createPresenceSnapshotsRepository } from "../src/data/presence-snapshots.repository.ts";
 import { createLocalAuthProvider } from "../src/application/auth-provider.ts";
 import { createAuthService } from "../src/application/auth.service.ts";
 import { createMfaService } from "../src/application/mfa.service.ts";
@@ -43,7 +44,12 @@ before(async () => {
 });
 
 beforeEach(async () => {
-  await pool.query("TRUNCATE clubs, users, system_settings RESTART IDENTITY CASCADE");
+  // presence_snapshots included (ghs#195): not FK-linked to users, so
+  // CASCADE from the users truncate above wouldn't touch it -- without
+  // this, a row left behind by presence-snapshots.repository.integration.
+  // test.ts (run order/database is shared across files in this suite)
+  // would silently flip hasHistory to true here.
+  await pool.query("TRUNCATE clubs, users, system_settings, presence_snapshots RESTART IDENTITY CASCADE");
 });
 
 after(async () => {
@@ -90,7 +96,7 @@ function buildApp() {
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, createPresenceSnapshotsRepository(pool), systemSettingsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -305,7 +311,7 @@ test("GET /dashboard/admin: real aggregated response, every section matching a m
       totalRounds: { data: { total: number; pending: number } };
       topCourses: { data: Array<{ courseId: string; courseName: string; roundsCount: number }> };
       mostActivePlayers: { data: Array<{ playerId: string; roundsCount: number; handicapIndex: number | null }> };
-      activeRightNow: { data: number };
+      activeRightNow: { data: { current: number; period: string; series: unknown[]; previousSeries: unknown[]; hasHistory: boolean } };
       userTrends: { data: unknown[] };
     };
 
@@ -319,7 +325,11 @@ test("GET /dashboard/admin: real aggregated response, every section matching a m
     assert.equal(body.mostActivePlayers.data.length, 2);
     assert.equal(body.mostActivePlayers.data[0]!.playerId, playerX!.id);
     assert.equal(body.mostActivePlayers.data[0]!.roundsCount, 2);
-    assert.equal(body.activeRightNow.data, 1, "only playerX heartbeated within the last 5 minutes");
+    assert.equal(body.activeRightNow.data.current, 1, "only playerX heartbeated within the last 5 minutes");
+    assert.equal(body.activeRightNow.data.period, "24h", "default period, no setting configured");
+    assert.equal(body.activeRightNow.data.series.length, 96, "24h of 15-minute buckets");
+    assert.equal(body.activeRightNow.data.previousSeries.length, 96);
+    assert.equal(body.activeRightNow.data.hasHistory, false, "no presence_snapshots rows were seeded in this test");
     assert.equal(body.userTrends.data.length, 30, "default period");
   });
 });

@@ -1,8 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Alert, BackButton, Card, CardBody, Checkbox, Skeleton, useToast } from "../components";
-import { ApiError, getAdminSettings, setMaintenanceMode, setNotificationSetting, setSelfRegistrationEnabled } from "../lib/api";
+import { Alert, BackButton, Card, CardBody, Checkbox, Skeleton, ToggleGroup, useToast } from "../components";
+import { ApiError, getAdminSettings, setActiveUsersChartPeriod, setMaintenanceMode, setNotificationSetting, setSelfRegistrationEnabled } from "../lib/api";
 import type { NotificationSettingType } from "../lib/api";
+import type { ActiveUsersChartPeriod } from "../types/domain";
+
+const ACTIVE_USERS_CHART_PERIOD_OPTIONS = [
+  { value: "24h", label: "24h" },
+  { value: "week", label: "Week" },
+  { value: "month", label: "Month" },
+];
 
 // ghs#157: the one admin-only screen for GHS's fixed, finite settings
 // vocabulary -- design doc / admin-settings.ts's own comment: "a fixed,
@@ -47,6 +54,38 @@ function SettingRow({ label, description, checked, isLoading, onChange }: Settin
   );
 }
 
+interface ChartPeriodSettingRowProps {
+  label: string;
+  description: string;
+  value: ActiveUsersChartPeriod;
+  isLoading: boolean;
+  onChange: (next: ActiveUsersChartPeriod) => void;
+}
+
+// ghs#195: the settings vocabulary's first non-boolean value -- a
+// segmented ToggleGroup (same primitive UserTrendsWidget's own period
+// selector already uses), not a Checkbox, laid out as its own row shape
+// rather than forcing SettingRow's checkbox-specific layout to also fit
+// a three-way choice.
+function ChartPeriodSettingRow({ label, description, value, isLoading, onChange }: ChartPeriodSettingRowProps) {
+  return (
+    <div className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <span>
+        <span className="block text-sm font-medium text-text">{label}</span>
+        <span className="block text-sm text-text-muted">{description}</span>
+      </span>
+      <ToggleGroup
+        name="active-users-chart-period"
+        options={ACTIVE_USERS_CHART_PERIOD_OPTIONS}
+        value={value}
+        disabled={isLoading}
+        onChange={(next) => onChange(next as ActiveUsersChartPeriod)}
+        className="shrink-0"
+      />
+    </div>
+  );
+}
+
 export default function AdminSettingsPage() {
   const navigate = useNavigate();
   const { show } = useToast();
@@ -74,6 +113,15 @@ export default function AdminSettingsPage() {
       show({ variant: "success", message: `Self-registration ${value ? "enabled" : "disabled"}.`, duration: 2500 });
     },
     onError: (error) => show({ variant: "error", message: describeError(error, "Couldn't update self-registration. Try again.") }),
+  });
+
+  const activeUsersChartPeriodMutation = useMutation({
+    mutationFn: setActiveUsersChartPeriod,
+    onSuccess: async (_data, value) => {
+      await invalidate();
+      show({ variant: "success", message: `Active Right Now chart period set to ${value === "24h" ? "24 hours" : value}.`, duration: 2500 });
+    },
+    onError: (error) => show({ variant: "error", message: describeError(error, "Couldn't update the chart period. Try again.") }),
   });
 
   // One shared mutation for all three notification toggles, disambiguated
@@ -125,6 +173,13 @@ export default function AdminSettingsPage() {
                 checked={settingsQuery.data.selfRegistrationEnabled}
                 isLoading={selfRegistrationMutation.isPending}
                 onChange={(value) => selfRegistrationMutation.mutate(value)}
+              />
+              <ChartPeriodSettingRow
+                label="Active Right Now chart period"
+                description="Comparison period for the Admin Dashboard's Active Right Now sparkline -- the current period plotted against the one immediately before it."
+                value={settingsQuery.data.activeUsersChartPeriod}
+                isLoading={activeUsersChartPeriodMutation.isPending}
+                onChange={(value) => activeUsersChartPeriodMutation.mutate(value)}
               />
               <SettingRow
                 label="Notify on round submitted"

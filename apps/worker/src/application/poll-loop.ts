@@ -3,6 +3,7 @@ import type { SystemSettingsService } from "@ghs/api/application/system-settings
 import { runDeliveryCycle, type DeliveryDeps } from "./delivery.service.ts";
 import { runCrashRecoverySweep, type CrashRecoveryDeps } from "./crash-recovery.service.ts";
 import { runRetentionCleanup, type RetentionDeps } from "./retention.service.ts";
+import { runPresenceSnapshot, type PresenceSnapshotDeps } from "./presence-snapshot.service.ts";
 
 export interface PollLoopDeps {
   logger: Logger;
@@ -11,6 +12,8 @@ export interface PollLoopDeps {
   crashRecovery: CrashRecoveryDeps;
   retention: RetentionDeps;
   retentionIntervalMs: number;
+  presenceSnapshot: PresenceSnapshotDeps;
+  presenceSnapshotIntervalMs: number;
 }
 
 export interface PollLoopHandle {
@@ -41,10 +44,11 @@ const FALLBACK_POLL_INTERVAL_SECONDS = 10;
 // changing it takes effect on the worker's very next cycle, no restart
 // needed.
 export function startPollLoop(deps: PollLoopDeps): PollLoopHandle {
-  const { logger, systemSettings, delivery, crashRecovery, retention, retentionIntervalMs } = deps;
+  const { logger, systemSettings, delivery, crashRecovery, retention, retentionIntervalMs, presenceSnapshot, presenceSnapshotIntervalMs } = deps;
 
   let stopped = false;
   let lastRetentionAt = 0;
+  let lastPresenceSnapshotAt = 0;
   let cancelSleep: (() => void) | null = null;
 
   async function runCycle(): Promise<void> {
@@ -60,6 +64,14 @@ export function startPollLoop(deps: PollLoopDeps): PollLoopHandle {
       if (now - lastRetentionAt >= retentionIntervalMs) {
         lastRetentionAt = now;
         await runRetentionCleanup(retention);
+      }
+      // ghs#195: same interval-between-passes technique as retention
+      // above, its own established precedent -- a worker that's been
+      // down doesn't burst-run every missed snapshot on restart, it just
+      // resumes on this same cadence from whenever it comes back.
+      if (now - lastPresenceSnapshotAt >= presenceSnapshotIntervalMs) {
+        lastPresenceSnapshotAt = now;
+        await runPresenceSnapshot(presenceSnapshot);
       }
     } catch (err) {
       // One bad cycle must never crash the whole worker (this issue's

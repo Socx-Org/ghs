@@ -13,6 +13,7 @@
     "./data/pool": "./src/data/pool.ts",
     "./data/users.repository": "./src/data/users.repository.ts",
     "./data/notifications.repository": "./src/data/notifications.repository.ts",
+    "./data/presence-snapshots.repository": "./src/data/presence-snapshots.repository.ts",
     "./data/system-settings.repository": "./src/data/system-settings.repository.ts",
     "./application/system-settings.service": "./src/application/system-settings.service.ts",
     "./data/migrations/apply": "./src/data/migrations/apply.ts"

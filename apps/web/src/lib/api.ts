@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { AccountProfile, AdminDashboard, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, DailyPcc, FairwayResult, HandicapHistoryRecord, HoleScore, PccCorrectionOutcome, PendingRoundQueueItem, PlayerDashboard, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
+import type { AccountProfile, ActiveUsersChartPeriod, AdminDashboard, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, DailyPcc, FairwayResult, HandicapHistoryRecord, HoleScore, PccCorrectionOutcome, PendingRoundQueueItem, PlayerDashboard, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -608,6 +608,8 @@ export interface AdminSettings {
   maintenanceMode: boolean;
   selfRegistrationEnabled: boolean;
   notifications: NotificationSettings;
+  // ghs#195: the Active Right Now sparkline's comparison period.
+  activeUsersChartPeriod: ActiveUsersChartPeriod;
 }
 
 export interface NotificationSettings {
@@ -627,6 +629,10 @@ export async function setMaintenanceMode(value: boolean): Promise<void> {
 
 export async function setSelfRegistrationEnabled(value: boolean): Promise<void> {
   await api.put("/admin/settings/self-registration-enabled", { value });
+}
+
+export async function setActiveUsersChartPeriod(value: ActiveUsersChartPeriod): Promise<void> {
+  await api.put("/admin/settings/active-users-chart-period", { value });
 }
 
 // Matches admin-settings.ts's own NOTIFICATION_KEYS route params exactly

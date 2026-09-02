@@ -43,3 +43,11 @@ export const RETENTION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 // (e.g. after a long-idle worker) is worked off over several passes
 // rather than one long lock-holding statement.
 export const RETENTION_DELETE_BATCH_SIZE = 1000;
+
+// ghs#195, confirmed with the platform owner: a fixed worker constant,
+// not system_settings-configurable, matching the convention above (only
+// the poll interval itself is runtime-tunable). 15 minutes gives the
+// Admin Dashboard's 24h sparkline 96 real data points -- smooth enough to
+// read as a line, small enough that a month of history is a few thousand
+// rows, a trivial footprint.
+export const PRESENCE_SNAPSHOT_INTERVAL_MS = 15 * 60 * 1000;

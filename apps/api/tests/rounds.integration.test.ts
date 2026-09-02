@@ -14,6 +14,7 @@ import { createPasswordResetTokenRepository } from "../src/data/password-reset-t
 import { createRefreshTokensRepository } from "../src/data/refresh-tokens.repository.ts";
 import { createMfaRepository } from "../src/data/mfa.repository.ts";
 import { createSystemSettingsRepository } from "../src/data/system-settings.repository.ts";
+import { createPresenceSnapshotsRepository } from "../src/data/presence-snapshots.repository.ts";
 import { createLocalAuthProvider } from "../src/application/auth-provider.ts";
 import { createAuthService } from "../src/application/auth.service.ts";
 import { createMfaService } from "../src/application/mfa.service.ts";
@@ -230,7 +231,7 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, createPresenceSnapshotsRepository(pool), systemSettingsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -377,7 +378,7 @@ test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole u
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, createPresenceSnapshotsRepository(pool), systemSettingsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
@@ -496,7 +497,7 @@ test("HTTP: submitting a round computes its real score immediately, before any a
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, createPresenceSnapshotsRepository(pool), systemSettingsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createLogger } from "@ghs/api/logger";
 import type { EmailProvider } from "@ghs/api/lib/email";
 import type { SystemSettingsService } from "@ghs/api/application/system-settings.service";
+import type { UsersRepository } from "@ghs/api/data/users.repository";
+import type { PresenceSnapshotsRepository } from "@ghs/api/data/presence-snapshots.repository";
 import { startPollLoop, type PollLoopDeps } from "../src/application/poll-loop.ts";
 import type { OutboxRepository } from "../src/data/outbox.repository.ts";
 import type { RecipientsRepository } from "../src/data/recipients.repository.ts";
@@ -51,6 +53,23 @@ function fakeSystemSettings(getPollIntervalSeconds: () => number): SystemSetting
     async setNotificationSetting() { throw new Error("not used by these tests"); },
     async getNotificationPollIntervalSeconds() { return getPollIntervalSeconds(); },
     async setNotificationPollIntervalSeconds() { throw new Error("not used by these tests"); },
+    async getActiveUsersChartPeriod() { throw new Error("not used by these tests"); },
+    async setActiveUsersChartPeriod() { throw new Error("not used by these tests"); },
+  };
+}
+
+// ghs#195: presenceSnapshot's own no-op fakes -- these poll-loop tests
+// are about scheduling/interrupt behaviour, not about presence snapshots
+// specifically, so a very long presenceSnapshotIntervalMs below keeps
+// runPresenceSnapshot from ever actually firing during them.
+function noopUsersRepository(): UsersRepository {
+  return { async countActiveNow() { return 0; } } as UsersRepository;
+}
+
+function noopPresenceSnapshotsRepository(): PresenceSnapshotsRepository {
+  return {
+    async insertSnapshot() { /* not reached -- presenceSnapshotIntervalMs never elapses in these tests */ },
+    async getSeries() { throw new Error("not used by these tests"); },
   };
 }
 
@@ -70,6 +89,8 @@ function baseDeps(systemSettings: SystemSettingsService): PollLoopDeps {
     crashRecovery: { outbox: emptyOutboxRepository(), logger: silentLogger, timeoutMinutes: 5, batchSize: 20, backoffMinutes: [1, 5, 15] },
     retention: { retention: noopRetentionRepository(), logger: silentLogger, sentRetentionDays: 7, failedRetentionDays: 30, historyRetentionDays: 365, deleteBatchSize: 1000 },
     retentionIntervalMs: 60 * 60 * 1000,
+    presenceSnapshot: { users: noopUsersRepository(), presenceSnapshots: noopPresenceSnapshotsRepository() },
+    presenceSnapshotIntervalMs: 60 * 60 * 1000,
   };
 }
 

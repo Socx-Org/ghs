@@ -194,6 +194,8 @@ function fakeSystemSettingsService(overrides: Partial<NotificationSettings> = {}
     async setNotificationPollIntervalSeconds() { throw new Error("not used by these tests"); },
     async getNotificationSettings() { return settings; },
     async setNotificationSetting() { throw new Error("not used by these tests"); },
+    async getActiveUsersChartPeriod() { throw new Error("not used by these tests"); },
+    async setActiveUsersChartPeriod() { throw new Error("not used by these tests"); },
   };
 }
 

@@ -11,6 +11,7 @@ import { createPasswordResetTokenRepository } from "./data/password-reset-tokens
 import { createRefreshTokensRepository } from "./data/refresh-tokens.repository.ts";
 import { createMfaRepository } from "./data/mfa.repository.ts";
 import { createSystemSettingsRepository } from "./data/system-settings.repository.ts";
+import { createPresenceSnapshotsRepository } from "./data/presence-snapshots.repository.ts";
 import { createClubsService } from "./application/clubs.service.ts";
 import { createCoursesService } from "./application/courses.service.ts";
 import { createLocalAuthProvider } from "./application/auth-provider.ts";
@@ -49,6 +50,7 @@ const passwordResetTokenRepository = createPasswordResetTokenRepository(pool);
 const refreshTokensRepository = createRefreshTokensRepository(pool);
 const mfaRepository = createMfaRepository(pool);
 const systemSettingsRepository = createSystemSettingsRepository(pool);
+const presenceSnapshotsRepository = createPresenceSnapshotsRepository(pool);
 const roundsRepository = createRoundsRepository(pool);
 const handicapOverridesRepository = createHandicapOverridesRepository(pool);
 const handicapHistoryRepository = createHandicapHistoryRepository(pool);
@@ -79,7 +81,7 @@ const authService = createAuthService({
   notifications: notificationsRepository,
 });
 const adminUsersService = createAdminUsersService(pool, logger, usersRepository, playersRepository, activationTokenRepository, notificationsRepository);
-const dashboardService = createDashboardService(handicapHistoryService, roundsService, usersRepository, coursesRepository, logger);
+const dashboardService = createDashboardService(handicapHistoryService, roundsService, usersRepository, coursesRepository, presenceSnapshotsRepository, systemSettingsService, logger);
 
 const app = createApp({
   logger,

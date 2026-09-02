@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createSystemSettingsService } from "../src/application/system-settings.service.ts";
+import { createSystemSettingsService, InvalidSettingValueError } from "../src/application/system-settings.service.ts";
 import type { SettingRow, SystemSettingsRepository } from "../src/data/system-settings.repository.ts";
 
 // Pure unit tests (ENG-030.3) -- no HTTP, no real database.
@@ -63,4 +63,22 @@ test("notification poll interval defaults to 10 seconds (ghs#42's approved confi
 
   await assert.rejects(() => service.setNotificationPollIntervalSeconds(0, "admin-1"));
   await assert.rejects(() => service.setNotificationPollIntervalSeconds(-5, "admin-1"));
+});
+
+test("ghs#195: active users chart period defaults to 24h, is system_settings-configurable across all three real values, and rejects anything outside that vocabulary", async () => {
+  const service = createSystemSettingsService(fakeRepository());
+  assert.equal(await service.getActiveUsersChartPeriod(), "24h");
+
+  await service.setActiveUsersChartPeriod("week", "admin-1");
+  assert.equal(await service.getActiveUsersChartPeriod(), "week");
+
+  await service.setActiveUsersChartPeriod("month", "admin-1");
+  assert.equal(await service.getActiveUsersChartPeriod(), "month");
+
+  await assert.rejects(
+    // @ts-expect-error -- deliberately an invalid value, proving the
+    // runtime check catches what the type system would otherwise block
+    () => service.setActiveUsersChartPeriod("90d", "admin-1"),
+    InvalidSettingValueError,
+  );
 });

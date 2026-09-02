@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Award, ClipboardCheck, History, LandPlot, Trophy, Users } from "lucide-react";
-import { DashboardGrid, EmptyState, KpiStat, RankingList, UserTrendsWidget, Widget } from "../components";
+import { Award, ClipboardCheck, History, LandPlot, Trophy, Users } from "lucide-react";
+import { ActiveUsersSparklineWidget, DashboardGrid, EmptyState, KpiStat, RankingList, UserTrendsWidget, Widget } from "../components";
 import type { RankingListItem } from "../components";
 import { ApiError, getAdminDashboard } from "../lib/api";
 import type { AdminDashboardPeriod } from "../lib/api";
@@ -90,7 +90,6 @@ export default function AdminDashboardPage() {
 
   const activeRightNow = dashboard && "data" in dashboard.activeRightNow ? dashboard.activeRightNow.data : undefined;
   const activeRightNowError = isNetworkError || (dashboard ? "error" in dashboard.activeRightNow : false);
-  const activeRightNowStatus = isLoading ? "loading" : activeRightNowError ? "error" : activeRightNow === undefined ? "empty" : "ready";
 
   const userTrends = dashboard && "data" in dashboard.userTrends ? dashboard.userTrends.data : [];
   const userTrendsError = isNetworkError || (dashboard ? "error" in dashboard.userTrends : false);
@@ -170,17 +169,17 @@ export default function AdminDashboardPage() {
         data={userTrends}
       />
 
-      <Widget
-        title="Active right now"
-        description="Active in the last 5 minutes"
-        icon={Activity}
+      <ActiveUsersSparklineWidget
         colSpan={{ md: 4 }}
-        status={activeRightNowStatus}
+        isLoading={isLoading}
+        isError={activeRightNowError}
         errorMessage={isNetworkError ? networkErrorMessage : undefined}
-        emptyState={<EmptyState title="No one active" />}
-      >
-        {activeRightNow !== undefined && <KpiStat label="Active right now" value={activeRightNow} />}
-      </Widget>
+        current={activeRightNow?.current}
+        period={activeRightNow?.period ?? "24h"}
+        series={activeRightNow?.series ?? []}
+        previousSeries={activeRightNow?.previousSeries ?? []}
+        hasHistory={activeRightNow?.hasHistory ?? false}
+      />
 
       <Widget
         title="Top courses"
