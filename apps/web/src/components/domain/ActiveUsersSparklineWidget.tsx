@@ -62,6 +62,7 @@ export function ActiveUsersSparklineWidget({
 
   const chartData = series.map((point, index) => ({
     index,
+    timestamp: point.timestamp,
     current: point.count,
     previous: previousSeries[index]?.count ?? 0,
   }));
@@ -87,8 +88,12 @@ export function ActiveUsersSparklineWidget({
                 <LineChart data={chartData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
                   <Tooltip
                     contentStyle={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }}
-                    labelStyle={{ display: "none" }}
+                    labelStyle={{ color: "var(--color-text)", fontWeight: 600 }}
                     itemStyle={{ color: "var(--color-text)" }}
+                    labelFormatter={(_label, payload) => {
+                      const timestamp = payload?.[0]?.payload?.timestamp as string | undefined;
+                      return timestamp ? formatBucketTimestamp(timestamp) : "";
+                    }}
                     formatter={(value, name) => [value, name === "current" ? `This ${periodLabel}` : `Previous ${periodLabel}`]}
                   />
                   <Line type="monotone" dataKey="previous" stroke="var(--color-text-muted)" strokeWidth={1.5} dot={false} isAnimationActive={false} />

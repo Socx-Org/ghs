@@ -5,11 +5,15 @@ import { ApiError, getAdminSettings, setActiveUsersChartPeriod, setMaintenanceMo
 import type { NotificationSettingType } from "../lib/api";
 import type { ActiveUsersChartPeriod } from "../types/domain";
 
-const ACTIVE_USERS_CHART_PERIOD_OPTIONS = [
+const ACTIVE_USERS_CHART_PERIOD_OPTIONS: { value: ActiveUsersChartPeriod; label: string }[] = [
   { value: "24h", label: "24h" },
   { value: "week", label: "Week" },
   { value: "month", label: "Month" },
 ];
+
+function activeUsersChartPeriodLabel(value: ActiveUsersChartPeriod): string {
+  return ACTIVE_USERS_CHART_PERIOD_OPTIONS.find((option) => option.value === value)?.label ?? value;
+}
 
 // ghs#157: the one admin-only screen for GHS's fixed, finite settings
 // vocabulary -- design doc / admin-settings.ts's own comment: "a fixed,
@@ -119,7 +123,7 @@ export default function AdminSettingsPage() {
     mutationFn: setActiveUsersChartPeriod,
     onSuccess: async (_data, value) => {
       await invalidate();
-      show({ variant: "success", message: `Active Right Now chart period set to ${value === "24h" ? "24 hours" : value}.`, duration: 2500 });
+      show({ variant: "success", message: `Active Right Now chart period set to ${activeUsersChartPeriodLabel(value)}.`, duration: 2500 });
     },
     onError: (error) => show({ variant: "error", message: describeError(error, "Couldn't update the chart period. Try again.") }),
   });

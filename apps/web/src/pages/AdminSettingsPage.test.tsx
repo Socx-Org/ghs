@@ -126,7 +126,7 @@ describe("AdminSettingsPage", () => {
     expect(await screen.findByRole("radio", { name: "24h" })).toBeChecked();
     await userEvent.click(monthOption);
 
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Active Right Now chart period set to month."));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Active Right Now chart period set to Month."));
     const [request] = mock.history.put?.filter((r) => r.url === "/admin/settings/active-users-chart-period") ?? [];
     expect(JSON.parse(request!.data)).toEqual({ value: "month" });
   });
