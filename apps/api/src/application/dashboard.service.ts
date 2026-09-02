@@ -71,17 +71,36 @@ const TOP_RANKING_LIMIT = 5;
 // a real window size -- current window is [now - windowMs, now), previous
 // window is the same width immediately before it ([now - 2*windowMs, now
 // - windowMs)), so the two series are always directly comparable
-// (same number of buckets, same bucket width).
+// (same number of buckets, same bucket width). windowMs is always an
+// exact multiple of bucketIntervalMs for every period below -- load-
+// bearing for alignBucketEnd's own stability guarantee (see its comment).
 interface ActiveUsersPeriodWindow {
   bucketInterval: string;
+  bucketIntervalMs: number;
   windowMs: number;
 }
 
 const ACTIVE_USERS_PERIOD_WINDOWS: Record<ActiveUsersChartPeriod, ActiveUsersPeriodWindow> = {
-  "24h": { bucketInterval: "15 minutes", windowMs: 24 * 60 * 60 * 1000 },
-  week: { bucketInterval: "1 hour", windowMs: 7 * 24 * 60 * 60 * 1000 },
-  month: { bucketInterval: "1 day", windowMs: 30 * 24 * 60 * 60 * 1000 },
+  "24h": { bucketInterval: "15 minutes", bucketIntervalMs: 15 * 60 * 1000, windowMs: 24 * 60 * 60 * 1000 },
+  week: { bucketInterval: "1 hour", bucketIntervalMs: 60 * 60 * 1000, windowMs: 7 * 24 * 60 * 60 * 1000 },
+  month: { bucketInterval: "1 day", bucketIntervalMs: 24 * 60 * 60 * 1000, windowMs: 30 * 24 * 60 * 60 * 1000 },
 };
+
+// Review finding, PR #196: the series' own range/bucket boundaries were
+// previously anchored to raw request-time `now`, which drifts on every
+// request -- date_bin's origin (getSeries' own rangeStart) shifted along
+// with it, so the exact same stored snapshot could land in a visibly
+// different bucket on the next 60s dashboard poll, reading as jitter with
+// no underlying data change. Flooring to the nearest completed bucket
+// boundary, relative to the fixed Unix epoch (not to `now` itself), gives
+// every request the same stable bucket grid -- the trailing, still-
+// filling bucket is deliberately excluded from the series entirely
+// (rangeEnd is the start of the CURRENT bucket, not partway through it),
+// which is why the live, always-current count above is a separate field
+// (`current`) rather than folded into the series as its own last point.
+function alignBucketEnd(now: Date, bucketIntervalMs: number): Date {
+  return new Date(Math.floor(now.getTime() / bucketIntervalMs) * bucketIntervalMs);
+}
 
 // Review finding, PR #183: toSection previously discarded the error
 // entirely -- a real section failure became a silent 200 with no trace
@@ -166,13 +185,13 @@ export function createDashboardService(
             {},
             (async (): Promise<ActiveUsersSnapshot> => {
               const period = await systemSettings.getActiveUsersChartPeriod();
-              const { bucketInterval, windowMs } = ACTIVE_USERS_PERIOD_WINDOWS[period];
-              const now = new Date();
-              const currentStart = new Date(now.getTime() - windowMs);
-              const previousStart = new Date(now.getTime() - 2 * windowMs);
+              const { bucketInterval, bucketIntervalMs, windowMs } = ACTIVE_USERS_PERIOD_WINDOWS[period];
+              const rangeEnd = alignBucketEnd(new Date(), bucketIntervalMs);
+              const currentStart = new Date(rangeEnd.getTime() - windowMs);
+              const previousStart = new Date(rangeEnd.getTime() - 2 * windowMs);
               const [current, series, previousSeries, hasHistory] = await Promise.all([
                 users.countActiveNow(),
-                presenceSnapshots.getSeries(currentStart, now, bucketInterval),
+                presenceSnapshots.getSeries(currentStart, rangeEnd, bucketInterval),
                 presenceSnapshots.getSeries(previousStart, currentStart, bucketInterval),
                 presenceSnapshots.hasAnySnapshot(),
               ]);

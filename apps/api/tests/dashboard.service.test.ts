@@ -362,6 +362,47 @@ test("ghs#195: activeRightNow reports hasHistory=false when the worker hasn't re
   });
 });
 
+test("ghs#195 (review finding, PR #196): the series' range boundaries are aligned to a fixed 15-minute grid, not to raw request-time `now` -- date_bin's own origin (getSeries' rangeStart) must be stable across requests, or the exact same stored snapshot could land in a visibly different bucket on the next dashboard poll", async () => {
+  const calls: Array<{ rangeStart: Date; rangeEnd: Date }> = [];
+  const presenceSnapshots = fakePresenceSnapshotsRepository({
+    async getSeries(rangeStart, rangeEnd) {
+      calls.push({ rangeStart, rangeEnd });
+      return SAMPLE_ACTIVE_USERS_SERIES;
+    },
+  });
+  const service = createDashboardService(
+    fakeHandicapHistoryService(),
+    fakeRoundsService(),
+    fakeUsersRepository(),
+    fakeCoursesRepository(),
+    presenceSnapshots,
+    fakeSystemSettingsService(),
+    fakeLogger(),
+  );
+
+  const before = Date.now();
+  await service.getAdminDashboard(30);
+  const after = Date.now();
+
+  assert.equal(calls.length, 2, "one getSeries call for the current series, one for the previous series");
+  const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+  const [currentCall, previousCall] = calls;
+
+  // The current series' own rangeEnd (the sparkline's "now" boundary) is
+  // aligned to the fixed 15-minute grid -- exactly divisible by the
+  // bucket width from the Unix epoch, not merely "close to now".
+  assert.equal(currentCall!.rangeEnd.getTime() % FIFTEEN_MINUTES_MS, 0);
+  // It's the last COMPLETED bucket boundary: at or before the real
+  // request time (never a future boundary), and no more than one full
+  // bucket width in the past.
+  assert.ok(currentCall!.rangeEnd.getTime() <= after);
+  assert.ok(currentCall!.rangeEnd.getTime() > before - FIFTEEN_MINUTES_MS);
+
+  // Previous series picks up exactly where the current series' own
+  // window starts -- no gap, no overlap.
+  assert.equal(previousCall!.rangeEnd.getTime(), currentCall!.rangeStart.getTime());
+});
+
 test("getAdminDashboard: a failed totalUsers section (and, independently, the activeRightNow section that shares the same repository) doesn't affect any other section (per-section failure isolation, ghs#180)", async () => {
   const logger = fakeLogger();
   const service = createDashboardService(
