@@ -6,7 +6,7 @@ import type { RoundsService } from "../src/application/rounds.service.ts";
 import type { Logger } from "../src/logger.ts";
 import type { HandicapHistoryRecord } from "../src/data/handicap-history.repository.ts";
 import type { CourseRoundRanking, PlayerRoundListItem, PlayerRoundRanking, PlayerStats } from "../src/data/rounds.repository.ts";
-import type { CourseSummary, CoursesRepository } from "../src/data/courses.repository.ts";
+import type { CourseCountryBreakdown, CoursesRepository } from "../src/data/courses.repository.ts";
 import type { RegistrationTrendPoint, UserRoleBreakdown, UsersRepository } from "../src/data/users.repository.ts";
 import type { PresenceSnapshotSeriesPoint, PresenceSnapshotsRepository } from "../src/data/presence-snapshots.repository.ts";
 import type { SystemSettingsService } from "../src/application/system-settings.service.ts";
@@ -35,10 +35,17 @@ const SAMPLE_STATS: PlayerStats = {
 };
 
 const SAMPLE_ROLE_BREAKDOWN: UserRoleBreakdown = { total: 10, player: 7, admin: 2, superAdmin: 1 };
-const SAMPLE_COURSES: CourseSummary[] = [
-  { id: "c1", clubId: null, name: "Sunningdale", city: null, country: "GB" },
-  { id: "c2", clubId: null, name: "St Andrews", city: null, country: "GB" },
-];
+// ghs#197: total !== the sum of just the top-2 countries -- `others`
+// (12) is real, distinct data a test can assert on, not just derivable
+// from the other two fields.
+const SAMPLE_COURSE_BREAKDOWN: CourseCountryBreakdown = {
+  total: 47,
+  topCountries: [
+    { country: "US", count: 20 },
+    { country: "GB", count: 15 },
+  ],
+  others: 12,
+};
 const SAMPLE_TOP_COURSES: CourseRoundRanking[] = [{ courseId: "c1", courseName: "Sunningdale", roundsCount: 42 }];
 const SAMPLE_MOST_ACTIVE_PLAYERS: PlayerRoundRanking[] = [
   { playerId: "p1", playerFirstName: "Alice", playerLastName: "Whitfield", roundsCount: 24, handicapIndex: 12.4 },
@@ -208,8 +215,9 @@ function fakeCoursesRepository(overrides: Partial<CoursesRepository> = {}): Cour
     throw new Error("not used by these tests");
   };
   return {
-    async list() {
-      return SAMPLE_COURSES;
+    list: notUsed,
+    async getCountryBreakdown() {
+      return SAMPLE_COURSE_BREAKDOWN;
     },
     create: notUsed,
     get: notUsed,
@@ -334,7 +342,7 @@ test("getAdminDashboard (ghs#180): returns real data for every section when all 
   const dashboard = await service.getAdminDashboard(30);
 
   assert.deepEqual(dashboard.totalUsers, { data: SAMPLE_ROLE_BREAKDOWN });
-  assert.deepEqual(dashboard.totalCourses, { data: SAMPLE_COURSES.length });
+  assert.deepEqual(dashboard.totalCourses, { data: SAMPLE_COURSE_BREAKDOWN });
   assert.deepEqual(dashboard.totalRounds, { data: { total: SAMPLE_ROUNDS_TOTAL, pending: SAMPLE_ROUNDS_PENDING } });
   assert.deepEqual(dashboard.topCourses, { data: SAMPLE_TOP_COURSES });
   assert.deepEqual(dashboard.mostActivePlayers, { data: SAMPLE_MOST_ACTIVE_PLAYERS });
@@ -425,7 +433,7 @@ test("getAdminDashboard: a failed totalUsers section (and, independently, the ac
   // Every other section, including activeRightNow (a different method on
   // the SAME users repository), is untouched real data -- proves the
   // isolation is per-call, not per-dependency.
-  assert.deepEqual(dashboard.totalCourses, { data: SAMPLE_COURSES.length });
+  assert.deepEqual(dashboard.totalCourses, { data: SAMPLE_COURSE_BREAKDOWN });
   assert.deepEqual(dashboard.totalRounds, { data: { total: SAMPLE_ROUNDS_TOTAL, pending: SAMPLE_ROUNDS_PENDING } });
   assert.deepEqual(dashboard.topCourses, { data: SAMPLE_TOP_COURSES });
   assert.deepEqual(dashboard.mostActivePlayers, { data: SAMPLE_MOST_ACTIVE_PLAYERS });
@@ -513,7 +521,7 @@ test("getAdminDashboard: every section can fail independently at once -- still r
       },
     }),
     fakeCoursesRepository({
-      async list() {
+      async getCountryBreakdown() {
         throw new Error("courses boom");
       },
     }),

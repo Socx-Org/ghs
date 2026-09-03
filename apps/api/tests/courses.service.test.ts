@@ -10,6 +10,19 @@ function fakeRepository(initial: Course[] = []): CoursesRepository {
     async list() {
       return courses.map(({ id, clubId, name, city, country }) => ({ id, clubId, name, city, country }));
     },
+    async getCountryBreakdown() {
+      const counts = new Map<string | null, number>();
+      for (const course of courses) {
+        counts.set(course.country, (counts.get(course.country) ?? 0) + 1);
+      }
+      const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+      const topCountries = sorted
+        .filter((entry): entry is [string, number] => entry[0] !== null)
+        .slice(0, 2)
+        .map(([country, count]) => ({ country, count }));
+      const others = courses.length - topCountries.reduce((sum, c) => sum + c.count, 0);
+      return { total: courses.length, topCountries, others };
+    },
     async create(input: CreateCourseInput) {
       const course: Course = {
         id: String(courses.length + 1),
