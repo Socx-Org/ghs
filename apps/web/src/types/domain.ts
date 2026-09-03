@@ -254,7 +254,7 @@ export interface ActiveUsersSnapshot {
 export interface AdminDashboard {
   totalUsers: DashboardSection<UserRoleBreakdown>;
   totalCourses: DashboardSection<CourseCountryBreakdown>;
-  totalRounds: DashboardSection<{ total: number; pending: number }>;
+  totalRounds: DashboardSection<{ total: number; pending: number; eighteenHole: number; nineHole: number }>;
   topCourses: DashboardSection<CourseRoundRanking[]>;
   mostActivePlayers: DashboardSection<PlayerRoundRanking[]>;
   activeRightNow: DashboardSection<ActiveUsersSnapshot>;

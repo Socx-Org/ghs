@@ -131,6 +131,17 @@ export interface ListAdminRoundsResult {
   total: number;
 }
 
+// ghs#199: the Admin Dashboard's Total Rounds widget -- same scope as
+// listAdminRounds' own bare total (every non-deleted round, every
+// status, no status filter), split by is_9_hole instead. is_9_hole is a
+// real NOT NULL boolean (004_rounds_and_scoring.sql) -- no third state,
+// so total === eighteenHole + nineHole always holds.
+export interface RoundsHoleCountBreakdown {
+  total: number;
+  eighteenHole: number;
+  nineHole: number;
+}
+
 export interface CreateHoleScoreInput {
   holeNumber: number;
   strokes: number;
@@ -317,6 +328,7 @@ export interface RoundsRepository {
   // above, not a generalisation of it: that one stays purpose-built and
   // deliberately narrow for the pending-review workflow specifically.
   listAdminRounds(filter: ListAdminRoundsFilter): Promise<ListAdminRoundsResult>;
+  getHoleCountBreakdown(): Promise<RoundsHoleCountBreakdown>;
   // Every approved round with a real differential -- the exact input the
   // WHS calculation engine (ghs#22) needs. Excludes anything without a
   // score_differential yet (unscored, or scoring not yet run) and
@@ -800,6 +812,19 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         })),
         total,
       };
+    },
+
+    async getHoleCountBreakdown() {
+      const result = await pool.query<{ total: number; eighteen_hole: number; nine_hole: number }>(
+        `SELECT
+           count(*)::int AS total,
+           count(*) FILTER (WHERE NOT is_9_hole)::int AS eighteen_hole,
+           count(*) FILTER (WHERE is_9_hole)::int AS nine_hole
+         FROM rounds
+         WHERE deleted_at IS NULL`,
+      );
+      const row = result.rows[0]!;
+      return { total: row.total, eighteenHole: row.eighteen_hole, nineHole: row.nine_hole };
     },
 
     async listApprovedDifferentialsForPlayer(playerId, client) {

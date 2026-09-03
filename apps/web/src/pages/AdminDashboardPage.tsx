@@ -50,6 +50,18 @@ function formatCourseCountryBreakdown(breakdown: CourseCountryBreakdown): string
   return segments.length > 0 ? segments.join(" · ") : undefined;
 }
 
+// ghs#199: "18 holes: 9 rounds · 9 holes: 2 rounds" -- unlike
+// formatCourseCountryBreakdown's conditional "Others" bucket (an open-
+// ended residual), 18-hole/9-hole is a fixed, exhaustive 2-category
+// pair, same "always show every category" convention as Total Users'
+// own role breakdown -- neither segment is ever omitted, even at zero.
+function formatRoundsHoleCountBreakdown(rounds: { eighteenHole: number; nineHole: number }): string {
+  return [
+    `18 holes: ${rounds.eighteenHole} round${rounds.eighteenHole === 1 ? "" : "s"}`,
+    `9 holes: ${rounds.nineHole} round${rounds.nineHole === 1 ? "" : "s"}`,
+  ].join(" · ");
+}
+
 function toPlayerRankingItems(rankings: PlayerRoundRanking[]): RankingListItem[] {
   const topValue = rankings[0]?.roundsCount ?? 0;
   return rankings.map((ranking) => ({
@@ -160,7 +172,9 @@ export default function AdminDashboardPage() {
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="No rounds yet" />}
         >
-          {totalRounds && <KpiStat label="Total rounds" value={totalRounds.total} />}
+          {totalRounds && (
+            <KpiStat label="Total rounds" value={totalRounds.total} secondary={formatRoundsHoleCountBreakdown(totalRounds)} />
+          )}
         </Widget>
 
         <Widget

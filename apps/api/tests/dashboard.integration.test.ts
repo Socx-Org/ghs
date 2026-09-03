@@ -290,9 +290,15 @@ test("GET /dashboard/admin: real aggregated response, every section matching a m
     // 2 approved rounds on course A for player X, 1 approved on course B
     // for player Y, 1 still-pending round on course A -- must not count
     // toward totalRounds' own approved-implicit ranking queries, but
-    // DOES count toward the plain total/pending numbers.
+    // DOES count toward the plain total/pending numbers. The second of
+    // player X's approved rounds is 9-hole (ghs#199): 3 eighteen-hole + 1
+    // nine-hole, a real mix real enough to prove the split isn't just
+    // "everything defaults to 18".
     for (let i = 0; i < 2; i++) {
-      const round = await roundsRepo.create({ playerId: playerX!.id, teeConfigurationId: courseA.teeConfigurations[0]!.id, playedAt: `2026-05-0${i + 1}T09:00:00.000Z` });
+      const round = await roundsRepo.create({
+        playerId: playerX!.id, teeConfigurationId: courseA.teeConfigurations[0]!.id, playedAt: `2026-05-0${i + 1}T09:00:00.000Z`,
+        is9Hole: i === 1,
+      });
       await roundsRepo.setStatus(round.id, "approved");
     }
     const roundB = await roundsRepo.create({ playerId: playerY!.id, teeConfigurationId: courseB.teeConfigurations[0]!.id, playedAt: "2026-05-10T09:00:00.000Z" });
@@ -318,7 +324,7 @@ test("GET /dashboard/admin: real aggregated response, every section matching a m
     const body = await response.json() as {
       totalUsers: { data: { total: number; player: number; admin: number; superAdmin: number } };
       totalCourses: { data: { total: number; topCountries: Array<{ country: string; count: number }>; others: number } };
-      totalRounds: { data: { total: number; pending: number } };
+      totalRounds: { data: { total: number; pending: number; eighteenHole: number; nineHole: number } };
       topCourses: { data: Array<{ courseId: string; courseName: string; roundsCount: number }> };
       mostActivePlayers: { data: Array<{ playerId: string; roundsCount: number; handicapIndex: number | null }> };
       activeRightNow: { data: { current: number; period: string; series: unknown[]; previousSeries: unknown[]; hasHistory: boolean } };
@@ -334,7 +340,11 @@ test("GET /dashboard/admin: real aggregated response, every section matching a m
       ],
       others: 2, // GB's course + the null-country course
     });
-    assert.deepEqual(body.totalRounds.data, { total: 4, pending: 1 }, "4 rounds total (3 approved + 1 pending), 1 pending");
+    assert.deepEqual(
+      body.totalRounds.data,
+      { total: 4, pending: 1, eighteenHole: 3, nineHole: 1 },
+      "4 rounds total (3 approved + 1 pending), 1 pending, 3 eighteen-hole + 1 nine-hole",
+    );
     assert.deepEqual(body.topCourses.data, [
       { courseId: courseA.id, courseName: "Admin Dashboard Course A", roundsCount: 2 },
       { courseId: courseB.id, courseName: "Admin Dashboard Course B", roundsCount: 1 },

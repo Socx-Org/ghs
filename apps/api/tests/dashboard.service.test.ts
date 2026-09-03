@@ -112,6 +112,10 @@ function fakeHandicapHistoryService(overrides: Partial<HandicapHistoryService> =
 // real shape rather than returning one flat number for both.
 const SAMPLE_ROUNDS_TOTAL = 20;
 const SAMPLE_ROUNDS_PENDING = 3;
+// ghs#199: eighteenHole + nineHole sums to SAMPLE_ROUNDS_TOTAL, matching
+// the real invariant getHoleCountBreakdown's own comment documents.
+const SAMPLE_ROUNDS_EIGHTEEN_HOLE = 15;
+const SAMPLE_ROUNDS_NINE_HOLE = 5;
 
 function fakeRoundsService(overrides: Partial<RoundsService> = {}): RoundsService {
   const notUsed = async () => {
@@ -128,6 +132,9 @@ function fakeRoundsService(overrides: Partial<RoundsService> = {}): RoundsServic
     listPendingQueue: notUsed,
     async listAdminRounds(filter) {
       return { items: [], total: filter.status === "pending" ? SAMPLE_ROUNDS_PENDING : SAMPLE_ROUNDS_TOTAL };
+    },
+    async getHoleCountBreakdown() {
+      return { total: SAMPLE_ROUNDS_TOTAL, eighteenHole: SAMPLE_ROUNDS_EIGHTEEN_HOLE, nineHole: SAMPLE_ROUNDS_NINE_HOLE };
     },
     async getPlayerStats() {
       return SAMPLE_STATS;
@@ -343,7 +350,7 @@ test("getAdminDashboard (ghs#180): returns real data for every section when all 
 
   assert.deepEqual(dashboard.totalUsers, { data: SAMPLE_ROLE_BREAKDOWN });
   assert.deepEqual(dashboard.totalCourses, { data: SAMPLE_COURSE_BREAKDOWN });
-  assert.deepEqual(dashboard.totalRounds, { data: { total: SAMPLE_ROUNDS_TOTAL, pending: SAMPLE_ROUNDS_PENDING } });
+  assert.deepEqual(dashboard.totalRounds, { data: { total: SAMPLE_ROUNDS_TOTAL, pending: SAMPLE_ROUNDS_PENDING, eighteenHole: SAMPLE_ROUNDS_EIGHTEEN_HOLE, nineHole: SAMPLE_ROUNDS_NINE_HOLE } });
   assert.deepEqual(dashboard.topCourses, { data: SAMPLE_TOP_COURSES });
   assert.deepEqual(dashboard.mostActivePlayers, { data: SAMPLE_MOST_ACTIVE_PLAYERS });
   assert.deepEqual(dashboard.activeRightNow, { data: SAMPLE_ACTIVE_RIGHT_NOW_SNAPSHOT });
@@ -434,7 +441,7 @@ test("getAdminDashboard: a failed totalUsers section (and, independently, the ac
   // the SAME users repository), is untouched real data -- proves the
   // isolation is per-call, not per-dependency.
   assert.deepEqual(dashboard.totalCourses, { data: SAMPLE_COURSE_BREAKDOWN });
-  assert.deepEqual(dashboard.totalRounds, { data: { total: SAMPLE_ROUNDS_TOTAL, pending: SAMPLE_ROUNDS_PENDING } });
+  assert.deepEqual(dashboard.totalRounds, { data: { total: SAMPLE_ROUNDS_TOTAL, pending: SAMPLE_ROUNDS_PENDING, eighteenHole: SAMPLE_ROUNDS_EIGHTEEN_HOLE, nineHole: SAMPLE_ROUNDS_NINE_HOLE } });
   assert.deepEqual(dashboard.topCourses, { data: SAMPLE_TOP_COURSES });
   assert.deepEqual(dashboard.mostActivePlayers, { data: SAMPLE_MOST_ACTIVE_PLAYERS });
   assert.deepEqual(dashboard.activeRightNow, { data: SAMPLE_ACTIVE_RIGHT_NOW_SNAPSHOT });
@@ -451,6 +458,30 @@ test("getAdminDashboard: totalRounds fails as one unit when either of its two un
       async listAdminRounds(filter) {
         if (filter.status === "pending") throw new Error("pending count query failed");
         return { items: [], total: SAMPLE_ROUNDS_TOTAL };
+      },
+    }),
+    fakeUsersRepository(),
+    fakeCoursesRepository(),
+    fakePresenceSnapshotsRepository(),
+    fakeSystemSettingsService(),
+    logger,
+  );
+
+  const dashboard = await service.getAdminDashboard(30);
+
+  assert.deepEqual(dashboard.totalRounds, { error: true });
+  assert.deepEqual(dashboard.totalUsers, { data: SAMPLE_ROLE_BREAKDOWN }, "unrelated sections stay real data");
+  assert.equal(logger.errors.length, 1);
+  assert.equal(logger.errors[0]!.fields?.section, "totalRounds");
+});
+
+test("ghs#199: getAdminDashboard: totalRounds also fails as one unit when getHoleCountBreakdown rejects, even though both listAdminRounds calls succeed", async () => {
+  const logger = fakeLogger();
+  const service = createDashboardService(
+    fakeHandicapHistoryService(),
+    fakeRoundsService({
+      async getHoleCountBreakdown() {
+        throw new Error("hole count query failed");
       },
     }),
     fakeUsersRepository(),

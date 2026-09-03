@@ -53,7 +53,10 @@ export interface AdminDashboard {
   // ghs#197: total + a top-2-country breakdown, same "structured data
   // in, display string built by the frontend" split as totalUsers above.
   totalCourses: DashboardSection<CourseCountryBreakdown>;
-  totalRounds: DashboardSection<{ total: number; pending: number }>;
+  // ghs#199: eighteenHole + nineHole always sums to total (see
+  // getHoleCountBreakdown's own comment) -- both drawn from the exact
+  // same "every non-deleted round, every status" scope.
+  totalRounds: DashboardSection<{ total: number; pending: number; eighteenHole: number; nineHole: number }>;
   topCourses: DashboardSection<CourseRoundRanking[]>;
   mostActivePlayers: DashboardSection<PlayerRoundRanking[]>;
   activeRightNow: DashboardSection<ActiveUsersSnapshot>;
@@ -165,12 +168,22 @@ export function createDashboardService(
           // Reuses the existing, already-proven listAdminRounds query
           // (ghs#100/#113) for both numbers -- limit: 1 since only the
           // real COUNT(*) it already computes is needed, not the rows.
+          // ghs#199: getHoleCountBreakdown() shares the exact same scope
+          // (every non-deleted round, every status, no status filter) as
+          // totalResult's own COUNT(*) -- eighteenHole + nineHole always
+          // equals total.
           toSection(logger, "totalRounds", {}, (async () => {
-            const [totalResult, pendingResult] = await Promise.all([
+            const [totalResult, pendingResult, holeCountBreakdown] = await Promise.all([
               rounds.listAdminRounds({ limit: 1, offset: 0 }),
               rounds.listAdminRounds({ status: "pending", limit: 1, offset: 0 }),
+              rounds.getHoleCountBreakdown(),
             ]);
-            return { total: totalResult.total, pending: pendingResult.total };
+            return {
+              total: totalResult.total,
+              pending: pendingResult.total,
+              eighteenHole: holeCountBreakdown.eighteenHole,
+              nineHole: holeCountBreakdown.nineHole,
+            };
           })()),
           toSection(logger, "topCourses", {}, rounds.getTopCourses(TOP_RANKING_LIMIT)),
           toSection(logger, "mostActivePlayers", {}, rounds.getMostActivePlayers(TOP_RANKING_LIMIT)),
