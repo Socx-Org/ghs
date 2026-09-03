@@ -131,6 +131,36 @@ test("stop() interrupts an in-progress sleep promptly, rather than waiting out t
   assert.ok(Date.now() - stoppedAt < 1000, "stop() did not wait out the full 1-hour interval");
 });
 
+test("ghs#195 (review finding, PR #196): a failed presence snapshot retries on the very next cycle, not after the full presenceSnapshotIntervalMs -- otherwise a single transient failure permanently loses that data point (no way to backfill it later, unlike retention's own self-healing miss)", async () => {
+  let attempts = 0;
+  const presenceSnapshots: PresenceSnapshotsRepository = {
+    async insertSnapshot() {
+      attempts += 1;
+      if (attempts === 1) throw new Error("simulated transient DB failure");
+    },
+    async getSeries() {
+      throw new Error("not used by this test");
+    },
+    async hasAnySnapshot() {
+      throw new Error("not used by this test");
+    },
+  };
+  // A very fast poll interval (10ms between cycles) against a huge
+  // presenceSnapshotIntervalMs (1 hour) -- if a failed attempt left
+  // lastPresenceSnapshotAt already advanced (the bug), no cycle within
+  // this test's short real-time window would ever re-open the gate, and
+  // attempts would stay at 1 forever.
+  const deps = baseDeps(fakeSystemSettings(() => 0.01));
+  deps.presenceSnapshot = { users: noopUsersRepository(), presenceSnapshots };
+  deps.presenceSnapshotIntervalMs = 60 * 60 * 1000;
+
+  const handle = startPollLoop(deps);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await handle.stop();
+
+  assert.equal(attempts, 2, "the failed first attempt must not block a retry -- and, once the retry succeeds, the interval gate closes again (not a third attempt)");
+});
+
 test("stop() called while a cycle is actively running (not sleeping) still waits for that cycle to finish, per its own docstring", async () => {
   let resolveCycle: (() => void) | undefined;
   const slowOutbox: OutboxRepository = {

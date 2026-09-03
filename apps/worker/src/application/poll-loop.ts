@@ -69,9 +69,21 @@ export function startPollLoop(deps: PollLoopDeps): PollLoopHandle {
       // above, its own established precedent -- a worker that's been
       // down doesn't burst-run every missed snapshot on restart, it just
       // resumes on this same cadence from whenever it comes back.
+      //
+      // Review finding, PR #196: lastPresenceSnapshotAt is set only
+      // AFTER a successful write -- unlike retention above (where a
+      // missed pass just self-heals with a larger batch next hour), a
+      // missed snapshot here is a permanent, unbackfillable gap in the
+      // sparkline's own history (this feature's own explicit, accepted
+      // cold-start tradeoff -- see dashboard.service.ts's alignBucketEnd
+      // comment -- doesn't extend to "and gaps from transient failures
+      // are fine too"). Leaving the gate open on failure means the very
+      // next cycle (seconds later, not presenceSnapshotIntervalMs later)
+      // retries -- the outer try/catch below still isolates a repeated
+      // failure from crashing the worker.
       if (now - lastPresenceSnapshotAt >= presenceSnapshotIntervalMs) {
-        lastPresenceSnapshotAt = now;
         await runPresenceSnapshot(presenceSnapshot);
+        lastPresenceSnapshotAt = now;
       }
     } catch (err) {
       // One bad cycle must never crash the whole worker (this issue's
