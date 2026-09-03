@@ -6,6 +6,7 @@ import { Pool } from "pg";
 import { applyMigrations } from "./helpers/apply-migrations.ts";
 import { createLogger } from "../src/logger.ts";
 import { createSystemSettingsRepository } from "../src/data/system-settings.repository.ts";
+import { createPresenceSnapshotsRepository } from "../src/data/presence-snapshots.repository.ts";
 import { createSystemSettingsService } from "../src/application/system-settings.service.ts";
 import { createUsersRepository } from "../src/data/users.repository.ts";
 import type { User, UserRole } from "../src/data/users.repository.ts";
@@ -99,7 +100,7 @@ function buildApp() {
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
   const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
-  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, createPresenceSnapshotsRepository(pool), systemSettingsService, logger);
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,

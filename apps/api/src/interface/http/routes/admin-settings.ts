@@ -1,7 +1,9 @@
 import { Router } from "express";
-import type { SystemSettingsService, NotificationSettings } from "../../../application/system-settings.service.ts";
+import type { ActiveUsersChartPeriod, SystemSettingsService, NotificationSettings } from "../../../application/system-settings.service.ts";
 import type { AuthProvider } from "../../../application/auth-provider.ts";
 import { requireAuth, requireRole } from "../middleware/require-auth.ts";
+
+const ACTIVE_USERS_CHART_PERIODS: readonly ActiveUsersChartPeriod[] = ["24h", "week", "month"];
 
 // Changes go through an authenticated, validated admin interface, not
 // direct database writes (APP-020). Dedicated, typed endpoints per known
@@ -16,12 +18,13 @@ export function adminSettingsRouter(settings: SystemSettingsService, authProvide
 
   router.get("/admin/settings", ...requireAdmin, async (_req, res, next) => {
     try {
-      const [maintenanceMode, selfRegistrationEnabled, notifications] = await Promise.all([
+      const [maintenanceMode, selfRegistrationEnabled, notifications, activeUsersChartPeriod] = await Promise.all([
         settings.getMaintenanceMode(),
         settings.getSelfRegistrationEnabled(),
         settings.getNotificationSettings(),
+        settings.getActiveUsersChartPeriod(),
       ]);
-      res.status(200).json({ maintenanceMode, selfRegistrationEnabled, notifications });
+      res.status(200).json({ maintenanceMode, selfRegistrationEnabled, notifications, activeUsersChartPeriod });
     } catch (err) {
       next(err);
     }
@@ -50,6 +53,20 @@ export function adminSettingsRouter(settings: SystemSettingsService, authProvide
       }
       await settings.setSelfRegistrationEnabled(value, req.identity!.sub);
       res.status(200).json({ selfRegistrationEnabled: value });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.put("/admin/settings/active-users-chart-period", ...requireAdmin, async (req, res, next) => {
+    try {
+      const { value } = req.body as Record<string, unknown>;
+      if (typeof value !== "string" || !ACTIVE_USERS_CHART_PERIODS.includes(value as ActiveUsersChartPeriod)) {
+        res.status(400).json({ error: `value must be one of ${ACTIVE_USERS_CHART_PERIODS.join(", ")}` });
+        return;
+      }
+      await settings.setActiveUsersChartPeriod(value as ActiveUsersChartPeriod, req.identity!.sub);
+      res.status(200).json({ activeUsersChartPeriod: value });
     } catch (err) {
       next(err);
     }

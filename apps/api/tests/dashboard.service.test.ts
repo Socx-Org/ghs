@@ -8,6 +8,8 @@ import type { HandicapHistoryRecord } from "../src/data/handicap-history.reposit
 import type { CourseRoundRanking, PlayerRoundListItem, PlayerRoundRanking, PlayerStats } from "../src/data/rounds.repository.ts";
 import type { CourseSummary, CoursesRepository } from "../src/data/courses.repository.ts";
 import type { RegistrationTrendPoint, UserRoleBreakdown, UsersRepository } from "../src/data/users.repository.ts";
+import type { PresenceSnapshotSeriesPoint, PresenceSnapshotsRepository } from "../src/data/presence-snapshots.repository.ts";
+import type { SystemSettingsService } from "../src/application/system-settings.service.ts";
 
 // Pure unit tests (ENG-030.3) -- no HTTP, no real database. Proves the
 // per-section failure isolation this issue's own acceptance criteria
@@ -43,6 +45,20 @@ const SAMPLE_MOST_ACTIVE_PLAYERS: PlayerRoundRanking[] = [
 ];
 const SAMPLE_USER_TRENDS: RegistrationTrendPoint[] = [{ date: "2026-05-01", count: 3 }];
 const SAMPLE_ACTIVE_RIGHT_NOW = 5;
+const SAMPLE_ACTIVE_USERS_SERIES: PresenceSnapshotSeriesPoint[] = [{ timestamp: "2026-09-01T00:00:00.000Z", count: 4 }];
+// ghs#195: the section's own real shape -- countActiveNow's live number,
+// plus whatever the (fake) presence-snapshots repository and (fake)
+// system-settings service produce. The fake below returns the same
+// series for both the current and previous window (there's no
+// meaningful "which call is which" distinction worth faking here), and
+// defaults the configured period to "24h".
+const SAMPLE_ACTIVE_RIGHT_NOW_SNAPSHOT = {
+  current: SAMPLE_ACTIVE_RIGHT_NOW,
+  period: "24h" as const,
+  series: SAMPLE_ACTIVE_USERS_SERIES,
+  previousSeries: SAMPLE_ACTIVE_USERS_SERIES,
+  hasHistory: true,
+};
 
 // Records every error() call rather than writing to stdout -- review
 // finding, PR #183: toSection previously discarded a section's error
@@ -151,6 +167,42 @@ function fakeUsersRepository(overrides: Partial<UsersRepository> = {}): UsersRep
   } as UsersRepository;
 }
 
+function fakePresenceSnapshotsRepository(overrides: Partial<PresenceSnapshotsRepository> = {}): PresenceSnapshotsRepository {
+  return {
+    async insertSnapshot() {
+      throw new Error("not used by these tests -- only apps/worker calls this");
+    },
+    async getSeries() {
+      return SAMPLE_ACTIVE_USERS_SERIES;
+    },
+    async hasAnySnapshot() {
+      return true;
+    },
+    ...overrides,
+  };
+}
+
+function fakeSystemSettingsService(overrides: Partial<SystemSettingsService> = {}): SystemSettingsService {
+  const notUsed = async () => {
+    throw new Error("not used by these tests");
+  };
+  return {
+    getMaintenanceMode: notUsed,
+    setMaintenanceMode: notUsed,
+    getSelfRegistrationEnabled: notUsed,
+    setSelfRegistrationEnabled: notUsed,
+    getNotificationSettings: notUsed,
+    setNotificationSetting: notUsed,
+    getNotificationPollIntervalSeconds: notUsed,
+    setNotificationPollIntervalSeconds: notUsed,
+    async getActiveUsersChartPeriod() {
+      return "24h";
+    },
+    setActiveUsersChartPeriod: notUsed,
+    ...overrides,
+  } as SystemSettingsService;
+}
+
 function fakeCoursesRepository(overrides: Partial<CoursesRepository> = {}): CoursesRepository {
   const notUsed = async () => {
     throw new Error("not used by these tests");
@@ -173,7 +225,7 @@ function fakeCoursesRepository(overrides: Partial<CoursesRepository> = {}): Cour
 
 test("getPlayerDashboard returns real data for every section when all three underlying calls succeed", async () => {
   const logger = fakeLogger();
-  const service = createDashboardService(fakeHandicapHistoryService(), fakeRoundsService(), fakeUsersRepository(), fakeCoursesRepository(), logger);
+  const service = createDashboardService(fakeHandicapHistoryService(), fakeRoundsService(), fakeUsersRepository(), fakeCoursesRepository(), fakePresenceSnapshotsRepository(), fakeSystemSettingsService(), logger);
 
   const dashboard = await service.getPlayerDashboard("player-1");
 
@@ -194,6 +246,8 @@ test("one section's rejected promise becomes { error: true } without affecting t
     fakeRoundsService(),
     fakeUsersRepository(),
     fakeCoursesRepository(),
+    fakePresenceSnapshotsRepository(),
+    fakeSystemSettingsService(),
     logger,
   );
 
@@ -227,6 +281,8 @@ test("a second section can independently fail while a third stays real data", as
     }),
     fakeUsersRepository(),
     fakeCoursesRepository(),
+    fakePresenceSnapshotsRepository(),
+    fakeSystemSettingsService(),
     logger,
   );
 
@@ -257,6 +313,8 @@ test("every section can fail independently at once -- still resolves (not a reje
     }),
     fakeUsersRepository(),
     fakeCoursesRepository(),
+    fakePresenceSnapshotsRepository(),
+    fakeSystemSettingsService(),
     logger,
   );
 
@@ -271,7 +329,7 @@ test("every section can fail independently at once -- still resolves (not a reje
 
 test("getAdminDashboard (ghs#180): returns real data for every section when all underlying calls succeed", async () => {
   const logger = fakeLogger();
-  const service = createDashboardService(fakeHandicapHistoryService(), fakeRoundsService(), fakeUsersRepository(), fakeCoursesRepository(), logger);
+  const service = createDashboardService(fakeHandicapHistoryService(), fakeRoundsService(), fakeUsersRepository(), fakeCoursesRepository(), fakePresenceSnapshotsRepository(), fakeSystemSettingsService(), logger);
 
   const dashboard = await service.getAdminDashboard(30);
 
@@ -280,9 +338,69 @@ test("getAdminDashboard (ghs#180): returns real data for every section when all 
   assert.deepEqual(dashboard.totalRounds, { data: { total: SAMPLE_ROUNDS_TOTAL, pending: SAMPLE_ROUNDS_PENDING } });
   assert.deepEqual(dashboard.topCourses, { data: SAMPLE_TOP_COURSES });
   assert.deepEqual(dashboard.mostActivePlayers, { data: SAMPLE_MOST_ACTIVE_PLAYERS });
-  assert.deepEqual(dashboard.activeRightNow, { data: SAMPLE_ACTIVE_RIGHT_NOW });
+  assert.deepEqual(dashboard.activeRightNow, { data: SAMPLE_ACTIVE_RIGHT_NOW_SNAPSHOT });
   assert.deepEqual(dashboard.userTrends, { data: SAMPLE_USER_TRENDS });
   assert.equal(logger.errors.length, 0, "nothing failed -- nothing should be logged");
+});
+
+test("ghs#195: activeRightNow reports hasHistory=false when the worker hasn't recorded a single snapshot yet -- the cold-start signal the frontend uses to show a 'collecting history' state instead of a flatlined-at-zero chart", async () => {
+  const logger = fakeLogger();
+  const service = createDashboardService(
+    fakeHandicapHistoryService(),
+    fakeRoundsService(),
+    fakeUsersRepository(),
+    fakeCoursesRepository(),
+    fakePresenceSnapshotsRepository({ async hasAnySnapshot() { return false; } }),
+    fakeSystemSettingsService(),
+    logger,
+  );
+
+  const dashboard = await service.getAdminDashboard(30);
+
+  assert.deepEqual(dashboard.activeRightNow, {
+    data: { ...SAMPLE_ACTIVE_RIGHT_NOW_SNAPSHOT, hasHistory: false },
+  });
+});
+
+test("ghs#195 (review finding, PR #196): the series' range boundaries are aligned to a fixed 15-minute grid, not to raw request-time `now` -- date_bin's own origin (getSeries' rangeStart) must be stable across requests, or the exact same stored snapshot could land in a visibly different bucket on the next dashboard poll", async () => {
+  const calls: Array<{ rangeStart: Date; rangeEnd: Date }> = [];
+  const presenceSnapshots = fakePresenceSnapshotsRepository({
+    async getSeries(rangeStart, rangeEnd) {
+      calls.push({ rangeStart, rangeEnd });
+      return SAMPLE_ACTIVE_USERS_SERIES;
+    },
+  });
+  const service = createDashboardService(
+    fakeHandicapHistoryService(),
+    fakeRoundsService(),
+    fakeUsersRepository(),
+    fakeCoursesRepository(),
+    presenceSnapshots,
+    fakeSystemSettingsService(),
+    fakeLogger(),
+  );
+
+  const before = Date.now();
+  await service.getAdminDashboard(30);
+  const after = Date.now();
+
+  assert.equal(calls.length, 2, "one getSeries call for the current series, one for the previous series");
+  const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+  const [currentCall, previousCall] = calls;
+
+  // The current series' own rangeEnd (the sparkline's "now" boundary) is
+  // aligned to the fixed 15-minute grid -- exactly divisible by the
+  // bucket width from the Unix epoch, not merely "close to now".
+  assert.equal(currentCall!.rangeEnd.getTime() % FIFTEEN_MINUTES_MS, 0);
+  // It's the last COMPLETED bucket boundary: at or before the real
+  // request time (never a future boundary), and no more than one full
+  // bucket width in the past.
+  assert.ok(currentCall!.rangeEnd.getTime() <= after);
+  assert.ok(currentCall!.rangeEnd.getTime() > before - FIFTEEN_MINUTES_MS);
+
+  // Previous series picks up exactly where the current series' own
+  // window starts -- no gap, no overlap.
+  assert.equal(previousCall!.rangeEnd.getTime(), currentCall!.rangeStart.getTime());
 });
 
 test("getAdminDashboard: a failed totalUsers section (and, independently, the activeRightNow section that shares the same repository) doesn't affect any other section (per-section failure isolation, ghs#180)", async () => {
@@ -296,6 +414,8 @@ test("getAdminDashboard: a failed totalUsers section (and, independently, the ac
       },
     }),
     fakeCoursesRepository(),
+    fakePresenceSnapshotsRepository(),
+    fakeSystemSettingsService(),
     logger,
   );
 
@@ -309,7 +429,7 @@ test("getAdminDashboard: a failed totalUsers section (and, independently, the ac
   assert.deepEqual(dashboard.totalRounds, { data: { total: SAMPLE_ROUNDS_TOTAL, pending: SAMPLE_ROUNDS_PENDING } });
   assert.deepEqual(dashboard.topCourses, { data: SAMPLE_TOP_COURSES });
   assert.deepEqual(dashboard.mostActivePlayers, { data: SAMPLE_MOST_ACTIVE_PLAYERS });
-  assert.deepEqual(dashboard.activeRightNow, { data: SAMPLE_ACTIVE_RIGHT_NOW });
+  assert.deepEqual(dashboard.activeRightNow, { data: SAMPLE_ACTIVE_RIGHT_NOW_SNAPSHOT });
   assert.deepEqual(dashboard.userTrends, { data: SAMPLE_USER_TRENDS });
   assert.equal(logger.errors.length, 1);
   assert.equal(logger.errors[0]!.fields?.section, "totalUsers");
@@ -327,6 +447,8 @@ test("getAdminDashboard: totalRounds fails as one unit when either of its two un
     }),
     fakeUsersRepository(),
     fakeCoursesRepository(),
+    fakePresenceSnapshotsRepository(),
+    fakeSystemSettingsService(),
     logger,
   );
 
@@ -351,6 +473,8 @@ test("getAdminDashboard: userTrends passes the caller's own days parameter strai
       },
     }),
     fakeCoursesRepository(),
+    fakePresenceSnapshotsRepository(),
+    fakeSystemSettingsService(),
     logger,
   );
 
@@ -393,6 +517,8 @@ test("getAdminDashboard: every section can fail independently at once -- still r
         throw new Error("courses boom");
       },
     }),
+    fakePresenceSnapshotsRepository(),
+    fakeSystemSettingsService(),
     logger,
   );
 

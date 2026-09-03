@@ -50,3 +50,4 @@ export * from "./domain/EditPlayedDateButton";
 export * from "./domain/RecentRoundsWidget";
 export * from "./domain/HandicapTrendWidget";
 export * from "./domain/UserTrendsWidget";
+export * from "./domain/ActiveUsersSparklineWidget";

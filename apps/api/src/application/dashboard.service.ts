@@ -1,10 +1,12 @@
 import type { HandicapHistoryRecord } from "../data/handicap-history.repository.ts";
 import type { CourseRoundRanking, PlayerRoundListItem, PlayerRoundRanking, PlayerStats } from "../data/rounds.repository.ts";
 import type { RegistrationTrendPoint, UserRoleBreakdown, UsersRepository } from "../data/users.repository.ts";
+import type { PresenceSnapshotSeriesPoint, PresenceSnapshotsRepository } from "../data/presence-snapshots.repository.ts";
 import type { CoursesRepository } from "../data/courses.repository.ts";
 import type { Logger } from "../logger.ts";
 import type { HandicapHistoryService } from "./handicap-history.service.ts";
 import type { RoundsService } from "./rounds.service.ts";
+import type { ActiveUsersChartPeriod, SystemSettingsService } from "./system-settings.service.ts";
 
 // ghs#176 (design doc section E/L.2): per-section failure isolation --
 // a genuinely new pattern for this backend (every existing endpoint
@@ -27,13 +29,32 @@ export interface PlayerDashboard {
 // pending-review count together (one widget, two numbers, design doc's
 // own "split into two KPIs" framing) rather than two separate top-level
 // sections for what's really one query.
+// ghs#195: activeRightNow's own richer shape -- the live 5-minute count
+// (unchanged, still users.countActiveNow()) plus a current-vs-previous
+// bucketed history for the sparkline. `period` is echoed back so the
+// frontend never has to independently track which admin setting produced
+// this particular series.
+export interface ActiveUsersSnapshot {
+  current: number;
+  period: ActiveUsersChartPeriod;
+  series: PresenceSnapshotSeriesPoint[];
+  previousSeries: PresenceSnapshotSeriesPoint[];
+  // False until the worker's periodic snapshot task has recorded at
+  // least one row -- distinguishes "no history collected yet" (an
+  // unavoidable cold start; there's nothing to backfill) from a real,
+  // legitimately zero-filled series. The frontend renders a "collecting
+  // history" state rather than a flatlined-at-zero chart while this is
+  // false.
+  hasHistory: boolean;
+}
+
 export interface AdminDashboard {
   totalUsers: DashboardSection<UserRoleBreakdown>;
   totalCourses: DashboardSection<number>;
   totalRounds: DashboardSection<{ total: number; pending: number }>;
   topCourses: DashboardSection<CourseRoundRanking[]>;
   mostActivePlayers: DashboardSection<PlayerRoundRanking[]>;
-  activeRightNow: DashboardSection<number>;
+  activeRightNow: DashboardSection<ActiveUsersSnapshot>;
   userTrends: DashboardSection<RegistrationTrendPoint[]>;
 }
 
@@ -45,6 +66,41 @@ export interface DashboardService {
 }
 
 const TOP_RANKING_LIMIT = 5;
+
+// ghs#195: each admin-configurable period maps to a real bucket width and
+// a real window size -- current window is [now - windowMs, now), previous
+// window is the same width immediately before it ([now - 2*windowMs, now
+// - windowMs)), so the two series are always directly comparable
+// (same number of buckets, same bucket width). windowMs is always an
+// exact multiple of bucketIntervalMs for every period below -- load-
+// bearing for alignBucketEnd's own stability guarantee (see its comment).
+interface ActiveUsersPeriodWindow {
+  bucketInterval: string;
+  bucketIntervalMs: number;
+  windowMs: number;
+}
+
+const ACTIVE_USERS_PERIOD_WINDOWS: Record<ActiveUsersChartPeriod, ActiveUsersPeriodWindow> = {
+  "24h": { bucketInterval: "15 minutes", bucketIntervalMs: 15 * 60 * 1000, windowMs: 24 * 60 * 60 * 1000 },
+  week: { bucketInterval: "1 hour", bucketIntervalMs: 60 * 60 * 1000, windowMs: 7 * 24 * 60 * 60 * 1000 },
+  month: { bucketInterval: "1 day", bucketIntervalMs: 24 * 60 * 60 * 1000, windowMs: 30 * 24 * 60 * 60 * 1000 },
+};
+
+// Review finding, PR #196: the series' own range/bucket boundaries were
+// previously anchored to raw request-time `now`, which drifts on every
+// request -- date_bin's origin (getSeries' own rangeStart) shifted along
+// with it, so the exact same stored snapshot could land in a visibly
+// different bucket on the next 60s dashboard poll, reading as jitter with
+// no underlying data change. Flooring to the nearest completed bucket
+// boundary, relative to the fixed Unix epoch (not to `now` itself), gives
+// every request the same stable bucket grid -- the trailing, still-
+// filling bucket is deliberately excluded from the series entirely
+// (rangeEnd is the start of the CURRENT bucket, not partway through it),
+// which is why the live, always-current count above is a separate field
+// (`current`) rather than folded into the series as its own last point.
+function alignBucketEnd(now: Date, bucketIntervalMs: number): Date {
+  return new Date(Math.floor(now.getTime() / bucketIntervalMs) * bucketIntervalMs);
+}
 
 // Review finding, PR #183: toSection previously discarded the error
 // entirely -- a real section failure became a silent 200 with no trace
@@ -73,6 +129,8 @@ export function createDashboardService(
   rounds: RoundsService,
   users: UsersRepository,
   courses: CoursesRepository,
+  presenceSnapshots: PresenceSnapshotsRepository,
+  systemSettings: SystemSettingsService,
   logger: Logger,
 ): DashboardService {
   return {
@@ -117,7 +175,29 @@ export function createDashboardService(
           })()),
           toSection(logger, "topCourses", {}, rounds.getTopCourses(TOP_RANKING_LIMIT)),
           toSection(logger, "mostActivePlayers", {}, rounds.getMostActivePlayers(TOP_RANKING_LIMIT)),
-          toSection(logger, "activeRightNow", {}, users.countActiveNow()),
+          // ghs#195: period is read live from system_settings inside this
+          // section's own promise (APP-020: never cached), so a slow or
+          // failing settings read only ever fails this one section, same
+          // isolation every other section already gets.
+          toSection(
+            logger,
+            "activeRightNow",
+            {},
+            (async (): Promise<ActiveUsersSnapshot> => {
+              const period = await systemSettings.getActiveUsersChartPeriod();
+              const { bucketInterval, bucketIntervalMs, windowMs } = ACTIVE_USERS_PERIOD_WINDOWS[period];
+              const rangeEnd = alignBucketEnd(new Date(), bucketIntervalMs);
+              const currentStart = new Date(rangeEnd.getTime() - windowMs);
+              const previousStart = new Date(rangeEnd.getTime() - 2 * windowMs);
+              const [current, series, previousSeries, hasHistory] = await Promise.all([
+                users.countActiveNow(),
+                presenceSnapshots.getSeries(currentStart, rangeEnd, bucketInterval),
+                presenceSnapshots.getSeries(previousStart, currentStart, bucketInterval),
+                presenceSnapshots.hasAnySnapshot(),
+              ]);
+              return { current, period, series, previousSeries, hasHistory };
+            })(),
+          ),
           toSection(logger, "userTrends", { days }, users.getRegistrationTrend(days)),
         ]);
 

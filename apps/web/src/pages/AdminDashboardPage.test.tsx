@@ -7,7 +7,7 @@ import MockAdapter from "axios-mock-adapter";
 import AdminDashboardPage from "./AdminDashboardPage";
 import { api } from "../lib/api";
 import { setTokens } from "../lib/auth-store";
-import type { AdminDashboard, CourseRoundRanking, PlayerRoundRanking, RegistrationTrendPoint, UserRoleBreakdown } from "../types/domain";
+import type { ActiveUsersSnapshot, AdminDashboard, CourseRoundRanking, PlayerRoundRanking, RegistrationTrendPoint, UserRoleBreakdown } from "../types/domain";
 
 function makeAccessToken(claims: object): string {
   const base64url = (input: string) => btoa(input).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -63,6 +63,15 @@ function trendPoint(date: string, count: number): RegistrationTrendPoint {
   return { date, count };
 }
 
+// ghs#195: activeRightNow's own richer shape -- current + a bucketed
+// series pair + hasHistory. Defaults to hasHistory: false (the common,
+// cold-start-safe case for tests that don't care about the sparkline
+// itself), matching a freshly-seeded backend with no presence_snapshots
+// rows yet.
+function activeUsersSnapshot(overrides: Partial<ActiveUsersSnapshot> = {}): ActiveUsersSnapshot {
+  return { current: 2, period: "24h", series: [], previousSeries: [], hasHistory: false, ...overrides };
+}
+
 // ghs#180's own per-section shape -- { data } by default for every
 // section; a test overrides just the section(s) it's exercising.
 function dashboardResponse(overrides: Partial<AdminDashboard> = {}): AdminDashboard {
@@ -72,7 +81,7 @@ function dashboardResponse(overrides: Partial<AdminDashboard> = {}): AdminDashbo
     totalRounds: { data: { total: 20, pending: 3 } },
     topCourses: { data: [] },
     mostActivePlayers: { data: [] },
-    activeRightNow: { data: 2 },
+    activeRightNow: { data: activeUsersSnapshot() },
     userTrends: { data: [] },
     ...overrides,
   };
@@ -131,12 +140,44 @@ describe("AdminDashboardPage", () => {
   });
 
   it("shows Active Right Now (acceptance criterion)", async () => {
-    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({ activeRightNow: { data: 7 } }));
+    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({ activeRightNow: { data: activeUsersSnapshot({ current: 7 }) } }));
 
     renderDashboard();
 
     expect(await screen.findByText("Active right now")).toBeInTheDocument();
     expect(await screen.findByText("7")).toBeInTheDocument();
+  });
+
+  it("Active Right Now shows a 'collecting history' note instead of the sparkline while hasHistory is false (cold start, ghs#195)", async () => {
+    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({ activeRightNow: { data: activeUsersSnapshot({ current: 13, hasHistory: false }) } }));
+
+    renderDashboard();
+
+    expect(await screen.findByText("13")).toBeInTheDocument();
+    expect(screen.getByText(/Collecting history for this chart/)).toBeInTheDocument();
+  });
+
+  it("Active Right Now renders the sparkline's accessible data table once hasHistory is true (ghs#195)", async () => {
+    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({
+      activeRightNow: {
+        data: activeUsersSnapshot({
+          current: 17,
+          hasHistory: true,
+          series: [{ timestamp: "2026-09-01T00:00:00.000Z", count: 4 }, { timestamp: "2026-09-01T00:15:00.000Z", count: 6 }],
+          previousSeries: [{ timestamp: "2026-08-31T00:00:00.000Z", count: 1 }, { timestamp: "2026-08-31T00:15:00.000Z", count: 2 }],
+        }),
+      },
+    }));
+
+    renderDashboard();
+
+    expect(await screen.findByText("17")).toBeInTheDocument();
+    expect(screen.queryByText(/Collecting history for this chart/)).not.toBeInTheDocument();
+    const table = screen.getByText("Active users: this 24h compared with the previous 24h").closest("table")!;
+    expect(within(table).getByText("4")).toBeInTheDocument();
+    expect(within(table).getByText("6")).toBeInTheDocument();
+    expect(within(table).getByText("1")).toBeInTheDocument();
+    expect(within(table).getByText("2")).toBeInTheDocument();
   });
 
   it("Top Courses ranks by rounds played, with the leader's bar at full share (acceptance criterion, real seeded-data shape)", async () => {
@@ -219,7 +260,7 @@ describe("AdminDashboardPage", () => {
       totalRounds: { data: { total: 20, pending: 3 } },
       topCourses: { error: true },
       mostActivePlayers: { data: [] },
-      activeRightNow: { data: 2 },
+      activeRightNow: { data: activeUsersSnapshot() },
       userTrends: { data: [] },
     });
 

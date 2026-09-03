@@ -29,6 +29,12 @@ const KEYS = {
   // retention periods, and batch size are all fixed constants -- see
   // apps/worker/src/constants.ts).
   notificationPollIntervalSeconds: "notify_poll_interval_seconds",
+  // ghs#195: the Admin Dashboard's Active Right Now sparkline -- the
+  // first non-boolean, non-integer setting this vocabulary has. A small,
+  // closed enum (matching KEYS' own "fixed, finite, GHS-defined
+  // vocabulary" framing, admin-settings.ts's own comment), not a
+  // free-form value.
+  activeUsersChartPeriod: "active_users_chart_period",
 } as const;
 
 export class InvalidSettingValueError extends Error {}
@@ -45,6 +51,23 @@ function parsePositiveInteger(raw: string): number {
     throw new InvalidSettingValueError(`expected a positive integer, got ${JSON.stringify(raw)}`);
   }
   return value;
+}
+
+// ghs#195: the sparkline's comparison-period vocabulary -- shared between
+// the getter/setter below and dashboard.service.ts, which maps each value
+// to a real bucket width and range.
+export type ActiveUsersChartPeriod = "24h" | "week" | "month";
+const ACTIVE_USERS_CHART_PERIODS: readonly ActiveUsersChartPeriod[] = ["24h", "week", "month"];
+
+function isActiveUsersChartPeriod(value: string): value is ActiveUsersChartPeriod {
+  return (ACTIVE_USERS_CHART_PERIODS as readonly string[]).includes(value);
+}
+
+function parseActiveUsersChartPeriod(raw: string): ActiveUsersChartPeriod {
+  if (!isActiveUsersChartPeriod(raw)) {
+    throw new InvalidSettingValueError(`expected one of ${ACTIVE_USERS_CHART_PERIODS.join(", ")}, got ${JSON.stringify(raw)}`);
+  }
+  return raw;
 }
 
 export interface NotificationSettings {
@@ -65,6 +88,9 @@ export interface SystemSettingsService {
 
   getNotificationPollIntervalSeconds(): Promise<number>;
   setNotificationPollIntervalSeconds(value: number, updatedBy: string | null): Promise<void>;
+
+  getActiveUsersChartPeriod(): Promise<ActiveUsersChartPeriod>;
+  setActiveUsersChartPeriod(value: ActiveUsersChartPeriod, updatedBy: string | null): Promise<void>;
 }
 
 export function createSystemSettingsService(repo: SystemSettingsRepository): SystemSettingsService {
@@ -131,6 +157,23 @@ export function createSystemSettingsService(repo: SystemSettingsRepository): Sys
         KEYS.notificationPollIntervalSeconds,
         String(value),
         "How often the notification worker polls notification_outbox for pending work, in seconds",
+        updatedBy,
+      );
+    },
+
+    async getActiveUsersChartPeriod() {
+      const row = await repo.get(KEYS.activeUsersChartPeriod);
+      return row ? parseActiveUsersChartPeriod(row.value) : "24h"; // default: the sparkline's original, narrowest framing
+    },
+
+    async setActiveUsersChartPeriod(value, updatedBy) {
+      if (!isActiveUsersChartPeriod(value)) {
+        throw new InvalidSettingValueError(`expected one of ${ACTIVE_USERS_CHART_PERIODS.join(", ")}, got ${JSON.stringify(value)}`);
+      }
+      await repo.upsert(
+        KEYS.activeUsersChartPeriod,
+        value,
+        "Comparison period for the Admin Dashboard's Active Right Now sparkline (24h/week/month)",
         updatedBy,
       );
     },

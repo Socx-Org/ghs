@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { createLogger } from "@ghs/api/logger";
 import type { EmailProvider } from "@ghs/api/lib/email";
 import type { SystemSettingsService } from "@ghs/api/application/system-settings.service";
+import type { UsersRepository } from "@ghs/api/data/users.repository";
+import type { PresenceSnapshotsRepository } from "@ghs/api/data/presence-snapshots.repository";
 import { startPollLoop, type PollLoopDeps } from "../src/application/poll-loop.ts";
 import type { OutboxRepository } from "../src/data/outbox.repository.ts";
 import type { RecipientsRepository } from "../src/data/recipients.repository.ts";
@@ -51,6 +53,28 @@ function fakeSystemSettings(getPollIntervalSeconds: () => number): SystemSetting
     async setNotificationSetting() { throw new Error("not used by these tests"); },
     async getNotificationPollIntervalSeconds() { return getPollIntervalSeconds(); },
     async setNotificationPollIntervalSeconds() { throw new Error("not used by these tests"); },
+    async getActiveUsersChartPeriod() { throw new Error("not used by these tests"); },
+    async setActiveUsersChartPeriod() { throw new Error("not used by these tests"); },
+  };
+}
+
+// ghs#195: presenceSnapshot's own no-op fakes -- these poll-loop tests
+// are about scheduling/interrupt behaviour, not about presence snapshots
+// specifically. lastPresenceSnapshotAt starts at 0 (same as
+// lastRetentionAt above), so runPresenceSnapshot DOES fire on the very
+// first cycle regardless of presenceSnapshotIntervalMs -- the long
+// interval below only prevents a SECOND firing within these tests' own
+// short lifetime, matching noopRetentionRepository's own harmless-no-op
+// framing rather than claiming these methods are never called at all.
+function noopUsersRepository(): UsersRepository {
+  return { async countActiveNow() { return 0; } } as UsersRepository;
+}
+
+function noopPresenceSnapshotsRepository(): PresenceSnapshotsRepository {
+  return {
+    async insertSnapshot() { /* called once, on cycle 1 -- a harmless no-op */ },
+    async getSeries() { throw new Error("not used by these tests"); },
+    async hasAnySnapshot() { throw new Error("not used by these tests"); },
   };
 }
 
@@ -70,6 +94,8 @@ function baseDeps(systemSettings: SystemSettingsService): PollLoopDeps {
     crashRecovery: { outbox: emptyOutboxRepository(), logger: silentLogger, timeoutMinutes: 5, batchSize: 20, backoffMinutes: [1, 5, 15] },
     retention: { retention: noopRetentionRepository(), logger: silentLogger, sentRetentionDays: 7, failedRetentionDays: 30, historyRetentionDays: 365, deleteBatchSize: 1000 },
     retentionIntervalMs: 60 * 60 * 1000,
+    presenceSnapshot: { users: noopUsersRepository(), presenceSnapshots: noopPresenceSnapshotsRepository() },
+    presenceSnapshotIntervalMs: 60 * 60 * 1000,
   };
 }
 
@@ -103,6 +129,36 @@ test("stop() interrupts an in-progress sleep promptly, rather than waiting out t
   const stoppedAt = Date.now();
   await handle.stop();
   assert.ok(Date.now() - stoppedAt < 1000, "stop() did not wait out the full 1-hour interval");
+});
+
+test("ghs#195 (review finding, PR #196): a failed presence snapshot retries on the very next cycle, not after the full presenceSnapshotIntervalMs -- otherwise a single transient failure permanently loses that data point (no way to backfill it later, unlike retention's own self-healing miss)", async () => {
+  let attempts = 0;
+  const presenceSnapshots: PresenceSnapshotsRepository = {
+    async insertSnapshot() {
+      attempts += 1;
+      if (attempts === 1) throw new Error("simulated transient DB failure");
+    },
+    async getSeries() {
+      throw new Error("not used by this test");
+    },
+    async hasAnySnapshot() {
+      throw new Error("not used by this test");
+    },
+  };
+  // A very fast poll interval (10ms between cycles) against a huge
+  // presenceSnapshotIntervalMs (1 hour) -- if a failed attempt left
+  // lastPresenceSnapshotAt already advanced (the bug), no cycle within
+  // this test's short real-time window would ever re-open the gate, and
+  // attempts would stay at 1 forever.
+  const deps = baseDeps(fakeSystemSettings(() => 0.01));
+  deps.presenceSnapshot = { users: noopUsersRepository(), presenceSnapshots };
+  deps.presenceSnapshotIntervalMs = 60 * 60 * 1000;
+
+  const handle = startPollLoop(deps);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  await handle.stop();
+
+  assert.equal(attempts, 2, "the failed first attempt must not block a retry -- and, once the retry succeeds, the interval gate closes again (not a third attempt)");
 });
 
 test("stop() called while a cycle is actively running (not sleeping) still waits for that cycle to finish, per its own docstring", async () => {

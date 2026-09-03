@@ -209,6 +209,33 @@ export interface RegistrationTrendPoint {
   count: number;
 }
 
+// Mirrors admin-settings.ts's own 24h/week/month vocabulary exactly
+// (ghs#195) -- the Active Right Now sparkline's admin-configurable
+// comparison period.
+export type ActiveUsersChartPeriod = "24h" | "week" | "month";
+
+// Mirrors apps/api/src/data/presence-snapshots.repository.ts's
+// PresenceSnapshotSeriesPoint exactly (ghs#195) -- one bucket in the
+// sparkline's current-or-previous series.
+export interface ActiveUsersSeriesPoint {
+  timestamp: string;
+  count: number;
+}
+
+// Mirrors apps/api/src/application/dashboard.service.ts's
+// ActiveUsersSnapshot exactly (ghs#195) -- activeRightNow's own richer
+// shape: the live 5-minute count (unchanged), plus current-vs-previous
+// bucketed history for the sparkline. `period` is echoed back so the
+// widget never has to independently track which admin setting produced
+// this particular series.
+export interface ActiveUsersSnapshot {
+  current: number;
+  period: ActiveUsersChartPeriod;
+  series: ActiveUsersSeriesPoint[];
+  previousSeries: ActiveUsersSeriesPoint[];
+  hasHistory: boolean;
+}
+
 // Mirrors apps/api/src/application/dashboard.service.ts's AdminDashboard
 // exactly (ghs#180) -- GET /dashboard/admin's per-section failure-
 // isolated response shape, same pattern as PlayerDashboard above.
@@ -218,7 +245,7 @@ export interface AdminDashboard {
   totalRounds: DashboardSection<{ total: number; pending: number }>;
   topCourses: DashboardSection<CourseRoundRanking[]>;
   mostActivePlayers: DashboardSection<PlayerRoundRanking[]>;
-  activeRightNow: DashboardSection<number>;
+  activeRightNow: DashboardSection<ActiveUsersSnapshot>;
   userTrends: DashboardSection<RegistrationTrendPoint[]>;
 }
 

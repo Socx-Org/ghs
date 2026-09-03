@@ -3,6 +3,8 @@ import { createLogger } from "@ghs/api/logger";
 import { createEmailProvider } from "@ghs/api/lib/email";
 import { createSystemSettingsRepository } from "@ghs/api/data/system-settings.repository";
 import { createSystemSettingsService } from "@ghs/api/application/system-settings.service";
+import { createUsersRepository } from "@ghs/api/data/users.repository";
+import { createPresenceSnapshotsRepository } from "@ghs/api/data/presence-snapshots.repository";
 import { loadWorkerConfig } from "./config.ts";
 import { createOutboxRepository } from "./data/outbox.repository.ts";
 import { createRecipientsRepository } from "./data/recipients.repository.ts";
@@ -17,6 +19,7 @@ import {
   BATCH_SIZE,
   RETENTION_CLEANUP_INTERVAL_MS,
   RETENTION_DELETE_BATCH_SIZE,
+  PRESENCE_SNAPSHOT_INTERVAL_MS,
 } from "./constants.ts";
 
 // Composition root (APP-010, ADR-130): config and secrets are read
@@ -32,6 +35,8 @@ const outbox = createOutboxRepository(pool);
 const recipients = createRecipientsRepository(pool);
 const retention = createRetentionRepository(pool);
 const systemSettings = createSystemSettingsService(createSystemSettingsRepository(pool));
+const users = createUsersRepository(pool);
+const presenceSnapshots = createPresenceSnapshotsRepository(pool);
 
 logger.info("worker starting", { env: config.env, emailProvider: config.email.provider });
 
@@ -63,6 +68,8 @@ const handle = startPollLoop({
     deleteBatchSize: RETENTION_DELETE_BATCH_SIZE,
   },
   retentionIntervalMs: RETENTION_CLEANUP_INTERVAL_MS,
+  presenceSnapshot: { users, presenceSnapshots },
+  presenceSnapshotIntervalMs: PRESENCE_SNAPSHOT_INTERVAL_MS,
 });
 
 async function shutdown(signal: string): Promise<void> {

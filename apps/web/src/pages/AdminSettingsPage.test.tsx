@@ -28,6 +28,7 @@ const SETTINGS = {
   maintenanceMode: false,
   selfRegistrationEnabled: false,
   notifications: { roundSubmitted: true, roundApproved: true, maintenanceAlerts: true },
+  activeUsersChartPeriod: "24h",
 };
 
 let mock: MockAdapter;
@@ -69,6 +70,7 @@ describe("AdminSettingsPage", () => {
       maintenanceMode: true,
       selfRegistrationEnabled: false,
       notifications: { roundSubmitted: true, roundApproved: false, maintenanceAlerts: true },
+      activeUsersChartPeriod: "week",
     });
     renderAsRole("admin");
 
@@ -77,6 +79,7 @@ describe("AdminSettingsPage", () => {
     expect(screen.getByRole("checkbox", { name: /Notify on round submitted/ })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /Notify on round approved/ })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: /Maintenance alert notifications/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Week" })).toBeChecked();
   });
 
   it("shows an error alert when the request fails", async () => {
@@ -112,6 +115,20 @@ describe("AdminSettingsPage", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Self-registration enabled."));
     const [request] = mock.history.put?.filter((r) => r.url === "/admin/settings/self-registration-enabled") ?? [];
     expect(JSON.parse(request!.data)).toEqual({ value: true });
+  });
+
+  it("changing the Active Right Now chart period calls the real endpoint and shows a toast", async () => {
+    mock.onGet("/admin/settings").reply(200, SETTINGS);
+    mock.onPut("/admin/settings/active-users-chart-period").reply(200, { activeUsersChartPeriod: "month" });
+
+    renderAsRole("admin");
+    const monthOption = await screen.findByRole("radio", { name: "Month" });
+    expect(await screen.findByRole("radio", { name: "24h" })).toBeChecked();
+    await userEvent.click(monthOption);
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Active Right Now chart period set to Month."));
+    const [request] = mock.history.put?.filter((r) => r.url === "/admin/settings/active-users-chart-period") ?? [];
+    expect(JSON.parse(request!.data)).toEqual({ value: "month" });
   });
 
   it("toggling each notification setting hits its own endpoint independently", async () => {
