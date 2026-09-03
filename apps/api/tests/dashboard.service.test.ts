@@ -450,14 +450,13 @@ test("getAdminDashboard: a failed totalUsers section (and, independently, the ac
   assert.equal(logger.errors[0]!.fields?.section, "totalUsers");
 });
 
-test("getAdminDashboard: totalRounds fails as one unit when either of its two underlying listAdminRounds calls rejects", async () => {
+test("getAdminDashboard: totalRounds fails as one unit when its underlying pending-count listAdminRounds call rejects (review finding, PR #200: the unfiltered listAdminRounds call was removed -- total is now derived from getHoleCountBreakdown instead)", async () => {
   const logger = fakeLogger();
   const service = createDashboardService(
     fakeHandicapHistoryService(),
     fakeRoundsService({
-      async listAdminRounds(filter) {
-        if (filter.status === "pending") throw new Error("pending count query failed");
-        return { items: [], total: SAMPLE_ROUNDS_TOTAL };
+      async listAdminRounds() {
+        throw new Error("pending count query failed");
       },
     }),
     fakeUsersRepository(),
@@ -475,7 +474,7 @@ test("getAdminDashboard: totalRounds fails as one unit when either of its two un
   assert.equal(logger.errors[0]!.fields?.section, "totalRounds");
 });
 
-test("ghs#199: getAdminDashboard: totalRounds also fails as one unit when getHoleCountBreakdown rejects, even though both listAdminRounds calls succeed", async () => {
+test("ghs#199: getAdminDashboard: totalRounds also fails as one unit when getHoleCountBreakdown rejects, even though the pending-count listAdminRounds call succeeds", async () => {
   const logger = fakeLogger();
   const service = createDashboardService(
     fakeHandicapHistoryService(),

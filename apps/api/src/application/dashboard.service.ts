@@ -166,20 +166,26 @@ export function createDashboardService(
           // per-country counts, not just the total.
           toSection(logger, "totalCourses", {}, courses.getCountryBreakdown()),
           // Reuses the existing, already-proven listAdminRounds query
-          // (ghs#100/#113) for both numbers -- limit: 1 since only the
-          // real COUNT(*) it already computes is needed, not the rows.
-          // ghs#199: getHoleCountBreakdown() shares the exact same scope
-          // (every non-deleted round, every status, no status filter) as
-          // totalResult's own COUNT(*) -- eighteenHole + nineHole always
-          // equals total.
+          // (ghs#100/#113) for the pending count -- limit: 1 since only
+          // the real COUNT(*) it already computes is needed, not the
+          // rows. Review finding, PR #200: the overall total used to
+          // come from a SECOND, unfiltered listAdminRounds call, even
+          // though getHoleCountBreakdown() already computes that exact
+          // same "every non-deleted round, every status" COUNT(*) as its
+          // own `total` field -- a fully redundant query (plus a wasted
+          // joined single-row SELECT listAdminRounds also always runs).
+          // Deriving total from holeCountBreakdown here instead removes
+          // the redundant call AND makes total/eighteenHole/nineHole
+          // structurally unable to drift apart (same query, same row) --
+          // stronger than the two-separate-queries version could ever
+          // guarantee, not just cheaper.
           toSection(logger, "totalRounds", {}, (async () => {
-            const [totalResult, pendingResult, holeCountBreakdown] = await Promise.all([
-              rounds.listAdminRounds({ limit: 1, offset: 0 }),
+            const [pendingResult, holeCountBreakdown] = await Promise.all([
               rounds.listAdminRounds({ status: "pending", limit: 1, offset: 0 }),
               rounds.getHoleCountBreakdown(),
             ]);
             return {
-              total: totalResult.total,
+              total: holeCountBreakdown.total,
               pending: pendingResult.total,
               eighteenHole: holeCountBreakdown.eighteenHole,
               nineHole: holeCountBreakdown.nineHole,
