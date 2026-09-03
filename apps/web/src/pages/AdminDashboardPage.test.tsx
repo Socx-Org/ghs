@@ -7,7 +7,7 @@ import MockAdapter from "axios-mock-adapter";
 import AdminDashboardPage from "./AdminDashboardPage";
 import { api } from "../lib/api";
 import { setTokens } from "../lib/auth-store";
-import type { ActiveUsersSnapshot, AdminDashboard, CourseRoundRanking, PlayerRoundRanking, RegistrationTrendPoint, UserRoleBreakdown } from "../types/domain";
+import type { ActiveUsersSnapshot, AdminDashboard, CourseCountryBreakdown, CourseRoundRanking, PlayerRoundRanking, RegistrationTrendPoint, UserRoleBreakdown } from "../types/domain";
 
 function makeAccessToken(claims: object): string {
   const base64url = (input: string) => btoa(input).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -72,12 +72,18 @@ function activeUsersSnapshot(overrides: Partial<ActiveUsersSnapshot> = {}): Acti
   return { current: 2, period: "24h", series: [], previousSeries: [], hasHistory: false, ...overrides };
 }
 
+// ghs#197: totalCourses' own richer shape -- total + top-2-country
+// breakdown + others.
+function courseCountryBreakdown(overrides: Partial<CourseCountryBreakdown> = {}): CourseCountryBreakdown {
+  return { total: 5, topCountries: [], others: 0, ...overrides };
+}
+
 // ghs#180's own per-section shape -- { data } by default for every
 // section; a test overrides just the section(s) it's exercising.
 function dashboardResponse(overrides: Partial<AdminDashboard> = {}): AdminDashboard {
   return {
     totalUsers: { data: roleBreakdown() },
-    totalCourses: { data: 5 },
+    totalCourses: { data: courseCountryBreakdown() },
     totalRounds: { data: { total: 20, pending: 3 } },
     topCourses: { data: [] },
     mostActivePlayers: { data: [] },
@@ -111,7 +117,7 @@ describe("AdminDashboardPage", () => {
 
   it("shows Total Courses and Total Rounds (acceptance criterion)", async () => {
     mock.onGet("/dashboard/admin").reply(200, dashboardResponse({
-      totalCourses: { data: 42 },
+      totalCourses: { data: courseCountryBreakdown({ total: 42 }) },
       totalRounds: { data: { total: 100, pending: 0 } },
     }));
 
@@ -119,6 +125,51 @@ describe("AdminDashboardPage", () => {
 
     expect(await screen.findByText("42")).toBeInTheDocument();
     expect(screen.getByText("100")).toBeInTheDocument();
+  });
+
+  it("Total Courses shows the top-2-country breakdown, raw codes not display names, joined with the Others bucket (ghs#197)", async () => {
+    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({
+      totalCourses: {
+        data: courseCountryBreakdown({
+          total: 44,
+          topCountries: [{ country: "US", count: 20 }, { country: "GB", count: 10 }],
+          others: 14,
+        }),
+      },
+    }));
+
+    renderDashboard();
+
+    expect(await screen.findByText("44")).toBeInTheDocument();
+    expect(screen.getByText("US: 20 courses · GB: 10 courses · Others: 14 courses")).toBeInTheDocument();
+  });
+
+  it("Total Courses omits the Others segment when every course falls under the top 2 countries, and uses singular 'course' for a count of exactly 1", async () => {
+    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({
+      totalCourses: {
+        data: courseCountryBreakdown({
+          total: 3,
+          topCountries: [{ country: "US", count: 2 }, { country: "GB", count: 1 }],
+          others: 0,
+        }),
+      },
+    }));
+
+    renderDashboard();
+
+    expect(await screen.findByText("US: 2 courses · GB: 1 course")).toBeInTheDocument();
+  });
+
+  it("Total Courses shows no breakdown line at all when there are zero courses", async () => {
+    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({
+      totalCourses: { data: courseCountryBreakdown({ total: 0, topCountries: [], others: 0 }) },
+    }));
+
+    renderDashboard();
+
+    expect(await screen.findByText("Total courses")).toBeInTheDocument();
+    expect(await screen.findByText("0")).toBeInTheDocument();
+    expect(screen.queryByText(/\d+ courses?/)).not.toBeInTheDocument();
   });
 
   it("Pending Review carries a warning accent when there's a real backlog, none when there isn't", async () => {
@@ -256,7 +307,7 @@ describe("AdminDashboardPage", () => {
   it("per-section failure isolation: a failed Top Courses section shows error only there, leaving the rest of the page completely unaffected", async () => {
     mock.onGet("/dashboard/admin").reply(200, {
       totalUsers: { data: roleBreakdown() },
-      totalCourses: { data: 5 },
+      totalCourses: { data: courseCountryBreakdown() },
       totalRounds: { data: { total: 20, pending: 3 } },
       topCourses: { error: true },
       mostActivePlayers: { data: [] },

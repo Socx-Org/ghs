@@ -183,6 +183,18 @@ export interface UserRoleBreakdown {
   superAdmin: number;
 }
 
+// Mirrors apps/api/src/data/courses.repository.ts's CourseCountryBreakdown
+// exactly (ghs#197) -- the Admin Dashboard's Total Courses widget.
+// topCountries is at most the top 2 named (non-null) countries; `others`
+// folds in every remaining country plus every course with no country
+// recorded. Raw stored codes (e.g. "GB"), never a display name -- matches
+// how a country is shown everywhere else in this app.
+export interface CourseCountryBreakdown {
+  total: number;
+  topCountries: { country: string; count: number }[];
+  others: number;
+}
+
 // Mirrors apps/api/src/data/rounds.repository.ts's CourseRoundRanking
 // exactly (ghs#180) -- the Admin Dashboard's Top Courses widget.
 export interface CourseRoundRanking {
@@ -241,7 +253,7 @@ export interface ActiveUsersSnapshot {
 // isolated response shape, same pattern as PlayerDashboard above.
 export interface AdminDashboard {
   totalUsers: DashboardSection<UserRoleBreakdown>;
-  totalCourses: DashboardSection<number>;
+  totalCourses: DashboardSection<CourseCountryBreakdown>;
   totalRounds: DashboardSection<{ total: number; pending: number }>;
   topCourses: DashboardSection<CourseRoundRanking[]>;
   mostActivePlayers: DashboardSection<PlayerRoundRanking[]>;

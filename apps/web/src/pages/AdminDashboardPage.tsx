@@ -5,7 +5,7 @@ import { ActiveUsersSparklineWidget, DashboardGrid, EmptyState, KpiStat, Ranking
 import type { RankingListItem } from "../components";
 import { ApiError, getAdminDashboard } from "../lib/api";
 import type { AdminDashboardPeriod } from "../lib/api";
-import type { CourseRoundRanking, PlayerRoundRanking } from "../types/domain";
+import type { CourseCountryBreakdown, CourseRoundRanking, PlayerRoundRanking } from "../types/domain";
 
 // ghs#181 (design doc section C): the real Admin Dashboard, replacing
 // DashboardPlaceholder for admin/super_admin -- an operational console
@@ -33,6 +33,21 @@ function toCourseRankingItems(rankings: CourseRoundRanking[]): RankingListItem[]
     value: `${ranking.roundsCount} round${ranking.roundsCount === 1 ? "" : "s"}`,
     share: toShare(ranking.roundsCount, topValue),
   }));
+}
+
+// ghs#197: "US: 20 courses · GB: 10 courses · Others: 14 courses" --
+// raw stored codes, never a display name (matches how a country is
+// shown everywhere else in this app, e.g. CourseDetailPage's own
+// locationLine). Same middle-dot-joined, manually-pluralized segment
+// style as totalUsers' own secondary line below. undefined (no
+// secondary line at all) only when there's nothing to show -- zero
+// courses.
+function formatCourseCountryBreakdown(breakdown: CourseCountryBreakdown): string | undefined {
+  const segments = breakdown.topCountries.map(({ country, count }) => `${country}: ${count} course${count === 1 ? "" : "s"}`);
+  if (breakdown.others > 0) {
+    segments.push(`Others: ${breakdown.others} course${breakdown.others === 1 ? "" : "s"}`);
+  }
+  return segments.length > 0 ? segments.join(" · ") : undefined;
 }
 
 function toPlayerRankingItems(rankings: PlayerRoundRanking[]): RankingListItem[] {
@@ -131,7 +146,9 @@ export default function AdminDashboardPage() {
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="No courses yet" />}
         >
-          {totalCourses !== undefined && <KpiStat label="Total courses" value={totalCourses} />}
+          {totalCourses !== undefined && (
+            <KpiStat label="Total courses" value={totalCourses.total} secondary={formatCourseCountryBreakdown(totalCourses)} />
+          )}
         </Widget>
 
         <Widget

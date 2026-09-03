@@ -103,6 +103,7 @@ const FAKE_TEE_CONFIGURATION: TeeConfiguration = {
 function fakeCoursesRepository(): CoursesRepository {
   return {
     async list() { return []; },
+    async getCountryBreakdown() { throw new Error("not used"); },
     async create() { throw new Error("not used"); },
     async get() { return null; },
     async getTeeConfiguration(id) {

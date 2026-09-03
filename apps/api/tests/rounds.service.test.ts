@@ -65,6 +65,9 @@ function fakeCoursesRepository(): CoursesRepository {
     async list() {
       return [];
     },
+    async getCountryBreakdown() {
+      throw new Error("not used by these tests");
+    },
     async create() {
       throw new Error("not used by these tests");
     },

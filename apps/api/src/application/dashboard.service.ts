@@ -2,7 +2,7 @@ import type { HandicapHistoryRecord } from "../data/handicap-history.repository.
 import type { CourseRoundRanking, PlayerRoundListItem, PlayerRoundRanking, PlayerStats } from "../data/rounds.repository.ts";
 import type { RegistrationTrendPoint, UserRoleBreakdown, UsersRepository } from "../data/users.repository.ts";
 import type { PresenceSnapshotSeriesPoint, PresenceSnapshotsRepository } from "../data/presence-snapshots.repository.ts";
-import type { CoursesRepository } from "../data/courses.repository.ts";
+import type { CourseCountryBreakdown, CoursesRepository } from "../data/courses.repository.ts";
 import type { Logger } from "../logger.ts";
 import type { HandicapHistoryService } from "./handicap-history.service.ts";
 import type { RoundsService } from "./rounds.service.ts";
@@ -50,7 +50,9 @@ export interface ActiveUsersSnapshot {
 
 export interface AdminDashboard {
   totalUsers: DashboardSection<UserRoleBreakdown>;
-  totalCourses: DashboardSection<number>;
+  // ghs#197: total + a top-2-country breakdown, same "structured data
+  // in, display string built by the frontend" split as totalUsers above.
+  totalCourses: DashboardSection<CourseCountryBreakdown>;
   totalRounds: DashboardSection<{ total: number; pending: number }>;
   topCourses: DashboardSection<CourseRoundRanking[]>;
   mostActivePlayers: DashboardSection<PlayerRoundRanking[]>;
@@ -156,13 +158,10 @@ export function createDashboardService(
       const [totalUsersSection, totalCoursesSection, totalRoundsSection, topCoursesSection, mostActivePlayersSection, activeRightNowSection, userTrendsSection] =
         await Promise.all([
           toSection(logger, "totalUsers", {}, users.getRoleBreakdown()),
-          // CoursesRepository.list() is already a lightweight, unpaginated
-          // query (courses.repository.ts's own list() -- no tee_configurations
-          // join) -- .length works client-side today, same shortcut the
-          // design doc itself calls out ("doesn't scale once course
-          // pagination lands," an accepted, documented tradeoff, not an
-          // oversight).
-          toSection(logger, "totalCourses", {}, courses.list().then((list) => list.length)),
+          // ghs#197: was courses.list().then(list => list.length) -- a
+          // real GROUP BY aggregation now, since the widget needs the
+          // per-country counts, not just the total.
+          toSection(logger, "totalCourses", {}, courses.getCountryBreakdown()),
           // Reuses the existing, already-proven listAdminRounds query
           // (ghs#100/#113) for both numbers -- limit: 1 since only the
           // real COUNT(*) it already computes is needed, not the rows.

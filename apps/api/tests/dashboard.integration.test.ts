@@ -261,6 +261,16 @@ test("GET /dashboard/admin: real aggregated response, every section matching a m
       name: "Admin Dashboard Course B", country: "ES",
       teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113, holes: [] }],
     });
+    // ghs#197: three more courses, none with any rounds (so they can't
+    // affect topCourses/mostActivePlayers below), purely to exercise
+    // totalCourses' own top-2-country breakdown against real seeded
+    // data: ES=2 (courses A/B above), then a real alphabetical tie-break
+    // between FR and GB (both count 1) -- FR wins second place -- with
+    // GB's own course and the null-country course both folding into
+    // `others` (2).
+    await coursesRepo.create({ name: "Admin Dashboard Course C", country: "GB" });
+    await coursesRepo.create({ name: "Admin Dashboard Course D", country: "FR" });
+    await coursesRepo.create({ name: "Admin Dashboard Course E" });
 
     const playerXUser = await adminUsersService.adminCreateUser({
       email: "admin-dashboard-x@example.com", password: "player-pw-1", role: "player",
@@ -307,7 +317,7 @@ test("GET /dashboard/admin: real aggregated response, every section matching a m
     assert.equal(response.status, 200);
     const body = await response.json() as {
       totalUsers: { data: { total: number; player: number; admin: number; superAdmin: number } };
-      totalCourses: { data: number };
+      totalCourses: { data: { total: number; topCountries: Array<{ country: string; count: number }>; others: number } };
       totalRounds: { data: { total: number; pending: number } };
       topCourses: { data: Array<{ courseId: string; courseName: string; roundsCount: number }> };
       mostActivePlayers: { data: Array<{ playerId: string; roundsCount: number; handicapIndex: number | null }> };
@@ -316,7 +326,14 @@ test("GET /dashboard/admin: real aggregated response, every section matching a m
     };
 
     assert.deepEqual(body.totalUsers.data, { total: 3, player: 2, admin: 1, superAdmin: 0 });
-    assert.equal(body.totalCourses.data, 2);
+    assert.deepEqual(body.totalCourses.data, {
+      total: 5,
+      topCountries: [
+        { country: "ES", count: 2 },
+        { country: "FR", count: 1 },
+      ],
+      others: 2, // GB's course + the null-country course
+    });
     assert.deepEqual(body.totalRounds.data, { total: 4, pending: 1 }, "4 rounds total (3 approved + 1 pending), 1 pending");
     assert.deepEqual(body.topCourses.data, [
       { courseId: courseA.id, courseName: "Admin Dashboard Course A", roundsCount: 2 },

@@ -40,6 +40,19 @@ export interface CourseSummary {
   country: string | null;
 }
 
+// ghs#197: the Admin Dashboard's Total Courses widget -- topCountries is
+// at most the top 2 *named* (non-null) countries by course count;
+// `others` folds in every remaining country plus every course with no
+// country recorded, so `total === topCountries.reduce(sum) + others`
+// always holds. Raw stored codes (e.g. "GB"), never a display name --
+// matches how a country is shown everywhere else in this app (e.g.
+// CourseDetailPage's own locationLine, "St Andrews, GB").
+export interface CourseCountryBreakdown {
+  total: number;
+  topCountries: { country: string; count: number }[];
+  others: number;
+}
+
 export interface CreateHoleInput {
   holeNumber: number;
   distanceYards: number;
@@ -97,6 +110,7 @@ export class TeeConfigurationHasRoundsError extends Error {}
 
 export interface CoursesRepository {
   list(): Promise<CourseSummary[]>;
+  getCountryBreakdown(): Promise<CourseCountryBreakdown>;
   create(input: CreateCourseInput): Promise<Course>;
   get(id: string): Promise<Course | null>;
   // Rounds only know their tee_configuration_id, not the owning course --
@@ -222,6 +236,31 @@ export function createCoursesRepository(pool: Pool): CoursesRepository {
         "SELECT id, club_id, name, city, country FROM courses WHERE deleted_at IS NULL ORDER BY name",
       );
       return result.rows.map(toSummary);
+    },
+
+    async getCountryBreakdown() {
+      // Same deleted_at IS NULL filter as list() -- total stays
+      // consistent with what this widget showed before this method
+      // existed (a bare courses.list().length). NULLS LAST as the
+      // tie-break's own tie-break: without it, Postgres's default NULL-
+      // sorts-last-on-ASC already happens to do the right thing here,
+      // but spelling it out means this doesn't quietly depend on that
+      // default if it's ever changed.
+      const result = await pool.query<{ country: string | null; count: number }>(
+        `SELECT country, count(*)::int AS count
+         FROM courses
+         WHERE deleted_at IS NULL
+         GROUP BY country
+         ORDER BY count(*) DESC, country ASC NULLS LAST`,
+      );
+      const total = result.rows.reduce((sum, row) => sum + row.count, 0);
+      // Null never displaces a real country from the top 2 -- there's no
+      // country to label it with, so it can only ever land in `others`.
+      const topCountries = result.rows
+        .filter((row): row is { country: string; count: number } => row.country !== null)
+        .slice(0, 2);
+      const namedTotal = topCountries.reduce((sum, row) => sum + row.count, 0);
+      return { total, topCountries, others: total - namedTotal };
     },
 
     async create(input) {

@@ -176,6 +176,50 @@ test("delete() returns false for an already-deleted or genuinely nonexistent cou
   assert.equal(await courses.delete("00000000-0000-0000-0000-000000000000"), false, "never existed");
 });
 
+// ghs#197: the Admin Dashboard's Total Courses widget.
+test("getCountryBreakdown() ranks the top 2 countries by course count, alphabetically tie-breaks equal counts, and folds every remaining country plus null-country courses into `others`, real database", async () => {
+  const courses = createCoursesRepository(pool);
+  await courses.create({ name: "ES Course 1", country: "ES" });
+  await courses.create({ name: "ES Course 2", country: "ES" });
+  await courses.create({ name: "ES Course 3", country: "ES" });
+  await courses.create({ name: "FR Course", country: "FR" });
+  await courses.create({ name: "GB Course", country: "GB" }); // ties FR's count -- FR wins alphabetically
+  await courses.create({ name: "No Country Course" }); // country left unset (null)
+
+  const breakdown = await courses.getCountryBreakdown();
+
+  assert.deepEqual(breakdown, {
+    total: 6,
+    topCountries: [
+      { country: "ES", count: 3 },
+      { country: "FR", count: 1 },
+    ],
+    others: 2, // GB's course + the null-country course
+  });
+});
+
+test("getCountryBreakdown() excludes soft-deleted courses, matching list()'s own count, real database", async () => {
+  const courses = createCoursesRepository(pool);
+  await courses.create({ name: "Kept Course", country: "US" });
+  const deleted = await courses.create({ name: "Deleted Course", country: "US" });
+  await courses.delete(deleted.id);
+
+  const breakdown = await courses.getCountryBreakdown();
+
+  assert.equal(breakdown.total, 1);
+  assert.deepEqual(breakdown.topCountries, [{ country: "US", count: 1 }]);
+  assert.equal(breakdown.others, 0);
+  assert.equal((await courses.list()).length, 1, "list()'s own count agrees");
+});
+
+test("getCountryBreakdown() on an empty table returns all zeros, not an error or a missing row", async () => {
+  const courses = createCoursesRepository(pool);
+
+  const breakdown = await courses.getCountryBreakdown();
+
+  assert.deepEqual(breakdown, { total: 0, topCountries: [], others: 0 });
+});
+
 // Review finding, PR #131: delete() previously checked for referencing
 // rounds BEFORE checking whether the course was already soft-deleted --
 // an already-deleted course whose (still physically present) tee
