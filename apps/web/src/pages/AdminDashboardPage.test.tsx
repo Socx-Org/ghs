@@ -78,13 +78,26 @@ function courseCountryBreakdown(overrides: Partial<CourseCountryBreakdown> = {})
   return { total: 5, topCountries: [], others: 0, ...overrides };
 }
 
+// ghs#199: totalRounds' own richer shape -- eighteenHole + nineHole sums
+// to total by default (15 + 5 = 20), matching the real invariant
+// getHoleCountBreakdown's own backend comment documents.
+interface TotalRoundsData {
+  total: number;
+  pending: number;
+  eighteenHole: number;
+  nineHole: number;
+}
+function totalRoundsData(overrides: Partial<TotalRoundsData> = {}): TotalRoundsData {
+  return { total: 20, pending: 3, eighteenHole: 15, nineHole: 5, ...overrides };
+}
+
 // ghs#180's own per-section shape -- { data } by default for every
 // section; a test overrides just the section(s) it's exercising.
 function dashboardResponse(overrides: Partial<AdminDashboard> = {}): AdminDashboard {
   return {
     totalUsers: { data: roleBreakdown() },
     totalCourses: { data: courseCountryBreakdown() },
-    totalRounds: { data: { total: 20, pending: 3 } },
+    totalRounds: { data: totalRoundsData() },
     topCourses: { data: [] },
     mostActivePlayers: { data: [] },
     activeRightNow: { data: activeUsersSnapshot() },
@@ -118,13 +131,34 @@ describe("AdminDashboardPage", () => {
   it("shows Total Courses and Total Rounds (acceptance criterion)", async () => {
     mock.onGet("/dashboard/admin").reply(200, dashboardResponse({
       totalCourses: { data: courseCountryBreakdown({ total: 42 }) },
-      totalRounds: { data: { total: 100, pending: 0 } },
+      totalRounds: { data: totalRoundsData({ total: 100, pending: 0, eighteenHole: 80, nineHole: 20 }) },
     }));
 
     renderDashboard();
 
     expect(await screen.findByText("42")).toBeInTheDocument();
     expect(screen.getByText("100")).toBeInTheDocument();
+  });
+
+  it("Total Rounds shows the 18-hole/9-hole breakdown, both segments always shown even at zero (ghs#199)", async () => {
+    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({
+      totalRounds: { data: totalRoundsData({ total: 11, pending: 0, eighteenHole: 9, nineHole: 2 }) },
+    }));
+
+    renderDashboard();
+
+    expect(await screen.findByText("11")).toBeInTheDocument();
+    expect(screen.getByText("18 holes: 9 rounds · 9 holes: 2 rounds")).toBeInTheDocument();
+  });
+
+  it("Total Rounds uses singular 'round' for a count of exactly 1, and still shows a zero-count segment rather than omitting it", async () => {
+    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({
+      totalRounds: { data: totalRoundsData({ total: 1, pending: 0, eighteenHole: 1, nineHole: 0 }) },
+    }));
+
+    renderDashboard();
+
+    expect(await screen.findByText("18 holes: 1 round · 9 holes: 0 rounds")).toBeInTheDocument();
   });
 
   it("Total Courses shows the top-2-country breakdown, raw codes not display names, joined with the Others bucket (ghs#197)", async () => {
@@ -173,7 +207,7 @@ describe("AdminDashboardPage", () => {
   });
 
   it("Pending Review carries a warning accent when there's a real backlog, none when there isn't", async () => {
-    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({ totalRounds: { data: { total: 20, pending: 4 } } }));
+    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({ totalRounds: { data: totalRoundsData({ pending: 4 }) } }));
 
     renderDashboard();
 
@@ -183,7 +217,7 @@ describe("AdminDashboardPage", () => {
     cleanup();
     mock.restore();
     mock = new MockAdapter(api);
-    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({ totalRounds: { data: { total: 20, pending: 0 } } }));
+    mock.onGet("/dashboard/admin").reply(200, dashboardResponse({ totalRounds: { data: totalRoundsData({ pending: 0 }) } }));
     renderDashboard();
 
     const zeroPending = await screen.findByText("0");
@@ -308,7 +342,7 @@ describe("AdminDashboardPage", () => {
     mock.onGet("/dashboard/admin").reply(200, {
       totalUsers: { data: roleBreakdown() },
       totalCourses: { data: courseCountryBreakdown() },
-      totalRounds: { data: { total: 20, pending: 3 } },
+      totalRounds: { data: totalRoundsData() },
       topCourses: { error: true },
       mostActivePlayers: { data: [] },
       activeRightNow: { data: activeUsersSnapshot() },

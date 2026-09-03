@@ -53,7 +53,10 @@ export interface AdminDashboard {
   // ghs#197: total + a top-2-country breakdown, same "structured data
   // in, display string built by the frontend" split as totalUsers above.
   totalCourses: DashboardSection<CourseCountryBreakdown>;
-  totalRounds: DashboardSection<{ total: number; pending: number }>;
+  // ghs#199: eighteenHole + nineHole always sums to total (see
+  // getHoleCountBreakdown's own comment) -- both drawn from the exact
+  // same "every non-deleted round, every status" scope.
+  totalRounds: DashboardSection<{ total: number; pending: number; eighteenHole: number; nineHole: number }>;
   topCourses: DashboardSection<CourseRoundRanking[]>;
   mostActivePlayers: DashboardSection<PlayerRoundRanking[]>;
   activeRightNow: DashboardSection<ActiveUsersSnapshot>;
@@ -163,14 +166,30 @@ export function createDashboardService(
           // per-country counts, not just the total.
           toSection(logger, "totalCourses", {}, courses.getCountryBreakdown()),
           // Reuses the existing, already-proven listAdminRounds query
-          // (ghs#100/#113) for both numbers -- limit: 1 since only the
-          // real COUNT(*) it already computes is needed, not the rows.
+          // (ghs#100/#113) for the pending count -- limit: 1 since only
+          // the real COUNT(*) it already computes is needed, not the
+          // rows. Review finding, PR #200: the overall total used to
+          // come from a SECOND, unfiltered listAdminRounds call, even
+          // though getHoleCountBreakdown() already computes that exact
+          // same "every non-deleted round, every status" COUNT(*) as its
+          // own `total` field -- a fully redundant query (plus a wasted
+          // joined single-row SELECT listAdminRounds also always runs).
+          // Deriving total from holeCountBreakdown here instead removes
+          // the redundant call AND makes total/eighteenHole/nineHole
+          // structurally unable to drift apart (same query, same row) --
+          // stronger than the two-separate-queries version could ever
+          // guarantee, not just cheaper.
           toSection(logger, "totalRounds", {}, (async () => {
-            const [totalResult, pendingResult] = await Promise.all([
-              rounds.listAdminRounds({ limit: 1, offset: 0 }),
+            const [pendingResult, holeCountBreakdown] = await Promise.all([
               rounds.listAdminRounds({ status: "pending", limit: 1, offset: 0 }),
+              rounds.getHoleCountBreakdown(),
             ]);
-            return { total: totalResult.total, pending: pendingResult.total };
+            return {
+              total: holeCountBreakdown.total,
+              pending: pendingResult.total,
+              eighteenHole: holeCountBreakdown.eighteenHole,
+              nineHole: holeCountBreakdown.nineHole,
+            };
           })()),
           toSection(logger, "topCourses", {}, rounds.getTopCourses(TOP_RANKING_LIMIT)),
           toSection(logger, "mostActivePlayers", {}, rounds.getMostActivePlayers(TOP_RANKING_LIMIT)),

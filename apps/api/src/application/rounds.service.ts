@@ -13,6 +13,7 @@ import type {
   Round,
   RoundForUpdate,
   RoundScoreUpdate,
+  RoundsHoleCountBreakdown,
   RoundsRepository,
   RoundStatus,
 } from "../data/rounds.repository.ts";
@@ -78,6 +79,9 @@ export interface RoundsService {
   // widgets -- same thin pass-through reasoning as above.
   getTopCourses(limit: number): Promise<CourseRoundRanking[]>;
   getMostActivePlayers(limit: number): Promise<PlayerRoundRanking[]>;
+  // ghs#199: the Admin Dashboard's Total Rounds widget -- same thin
+  // pass-through reasoning as above.
+  getHoleCountBreakdown(): Promise<RoundsHoleCountBreakdown>;
 
   // draft|rejected|amending -> pending (ghs#58). The explicit moment a
   // round actually becomes visible to the admin pending-queue -- never
@@ -653,6 +657,10 @@ export function createRoundsService(
 
     async getMostActivePlayers(limit) {
       return repository.getMostActivePlayers(limit);
+    },
+
+    async getHoleCountBreakdown() {
+      return repository.getHoleCountBreakdown();
     },
 
     async submitForReview(id, submittedByRole) {

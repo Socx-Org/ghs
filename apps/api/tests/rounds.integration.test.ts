@@ -815,3 +815,32 @@ test("getMostActivePlayers (ghs#180): real GROUP BY ranking over approved rounds
     { playerId: playerY.id, playerFirstName: "Ben", playerLastName: "Okafor", roundsCount: 1, handicapIndex: 8.1 },
   ], "playerZ is excluded (soft-deleted)");
 });
+
+test("getHoleCountBreakdown (ghs#199): real 18/9-hole split, every non-deleted round of every status counted (matching listAdminRounds' own bare-total scope), soft-deleted rounds excluded", async () => {
+  const courses = createCoursesRepository(pool);
+  const roundsRepo = createRoundsRepository(pool);
+  const players = createPlayersRepository(pool);
+
+  const course = await courses.create({
+    name: "Hole Count Breakdown Course", country: "ES",
+    teeConfigurations: [{ name: "White", holeCount: 18, courseRating: 72.0, slopeRating: 113, holes: [] }],
+  });
+  const teeId = course.teeConfigurations[0]!.id;
+  const player = await players.create({ firstName: "Hole", lastName: "Counter" });
+
+  // 2 eighteen-hole rounds, left as draft/pending (never approved) --
+  // the breakdown's own scope is every status, not just approved.
+  await roundsRepo.create({ playerId: player.id, teeConfigurationId: teeId, playedAt: "2026-08-01T09:00:00.000Z" });
+  const pending = await roundsRepo.create({ playerId: player.id, teeConfigurationId: teeId, playedAt: "2026-08-02T09:00:00.000Z" });
+  await roundsRepo.setStatus(pending.id, "pending");
+  // 1 nine-hole round, approved.
+  const nineHole = await roundsRepo.create({ playerId: player.id, teeConfigurationId: teeId, playedAt: "2026-08-03T09:00:00.000Z", is9Hole: true });
+  await roundsRepo.setStatus(nineHole.id, "approved");
+  // 1 more nine-hole round, soft-deleted -- must not count either way.
+  const deletedNineHole = await roundsRepo.create({ playerId: player.id, teeConfigurationId: teeId, playedAt: "2026-08-04T09:00:00.000Z", is9Hole: true });
+  await roundsRepo.softDelete(deletedNineHole.id);
+
+  const breakdown = await roundsRepo.getHoleCountBreakdown();
+
+  assert.deepEqual(breakdown, { total: 3, eighteenHole: 2, nineHole: 1 });
+});
