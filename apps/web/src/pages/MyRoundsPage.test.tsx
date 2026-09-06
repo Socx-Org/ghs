@@ -83,6 +83,31 @@ describe("MyRoundsPage", () => {
     expect(within(table).getByText("Draft")).toBeInTheDocument();
   });
 
+  it("sorts by Course and by Played, the latter using the raw ISO playedAt rather than the locale-formatted display date (ghs#203)", async () => {
+    mock.onGet("/players/player-1/rounds").reply(200, ROUNDS);
+    renderAsRole("player");
+    await screen.findByText("Pebble Beach Golf Links");
+
+    const table = screen.getByRole("table");
+    function courseColumn(): string[] {
+      return within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[0]!.textContent!);
+    }
+
+    await userEvent.click(screen.getByRole("button", { name: /^Course/ }));
+    expect(courseColumn()).toEqual(["Pebble Beach Golf Links", "St Andrews Links"]);
+
+    // Played ascending: round-2 (2026-05-01) before round-1 (2026-05-05)
+    // -- proves this sorts by the raw ISO value, not the rendered
+    // locale-formatted date string (which starts with the same "May"
+    // prefix for both and wouldn't distinguish a formatting bug from a
+    // real chronological sort).
+    await userEvent.click(screen.getByRole("button", { name: /^Played/ }));
+    expect(courseColumn()).toEqual(["St Andrews Links", "Pebble Beach Golf Links"]);
+  });
+
   it("links each row to its own RoundDetailsPage, not the edit screen", async () => {
     mock.onGet("/players/player-1/rounds").reply(200, ROUNDS);
     renderAsRole("player");

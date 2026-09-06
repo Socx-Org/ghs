@@ -1,20 +1,22 @@
 import { Plus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, Card, CardBody, EmptyState, ListView, Skeleton, TableCell, TableHeaderCell } from "../components";
+import { Alert, Button, Card, CardBody, EmptyState, ListView, Skeleton, SortableTableHeaderCell, TableCell } from "../components";
 import { ApiError, listCourses } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
+import { useTableSort } from "../lib/useTableSort";
 import type { CourseSummary } from "../types/domain";
 
 // ghs#109: course list screen -- design doc section 6.1. First real
 // consumer of ListView (#103) outside Accounts. No role restriction on
 // viewing (matches GET /courses, unauthenticated on the backend) -- the
-// nav entry and route are open to every authenticated role. Sort order
-// itself is still whatever GET /courses returns (name-ordered) --
-// narrowing the result client-side, via ListView's own search (ghs#137),
-// is a separate concern from sort order and doesn't change it. No
-// column filters here -- name/location are free text, not the
-// enum-like data ListView's column-filter opt-in is meant for.
+// nav entry and route are open to every authenticated role. No column
+// filters here -- name/location are free text, not the enum-like data
+// ListView's column-filter opt-in is meant for.
+//
+// ghs#203: sortable by Name/Location (useTableSort, ghs#201) -- narrowing
+// the result client-side, via ListView's own search (ghs#137), and
+// ordering it, via this, are independent concerns that now both exist.
 //
 // ghs#110: rows now link to /courses/:id, and a "Create course" button
 // is shown for admin/super_admin -- the only real action this list
@@ -35,6 +37,14 @@ export default function CourseListPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
   const coursesQuery = useQuery({ queryKey: ["courses"], queryFn: listCourses });
+  // ghs#203: sorts by the raw nullable locationLine(item), not the "—"
+  // placeholder renderTableRow displays -- a course missing a location
+  // sorts last (useTableSort's own nulls-last rule), not wherever "—"
+  // happens to fall alphabetically.
+  const coursesSort = useTableSort(coursesQuery.data ?? [], {
+    name: (item) => item.name,
+    location: (item) => locationLine(item),
+  });
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
@@ -63,14 +73,18 @@ export default function CourseListPage() {
           ) : (
             <ListView<CourseSummary>
               id="courses"
-              items={coursesQuery.data}
+              items={coursesSort.sortedItems}
               getKey={(item) => item.id}
               searchPlaceholder="Search by name, city, or country…"
               getSearchText={(item) => `${item.name} ${item.city ?? ""} ${item.country ?? ""}`}
               tableHead={
                 <>
-                  <TableHeaderCell>Name</TableHeaderCell>
-                  <TableHeaderCell>Location</TableHeaderCell>
+                  <SortableTableHeaderCell columnId="name" sort={coursesSort.sort} onSort={coursesSort.toggleSort}>
+                    Name
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="location" sort={coursesSort.sort} onSort={coursesSort.toggleSort}>
+                    Location
+                  </SortableTableHeaderCell>
                 </>
               }
               renderTableRow={(item) => (

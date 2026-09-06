@@ -20,6 +20,7 @@ import {
   RoleBadge,
   Select,
   Skeleton,
+  SortableTableHeaderCell,
   TableCell,
   TableHeaderCell,
   Tooltip,
@@ -29,6 +30,7 @@ import { ApiError, deleteUser, listUsers, setUserStatus, updateUser } from "../l
 import type { UpdateUserRequest } from "../lib/api";
 import { ACCOUNT_STATUS_OPTIONS, ROLE_OPTIONS } from "../lib/domain-labels";
 import { useAuth } from "../hooks/useAuth";
+import { useTableSort } from "../lib/useTableSort";
 import type { AdminUserListItem } from "../types/domain";
 
 // ghs#104: admin account list -- design doc sections 5.6-5.8. First
@@ -50,6 +52,15 @@ function accountName(item: AdminUserListItem): string {
   // them at all (see AdminUserListItem's own doc comment), not a
   // loading/error state to distinguish from a real one.
   return item.firstName && item.lastName ? `${item.firstName} ${item.lastName}` : "—";
+}
+
+// ghs#203: the Name column's own sort accessor -- the raw nullable name,
+// not accountName()'s "—" placeholder, so an admin/super_admin account
+// (no players row, no name at all) sorts last (useTableSort's own
+// nulls-last rule) rather than wherever "—" happens to fall
+// alphabetically.
+function accountSortName(item: AdminUserListItem): string | null {
+  return item.firstName && item.lastName ? `${item.firstName} ${item.lastName}` : null;
 }
 
 function describeQueryError(error: unknown, fallback: string): string {
@@ -168,6 +179,15 @@ export default function AdminAccountsPage() {
   const [editTarget, setEditTarget] = useState<AdminUserListItem | null>(null);
 
   const usersQuery = useQuery({ queryKey: ["admin", "users"], queryFn: () => listUsers() });
+  // ghs#203: Created sorts by the raw ISO createdAt, not
+  // formatCreatedAt's own locale-formatted display string.
+  const usersSort = useTableSort(usersQuery.data?.items ?? [], {
+    email: (item) => item.email,
+    name: (item) => accountSortName(item),
+    role: (item) => item.role,
+    status: (item) => item.status,
+    createdAt: (item) => item.createdAt,
+  });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, input }: { id: string; input: UpdateUserRequest }) => updateUser(id, input),
@@ -285,7 +305,7 @@ export default function AdminAccountsPage() {
           ) : (
             <ListView<AdminUserListItem>
               id="accounts"
-              items={usersQuery.data.items}
+              items={usersSort.sortedItems}
               getKey={(item) => item.id}
               searchPlaceholder="Search by email or name…"
               getSearchText={(item) => `${item.email} ${accountName(item)}`}
@@ -295,11 +315,21 @@ export default function AdminAccountsPage() {
               ]}
               tableHead={
                 <>
-                  <TableHeaderCell>Email</TableHeaderCell>
-                  <TableHeaderCell>Name</TableHeaderCell>
-                  <TableHeaderCell>Role</TableHeaderCell>
-                  <TableHeaderCell>Status</TableHeaderCell>
-                  <TableHeaderCell>Created</TableHeaderCell>
+                  <SortableTableHeaderCell columnId="email" sort={usersSort.sort} onSort={usersSort.toggleSort}>
+                    Email
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="name" sort={usersSort.sort} onSort={usersSort.toggleSort}>
+                    Name
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="role" sort={usersSort.sort} onSort={usersSort.toggleSort}>
+                    Role
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="status" sort={usersSort.sort} onSort={usersSort.toggleSort}>
+                    Status
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="createdAt" sort={usersSort.sort} onSort={usersSort.toggleSort}>
+                    Created
+                  </SortableTableHeaderCell>
                   <TableHeaderCell>
                     <span className="sr-only">Actions</span>
                   </TableHeaderCell>

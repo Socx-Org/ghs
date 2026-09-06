@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Badge, Button, Card, CardBody, CardHeader, EmptyState, FormField, Input, Select, Skeleton, Stat, RoundStatusBadge, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow, useToast } from "../components";
+import { Alert, Badge, Button, Card, CardBody, CardHeader, EmptyState, FormField, Input, Select, Skeleton, Stat, RoundStatusBadge, SortableTableHeaderCell, Table, TableBody, TableCell, TableHead, TableRow, useToast } from "../components";
 import { ApiError, getCourse, getDailyPcc, listAdminRounds, listCourses, setDailyPcc } from "../lib/api";
 import { playedAtToIsoString, today } from "../lib/dates";
+import { useTableSort } from "../lib/useTableSort";
 import type { PccCorrectionOutcome } from "../types/domain";
 
 // ghs#168: the Daily PCC screen -- the admin-facing half of "move
@@ -61,6 +62,18 @@ export default function DailyPccPage() {
     queryKey: ["admin", "rounds", { teeConfigurationId, playedOn }],
     queryFn: () => listAdminRounds({ teeConfigurationId, playedOn }),
     enabled: scoped,
+  });
+  // ghs#203: the bare-<Table> case -- useTableSort/SortableTableHeaderCell
+  // work identically outside ListView. Nullable score fields (a round
+  // still in draft has none yet) sort last regardless of direction, same
+  // as every other useTableSort column in this app.
+  const roundsSort = useTableSort(roundsQuery.data?.items ?? [], {
+    player: (item) => `${item.playerFirstName} ${item.playerLastName}`,
+    status: (item) => item.status,
+    grossScore: (item) => item.grossScore,
+    adjustedGrossScore: (item) => item.adjustedGrossScore,
+    scoreDifferential: (item) => item.scoreDifferential,
+    pcc: (item) => item.pcc,
   });
 
   const applyMutation = useMutation({
@@ -202,16 +215,28 @@ export default function DailyPccPage() {
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableHeaderCell>Player</TableHeaderCell>
-                      <TableHeaderCell>Status</TableHeaderCell>
-                      <TableHeaderCell>Gross</TableHeaderCell>
-                      <TableHeaderCell>Adjusted gross</TableHeaderCell>
-                      <TableHeaderCell>Differential</TableHeaderCell>
-                      <TableHeaderCell>PCC</TableHeaderCell>
+                      <SortableTableHeaderCell columnId="player" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                        Player
+                      </SortableTableHeaderCell>
+                      <SortableTableHeaderCell columnId="status" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                        Status
+                      </SortableTableHeaderCell>
+                      <SortableTableHeaderCell columnId="grossScore" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                        Gross
+                      </SortableTableHeaderCell>
+                      <SortableTableHeaderCell columnId="adjustedGrossScore" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                        Adjusted gross
+                      </SortableTableHeaderCell>
+                      <SortableTableHeaderCell columnId="scoreDifferential" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                        Differential
+                      </SortableTableHeaderCell>
+                      <SortableTableHeaderCell columnId="pcc" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                        PCC
+                      </SortableTableHeaderCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {roundsQuery.data.items.map((item) => (
+                    {roundsSort.sortedItems.map((item) => (
                       <TableRow key={item.id}>
                         <TableCell>
                           {item.playerFirstName} {item.playerLastName}

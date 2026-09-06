@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, Tooltip, useToast } from "../components";
+import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, SortableTableHeaderCell, TableCell, TableHeaderCell, Tooltip, useToast } from "../components";
 import { ApiError, deleteRound, getMyPlayerProfile, getPlayerRounds } from "../lib/api";
 import { ROUND_STATUS_OPTIONS } from "../lib/domain-labels";
+import { useTableSort } from "../lib/useTableSort";
 import { AMENDABLE_ROUND_STATUSES, EDITABLE_ROUND_STATUSES } from "../types/domain";
 import type { PlayerRoundListItem } from "../types/domain";
 
@@ -54,6 +55,14 @@ export default function MyRoundsPage() {
     queryKey: ["players", playerId, "rounds"],
     queryFn: () => getPlayerRounds(playerId!),
     enabled: Boolean(playerId),
+  });
+  // ghs#203: Played sorts by the raw ISO playedAt, not formatPlayedAt's
+  // own locale-formatted display string.
+  const roundsSort = useTableSort(roundsQuery.data ?? [], {
+    course: (item) => item.courseName,
+    tee: (item) => item.teeConfigurationName,
+    playedAt: (item) => item.playedAt,
+    status: (item) => item.status,
   });
 
   const deleteMutation = useMutation({
@@ -143,17 +152,25 @@ export default function MyRoundsPage() {
           ) : (
             <ListView<PlayerRoundListItem>
               id="my-rounds"
-              items={roundsQuery.data}
+              items={roundsSort.sortedItems}
               getKey={(item) => item.id}
               searchPlaceholder="Search by course or tee…"
               getSearchText={(item) => `${item.courseName} ${item.teeConfigurationName}`}
               filters={[{ id: "status", label: "Status", getValue: (item) => item.status, options: ROUND_STATUS_OPTIONS }]}
               tableHead={
                 <>
-                  <TableHeaderCell>Course</TableHeaderCell>
-                  <TableHeaderCell>Tee</TableHeaderCell>
-                  <TableHeaderCell>Played</TableHeaderCell>
-                  <TableHeaderCell>Status</TableHeaderCell>
+                  <SortableTableHeaderCell columnId="course" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Course
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="tee" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Tee
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="playedAt" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Played
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="status" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Status
+                  </SortableTableHeaderCell>
                   <TableHeaderCell>
                     <span className="sr-only">Actions</span>
                   </TableHeaderCell>

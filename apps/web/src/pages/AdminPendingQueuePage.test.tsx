@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import MockAdapter from "axios-mock-adapter";
@@ -59,6 +60,17 @@ const QUEUE = [
     teeConfigurationName: "Blue",
     playedAt: "2026-05-01T00:00:00.000Z",
   },
+  {
+    id: "round-2",
+    playerId: "player-2",
+    playerFirstName: "Ben",
+    playerLastName: "Okafor",
+    courseId: "course-2",
+    courseName: "Augusta National",
+    teeConfigurationId: "tee-2",
+    teeConfigurationName: "White",
+    playedAt: "2026-05-02T00:00:00.000Z",
+  },
 ];
 
 describe("AdminPendingQueuePage", () => {
@@ -82,6 +94,28 @@ describe("AdminPendingQueuePage", () => {
 
     const link = await screen.findByRole("link", { name: "Alice Whitfield" });
     expect(link).toHaveAttribute("href", "/admin/rounds/round-1");
+  });
+
+  // ghs#203: sorting is the one exception to this screen's own
+  // "deliberately narrow" scope -- see the page's own updated comment.
+  it("sorts by Course ascending/descending", async () => {
+    mock.onGet("/admin/rounds/pending").reply(200, QUEUE);
+    renderAsRole("admin");
+    await screen.findByText("Alice Whitfield");
+
+    const table = screen.getByRole("table");
+    function courseColumn(): string[] {
+      return within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[1]!.textContent!);
+    }
+
+    await userEvent.click(screen.getByRole("button", { name: /Course/ }));
+    expect(courseColumn()).toEqual(["Augusta National", "Pebble Beach Golf Links"]);
+
+    await userEvent.click(screen.getByRole("button", { name: /Course/ }));
+    expect(courseColumn()).toEqual(["Pebble Beach Golf Links", "Augusta National"]);
   });
 
   it("shows an empty state when the queue is empty", async () => {
