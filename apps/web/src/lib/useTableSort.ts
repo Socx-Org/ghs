@@ -46,7 +46,19 @@ export function useTableSort<T>(items: T[], accessors: SortAccessors<T>) {
       if (aValue === null) return 1;
       if (bValue === null) return -1;
 
-      const comparison = typeof aValue === "number" && typeof bValue === "number" ? aValue - bValue : String(aValue).localeCompare(String(bValue));
+      // Review finding, PR #202: localeCompare's default collation is
+      // case-SENSITIVE as a tertiary tie-break (only base letters are
+      // compared case-insensitively) -- "apple" and "Apple" don't
+      // collapse to equal, they resolve to a real, non-zero order.
+      // Explicit sensitivity: "accent" makes case genuinely not matter
+      // for ordering (while still distinguishing accented letters, e.g.
+      // "e" vs "é" -- this app's real names/course names can be
+      // international) -- not relying on collator defaults, which the
+      // spec doesn't actually guarantee are case-insensitive at all.
+      const comparison =
+        typeof aValue === "number" && typeof bValue === "number"
+          ? aValue - bValue
+          : String(aValue).localeCompare(String(bValue), undefined, { sensitivity: "accent" });
       return direction === "desc" ? -comparison : comparison;
     });
     // accessors is a plain object literal at nearly every call site (not

@@ -26,11 +26,28 @@ describe("useTableSort", () => {
     expect(result.current.sort).toEqual({ columnId: null, direction: null });
   });
 
-  it("first click sorts ascending by the string accessor, case-insensitively (localeCompare)", () => {
+  it("first click sorts ascending by the string accessor (localeCompare)", () => {
     const { result } = renderHook(() => useTableSort(ROWS, ACCESSORS));
     act(() => result.current.toggleSort("name"));
     expect(result.current.sort).toEqual({ columnId: "name", direction: "asc" });
     expect(result.current.sortedItems.map((r) => r.name)).toEqual(["alice", "Bob", "Charlie"]);
+  });
+
+  it("treats two names differing only by case as equal, not ordered by case (review finding, PR #202: the previous version of this file asserted 'case-insensitively' without any data that could actually distinguish it from case-sensitive collation)", () => {
+    // Bob/bob is the minimal real proof: localeCompare's own DEFAULT
+    // collation is not case-insensitive -- "Bob".localeCompare("bob")
+    // is a real, non-zero -1/1 (confirmed directly), not a tie. With
+    // sensitivity: "accent" it's a genuine tie (0), so Array.prototype
+    // .sort's guaranteed stability (ES2019+) preserves the original
+    // "Bob" (id 1) before "bob" (id 2) order. Under the old, unfixed
+    // default collation this would instead come out reversed.
+    const rows: Row[] = [
+      { id: "1", name: "Bob", score: 1 },
+      { id: "2", name: "bob", score: 2 },
+    ];
+    const { result } = renderHook(() => useTableSort(rows, ACCESSORS));
+    act(() => result.current.toggleSort("name"));
+    expect(result.current.sortedItems.map((r) => r.id)).toEqual(["1", "2"]);
   });
 
   it("second click on the same column flips to descending", () => {

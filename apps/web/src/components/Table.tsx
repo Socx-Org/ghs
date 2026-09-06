@@ -60,7 +60,13 @@ export function SortableTableHeaderCell({ columnId, sort, onSort, className, chi
   const Icon = direction === "asc" ? ArrowUp : direction === "desc" ? ArrowDown : ArrowUpDown;
 
   return (
-    <TableHeaderCell aria-sort={ariaSort} className={className} {...rest}>
+    // Review finding, PR #202: aria-sort must come AFTER {...rest}, not
+    // before -- rest is typed to allow a caller-supplied aria-sort (it's
+    // a plain ThHTMLAttributes prop), and this component's whole
+    // contract is that aria-sort is computed from real sort state, never
+    // caller-overridable, the same way `direction`/`Icon` above aren't
+    // caller-settable props either.
+    <TableHeaderCell className={className} {...rest} aria-sort={ariaSort}>
       <button
         type="button"
         onClick={() => onSort(columnId)}
