@@ -100,6 +100,17 @@ export function useTableSort<T>(items: T[], accessors: SortAccessors<T>) {
   }, [items, accessors, sort.columnId, sort.direction]);
 
   function toggleSort(columnId: string): void {
+    // Review finding, PR #204: without this guard, toggling a columnId
+    // with no accessor still wrote it into rawSort -- invisible right
+    // now (the effective `sort` above already downgrades it to
+    // UNSORTED), but a real latent bug: if that column's accessor is
+    // added later (e.g. a feature flag turns a column on, or a caller's
+    // accessors map is otherwise conditionally built), the hidden
+    // rawSort would spring back to life and the table would suddenly
+    // appear sorted by a column nobody clicked while it was actually
+    // sortable. A no-op here means there's never a hidden state to
+    // spring back from.
+    if (!accessors[columnId]) return;
     if (sort.columnId !== columnId) {
       setRawSort({ columnId, direction: "asc" });
     } else if (sort.direction === "asc") {
