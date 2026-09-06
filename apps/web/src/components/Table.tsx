@@ -58,6 +58,7 @@ export function SortableTableHeaderCell({ columnId, sort, onSort, className, chi
   const direction = sort.columnId === columnId ? sort.direction : null;
   const ariaSort = direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none";
   const Icon = direction === "asc" ? ArrowUp : direction === "desc" ? ArrowDown : ArrowUpDown;
+  const sortStateLabel = direction === "asc" ? "sorted ascending" : direction === "desc" ? "sorted descending" : "not sorted";
 
   return (
     // Review finding, PR #202: aria-sort must come AFTER {...rest}, not
@@ -72,8 +73,24 @@ export function SortableTableHeaderCell({ columnId, sort, onSort, className, chi
         onClick={() => onSort(columnId)}
         className="inline-flex items-center gap-1 rounded text-inherit hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
-        {children}
+        {children}{" "}
         <Icon aria-hidden="true" className={cn("h-3.5 w-3.5", direction === null && "opacity-40")} />
+        {/* Review finding, PR #202: aria-sort on the <th> is the spec-
+            correct place for it, but keyboard focus lands on this button
+            -- many screen readers announce only the focused element's
+            own accessible name, not an ancestor columnheader's
+            aria-sort. Folded into the button's own name via sr-only text
+            (not aria-describedby: a description is often lower-priority/
+            optional in a screen reader's verbosity settings, while the
+            accessible name is always announced), so the sort state is
+            unambiguous regardless of how a given screen reader handles
+            table-cell ancestry. The separating {" "} above must trail
+            {"{children}"}, not lead this span -- accessible-name
+            computation trims each contributing node's own leading/
+            trailing whitespace before concatenating (confirmed
+            directly: a leading space on this span's own text instead
+            computes as "Namenot sorted", not "Name not sorted"). */}
+        <span className="sr-only">{sortStateLabel}</span>
       </button>
     </TableHeaderCell>
   );

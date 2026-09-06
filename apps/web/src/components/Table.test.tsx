@@ -28,7 +28,7 @@ describe("SortableTableHeaderCell", () => {
     const calls: string[] = [];
     renderHeader({ columnId: null, direction: null }, (columnId) => calls.push(columnId));
 
-    await userEvent.click(screen.getByRole("button", { name: "Name" }));
+    await userEvent.click(screen.getByRole("button", { name: /Name/ }));
 
     expect(calls).toEqual(["name"]);
   });
@@ -70,15 +70,62 @@ describe("SortableTableHeaderCell", () => {
     const calls: string[] = [];
     renderHeader({ columnId: null, direction: null }, (columnId) => calls.push(columnId));
 
-    const button = screen.getByRole("button", { name: "Name" });
+    const button = screen.getByRole("button", { name: /Name/ });
     button.focus();
     await userEvent.keyboard("{Enter}");
 
     expect(calls).toEqual(["name"]);
   });
 
-  it("keeps the visible label text as the button's own accessible name", () => {
+  it("keeps the visible label text as (a prefix of) the button's own accessible name", () => {
     renderHeader({ columnId: "name", direction: "asc" }, () => {});
-    expect(screen.getByRole("button", { name: "Name" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Name/ })).toBeInTheDocument();
+  });
+
+  // Review finding, PR #202: aria-sort on the <th> is the spec-correct
+  // place for it, but keyboard focus lands on the inner button -- many
+  // screen readers announce only the focused element's own accessible
+  // name, not an ancestor columnheader's aria-sort. The sort state must
+  // therefore also be discoverable from the button's OWN accessible
+  // name, not solely from aria-sort on an ancestor.
+  it("appends the current sort state to the button's own accessible name, for every state", () => {
+    const { rerender } = render(
+      <Table>
+        <TableHead>
+          <TableRow>
+            <SortableTableHeaderCell columnId="name" sort={{ columnId: null, direction: null }} onSort={() => {}}>
+              Name
+            </SortableTableHeaderCell>
+          </TableRow>
+        </TableHead>
+      </Table>,
+    );
+    expect(screen.getByRole("button", { name: "Name not sorted" })).toBeInTheDocument();
+
+    rerender(
+      <Table>
+        <TableHead>
+          <TableRow>
+            <SortableTableHeaderCell columnId="name" sort={{ columnId: "name", direction: "asc" }} onSort={() => {}}>
+              Name
+            </SortableTableHeaderCell>
+          </TableRow>
+        </TableHead>
+      </Table>,
+    );
+    expect(screen.getByRole("button", { name: "Name sorted ascending" })).toBeInTheDocument();
+
+    rerender(
+      <Table>
+        <TableHead>
+          <TableRow>
+            <SortableTableHeaderCell columnId="name" sort={{ columnId: "name", direction: "desc" }} onSort={() => {}}>
+              Name
+            </SortableTableHeaderCell>
+          </TableRow>
+        </TableHead>
+      </Table>,
+    );
+    expect(screen.getByRole("button", { name: "Name sorted descending" })).toBeInTheDocument();
   });
 });
