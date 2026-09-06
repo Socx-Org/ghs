@@ -52,6 +52,7 @@ import {
   SegmentedBar,
   Select,
   Skeleton,
+  SortableTableHeaderCell,
   Spinner,
   Stat,
   Table,
@@ -69,6 +70,8 @@ import {
 import type { WidgetStatus } from "./components";
 import { useToast } from "./components/useToast";
 import { ROUND_STATUS_OPTIONS } from "./lib/domain-labels";
+import { useTableSort } from "./lib/useTableSort";
+import type { SortAccessors } from "./lib/useTableSort";
 import type { HandicapHistoryRecord, PlayerRoundListItem, RoundStatus, UserRole } from "./types/domain";
 
 // ghs#78/#82: the living visual reference for GHS. Every component
@@ -97,6 +100,22 @@ const SAMPLE_ROUNDS: Array<{
   { id: "4", course: "Sunningdale (New)", tee: "Red", playedAt: "2026-08-17", status: "amending", differential: null },
   { id: "5", course: "Wentworth (East)", tee: "Yellow", playedAt: "2026-08-18", status: "draft", differential: null },
 ];
+
+// Review finding, PR #202: a module-level constant, not an object
+// literal passed inline at the useTableSort call site below -- these
+// accessors don't close over any component state, so there's no reason
+// for them to be recreated (and re-trigger a sort recompute) on every
+// render of this page for unrelated reasons (e.g. toggling activeNav).
+// The catalogue is meant to be copy/pasted into real pages (this file's
+// own opening comment), so it should model the stable-reference version,
+// not the convenient-but-wasteful one.
+const SAMPLE_ROUNDS_SORT_ACCESSORS: SortAccessors<(typeof SAMPLE_ROUNDS)[number]> = {
+  course: (r) => r.course,
+  tee: (r) => r.tee,
+  playedAt: (r) => r.playedAt,
+  status: (r) => r.status,
+  differential: (r) => r.differential,
+};
 
 // ghs#116: PlayerRoundListItem-shaped (courseName/teeConfigurationName
 // enriched, ghs#147), distinct from SAMPLE_ROUNDS above -- the exact
@@ -205,6 +224,10 @@ export default function ComponentsCatalogue() {
   const [activeNav, setActiveNav] = useState("dashboard");
   const [showSkeletons, setShowSkeletons] = useState(true);
   const [widgetStatus, setWidgetStatus] = useState<WidgetStatus>("ready");
+  // ghs#201: the sortable-columns demo -- SAMPLE_ROUNDS itself never
+  // changes, so this is the same "sort a small in-memory page of data"
+  // shape every real table using useTableSort will follow.
+  const roundsSort = useTableSort(SAMPLE_ROUNDS, SAMPLE_ROUNDS_SORT_ACCESSORS);
 
   useEffect(() => {
     let cancelled = false;
@@ -729,19 +752,29 @@ export default function ComponentsCatalogue() {
             </div>
           </Example>
 
-          <Example label="Table -- desktop-dense round history (horizontal scroll on narrow widths)">
+          <Example label="Table -- desktop-dense round history, sortable columns (ghs#201, click a header to sort, click again to reverse, a third time to reset)">
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableHeaderCell>Course</TableHeaderCell>
-                  <TableHeaderCell>Tee</TableHeaderCell>
-                  <TableHeaderCell>Played</TableHeaderCell>
-                  <TableHeaderCell>Status</TableHeaderCell>
-                  <TableHeaderCell>Differential</TableHeaderCell>
+                  <SortableTableHeaderCell columnId="course" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Course
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="tee" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Tee
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="playedAt" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Played
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="status" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Status
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="differential" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Differential
+                  </SortableTableHeaderCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {SAMPLE_ROUNDS.map((r) => (
+                {roundsSort.sortedItems.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell>{r.course}</TableCell>
                     <TableCell>{r.tee}</TableCell>
