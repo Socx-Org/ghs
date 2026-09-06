@@ -109,6 +109,30 @@ describe("AdminRoundsListPage", () => {
     expect(link).toHaveAttribute("href", "/admin/rounds/round-1");
   });
 
+  it("sorts by Player and by Played, the latter using the raw ISO playedAt rather than the locale-formatted display date (ghs#203)", async () => {
+    mock.onGet("/admin/rounds").reply(200, ROUNDS);
+    renderAsRole("admin");
+    await screen.findByText("Alice Whitfield");
+
+    const table = screen.getByRole("table");
+    function playerColumn(): string[] {
+      return within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[0]!.textContent!);
+    }
+
+    await userEvent.click(screen.getByRole("button", { name: /^Player/ }));
+    expect(playerColumn()).toEqual(["Alice Whitfield", "Bob Carver"]);
+    await userEvent.click(screen.getByRole("button", { name: /^Player/ }));
+    expect(playerColumn()).toEqual(["Bob Carver", "Alice Whitfield"]);
+
+    await userEvent.click(screen.getByRole("button", { name: /^Played/ }));
+    expect(playerColumn()).toEqual(["Alice Whitfield", "Bob Carver"]); // playedAt ascending: round-1 (05-01) before round-2 (05-02)
+    await userEvent.click(screen.getByRole("button", { name: /^Played/ }));
+    expect(playerColumn()).toEqual(["Bob Carver", "Alice Whitfield"]);
+  });
+
   it("shows an empty state when there are no rounds at all", async () => {
     mock.onGet("/admin/rounds").reply(200, { items: [], total: 0 });
     renderAsRole("admin");

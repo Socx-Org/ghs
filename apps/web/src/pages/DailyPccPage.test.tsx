@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -56,8 +56,24 @@ const ROUNDS_RESULT = {
       scoreDifferential: 18.4,
       pcc: 0,
     },
+    {
+      id: "round-2",
+      playerId: "player-2",
+      playerFirstName: "Alice",
+      playerLastName: "Whitfield",
+      courseId: "course-1",
+      courseName: "Pebble Beach Golf Links",
+      teeConfigurationId: "tee-1",
+      teeConfigurationName: "Blue",
+      playedAt: "2026-05-01T10:00:00.000Z",
+      status: "draft",
+      grossScore: null,
+      adjustedGrossScore: null,
+      scoreDifferential: null,
+      pcc: null,
+    },
   ],
-  total: 1,
+  total: 2,
 };
 
 let mock: MockAdapter;
@@ -116,6 +132,33 @@ describe("DailyPccPage", () => {
     expect(screen.getByText("18.4")).toBeInTheDocument();
     expect(screen.getByText("Current PCC")).toBeInTheDocument();
     expect(screen.getByText("Calculated from rounds")).toBeInTheDocument();
+  });
+
+  it("sorts the rounds table (a bare Table, not ListView) by Player and by Differential, nulls last regardless of direction (ghs#203)", async () => {
+    mock.onGet("/admin/tee-configurations/tee-1/pcc", { params: { playedOn: "2026-05-01" } }).reply(200, { dailyPcc: DAILY_PCC });
+    mock.onGet("/admin/rounds", { params: { teeConfigurationId: "tee-1", playedOn: "2026-05-01" } }).reply(200, ROUNDS_RESULT);
+    const user = userEvent.setup();
+    renderPage();
+    await selectTeeAndDate(user);
+    await screen.findByText("Browser Player");
+
+    const table = screen.getByRole("table");
+    function playerColumn(): string[] {
+      return within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[0]!.textContent!);
+    }
+
+    await user.click(screen.getByRole("button", { name: /^Player/ }));
+    expect(playerColumn()).toEqual(["Alice Whitfield", "Browser Player"]);
+
+    // Differential: round-2 has no score yet (still draft) -- it must
+    // sort last in BOTH directions, not first on descending.
+    await user.click(screen.getByRole("button", { name: /^Differential/ }));
+    expect(playerColumn()).toEqual(["Browser Player", "Alice Whitfield"]);
+    await user.click(screen.getByRole("button", { name: /^Differential/ }));
+    expect(playerColumn()).toEqual(["Browser Player", "Alice Whitfield"]);
   });
 
   it("shows an empty state when no rounds exist yet for the chosen tee/day", async () => {

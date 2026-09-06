@@ -1,16 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Alert, Card, CardBody, EmptyState, ListView, Skeleton, TableCell, TableHeaderCell } from "../components";
+import { Alert, Card, CardBody, EmptyState, ListView, Skeleton, SortableTableHeaderCell, TableCell } from "../components";
 import { ApiError, listPendingRounds } from "../lib/api";
+import { useTableSort } from "../lib/useTableSort";
 import type { PendingRoundQueueItem } from "../types/domain";
 
 // ghs#67: the admin pending-review queue -- design doc's own "golden
 // path" admin half. Deliberately narrow, matching GET /admin/rounds/
-// pending's own approved scope (no filters/pagination/sorting) -- a
-// general admin round browser is #113, a separate screen entirely, not
-// folded in here. Once #100's admin-created-round auto-approval fast
-// path ships, this queue only ever contains player-submitted rounds --
-// no change needed here for that, just noted for context.
+// pending's own approved scope (no filters/pagination) -- a general
+// admin round browser is #113, a separate screen entirely, not folded
+// in here. Once #100's admin-created-round auto-approval fast path
+// ships, this queue only ever contains player-submitted rounds -- no
+// change needed here for that, just noted for context.
+//
+// ghs#203: sorting is the one exception to "deliberately narrow" above
+// -- unlike pagination/filtering (real complexity this purpose-built
+// queue was never meant to carry), useTableSort is a few lines with no
+// new dependencies, so it doesn't cost what that original decision was
+// written against.
 
 function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
@@ -22,6 +29,12 @@ function describeQueryError(error: unknown, fallback: string): string {
 
 export default function AdminPendingQueuePage() {
   const queueQuery = useQuery({ queryKey: ["admin", "rounds", "pending"], queryFn: listPendingRounds });
+  const queueSort = useTableSort(queueQuery.data ?? [], {
+    player: (item) => `${item.playerFirstName} ${item.playerLastName}`,
+    course: (item) => item.courseName,
+    tee: (item) => item.teeConfigurationName,
+    playedAt: (item) => item.playedAt,
+  });
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
@@ -43,14 +56,22 @@ export default function AdminPendingQueuePage() {
           ) : (
             <ListView<PendingRoundQueueItem>
               id="pending-rounds"
-              items={queueQuery.data}
+              items={queueSort.sortedItems}
               getKey={(item) => item.id}
               tableHead={
                 <>
-                  <TableHeaderCell>Player</TableHeaderCell>
-                  <TableHeaderCell>Course</TableHeaderCell>
-                  <TableHeaderCell>Tee</TableHeaderCell>
-                  <TableHeaderCell>Played</TableHeaderCell>
+                  <SortableTableHeaderCell columnId="player" sort={queueSort.sort} onSort={queueSort.toggleSort}>
+                    Player
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="course" sort={queueSort.sort} onSort={queueSort.toggleSort}>
+                    Course
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="tee" sort={queueSort.sort} onSort={queueSort.toggleSort}>
+                    Tee
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="playedAt" sort={queueSort.sort} onSort={queueSort.toggleSort}>
+                    Played
+                  </SortableTableHeaderCell>
                 </>
               }
               renderTableRow={(item) => (

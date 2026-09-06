@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, TableCell, TableHeaderCell, Tooltip, useToast } from "../components";
+import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, SortableTableHeaderCell, TableCell, TableHeaderCell, Tooltip, useToast } from "../components";
 import { ApiError, deleteRound, listAdminRounds } from "../lib/api";
 import { ROUND_STATUS_OPTIONS } from "../lib/domain-labels";
+import { useTableSort } from "../lib/useTableSort";
 import type { AdminRoundListItem } from "../types/domain";
 
 // ghs#113: the general admin all-rounds browser -- distinct from the
@@ -39,6 +40,15 @@ export default function AdminRoundsListPage() {
   const [deleteTarget, setDeleteTarget] = useState<AdminRoundListItem | null>(null);
 
   const roundsQuery = useQuery({ queryKey: ["admin", "rounds"], queryFn: () => listAdminRounds() });
+  // ghs#203: Played sorts by the raw ISO playedAt, not formatPlayedAt's
+  // own locale-formatted display string.
+  const roundsSort = useTableSort(roundsQuery.data?.items ?? [], {
+    player: (item) => `${item.playerFirstName} ${item.playerLastName}`,
+    course: (item) => item.courseName,
+    tee: (item) => item.teeConfigurationName,
+    playedAt: (item) => item.playedAt,
+    status: (item) => item.status,
+  });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteRound(id),
@@ -102,18 +112,28 @@ export default function AdminRoundsListPage() {
           ) : (
             <ListView<AdminRoundListItem>
               id="admin-rounds"
-              items={roundsQuery.data.items}
+              items={roundsSort.sortedItems}
               getKey={(item) => item.id}
               searchPlaceholder="Search by player, course, or tee…"
               getSearchText={(item) => `${item.playerFirstName} ${item.playerLastName} ${item.courseName} ${item.teeConfigurationName}`}
               filters={[{ id: "status", label: "Status", getValue: (item) => item.status, options: ROUND_STATUS_OPTIONS }]}
               tableHead={
                 <>
-                  <TableHeaderCell>Player</TableHeaderCell>
-                  <TableHeaderCell>Course</TableHeaderCell>
-                  <TableHeaderCell>Tee</TableHeaderCell>
-                  <TableHeaderCell>Played</TableHeaderCell>
-                  <TableHeaderCell>Status</TableHeaderCell>
+                  <SortableTableHeaderCell columnId="player" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Player
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="course" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Course
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="tee" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Tee
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="playedAt" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Played
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="status" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Status
+                  </SortableTableHeaderCell>
                   <TableHeaderCell>
                     <span className="sr-only">Actions</span>
                   </TableHeaderCell>

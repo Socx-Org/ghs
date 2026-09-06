@@ -108,6 +108,49 @@ describe("AdminAccountsPage", () => {
     expect(adminRow.textContent).toContain("—");
   });
 
+  it("sorts by Name with a raw-value nulls-last comparator (not the '—' placeholder) -- admin accounts with no linked player sort last regardless of direction (ghs#203)", async () => {
+    setTokens(ADMIN_TOKENS);
+    mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+    renderPage();
+    await screen.findByText("alice@example.com");
+
+    function emailColumn(): string[] {
+      const table = screen.getByRole("table");
+      return within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[0]!.textContent!);
+    }
+
+    await userEvent.click(screen.getByRole("button", { name: /^Name/ }));
+    let emails = emailColumn();
+    // Alice, Ben, Gone, Pending sort by real name ascending; admin@ and
+    // carol@ (both null names) land at the bottom, in either order.
+    expect(emails.slice(0, 4)).toEqual(["alice@example.com", "ben@example.com", "gone@example.com", "pending@example.com"]);
+    expect(new Set(emails.slice(4))).toEqual(new Set(["admin@example.com", "carol@example.com"]));
+
+    await userEvent.click(screen.getByRole("button", { name: /^Name/ }));
+    emails = emailColumn();
+    expect(emails.slice(0, 4)).toEqual(["pending@example.com", "gone@example.com", "ben@example.com", "alice@example.com"]);
+    expect(new Set(emails.slice(4))).toEqual(new Set(["admin@example.com", "carol@example.com"]));
+  });
+
+  it("sorts by Created using the raw ISO createdAt, not the locale-formatted display date (ghs#203)", async () => {
+    setTokens(ADMIN_TOKENS);
+    mock.onGet("/admin/users").reply(200, { items: ACCOUNTS, total: ACCOUNTS.length });
+    renderPage();
+    await screen.findByText("alice@example.com");
+
+    await userEvent.click(screen.getByRole("button", { name: /^Created/ }));
+    // Descending: newest createdAt first -- carol@ (08-06) down to
+    // admin@ (08-01).
+    await userEvent.click(screen.getByRole("button", { name: /^Created/ }));
+    const table = screen.getByRole("table");
+    const rows = within(table).getAllByRole("row").slice(1);
+    const firstRowEmail = within(rows[0]!).getAllByRole("cell")[0]!.textContent;
+    expect(firstRowEmail).toBe("carol@example.com");
+  });
+
   it("shows an empty state when there are no accounts", async () => {
     setTokens(ADMIN_TOKENS);
     mock.onGet("/admin/users").reply(200, { items: [], total: 0 });

@@ -150,4 +150,24 @@ describe("useTableSort", () => {
     expect(result.current.sort).toEqual({ columnId: null, direction: null });
     expect(result.current.sortedItems).toEqual(ROWS);
   });
+
+  it("does not create a latent sort when toggling a column with no accessor -- adding that column's accessor later does not retroactively spring it into a sorted state (review finding, PR #204)", () => {
+    const { result, rerender } = renderHook(({ accessors }) => useTableSort(ROWS, accessors), {
+      initialProps: { accessors: { name: ACCESSORS.name } as SortAccessors<Row> },
+    });
+
+    // "score" has no accessor yet -- must be a true no-op, not a hidden
+    // internal state change.
+    act(() => result.current.toggleSort("score"));
+    expect(result.current.sort).toEqual({ columnId: null, direction: null });
+
+    // "score"'s accessor becomes available (e.g. a feature flag turns
+    // on). Without the fix, the earlier toggle would "spring back" here
+    // and suddenly show as sorted by score, even though the click that
+    // supposedly caused it had no visible effect at the time.
+    rerender({ accessors: ACCESSORS });
+
+    expect(result.current.sort).toEqual({ columnId: null, direction: null });
+    expect(result.current.sortedItems).toEqual(ROWS);
+  });
 });

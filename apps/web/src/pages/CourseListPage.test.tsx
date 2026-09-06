@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import MockAdapter from "axios-mock-adapter";
@@ -102,6 +103,29 @@ describe("CourseListPage", () => {
 
     const link = await screen.findByRole("link", { name: "Pebble Beach" });
     expect(link).toHaveAttribute("href", "/courses/course-1");
+  });
+
+  it("sorts by Name and by Location, with a raw-value nulls-last comparator (not the '—' placeholder) for Location (ghs#203)", async () => {
+    mock.onGet("/courses").reply(200, COURSES);
+    renderAsRole("player");
+    await screen.findByText("Pebble Beach");
+
+    await userEvent.click(screen.getByRole("button", { name: /Name/ }));
+    let rows = screen.getAllByRole("row").slice(1);
+    expect(within(rows[0]!).getByText("No Location Course")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("Pebble Beach")).toBeInTheDocument();
+    expect(within(rows[2]!).getByText("St Andrews")).toBeInTheDocument();
+
+    // Location: the course with neither city nor country sorts last in
+    // BOTH directions -- proof this uses locationLine's own raw (nullable)
+    // return value, not the "—" placeholder renderTableRow displays for it.
+    await userEvent.click(screen.getByRole("button", { name: /Location/ }));
+    rows = screen.getAllByRole("row").slice(1);
+    expect(within(rows[rows.length - 1]!).getByText("No Location Course")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /Location/ }));
+    rows = screen.getAllByRole("row").slice(1);
+    expect(within(rows[rows.length - 1]!).getByText("No Location Course")).toBeInTheDocument();
   });
 
   it("shows a Create course button for an admin, not for a player", async () => {
