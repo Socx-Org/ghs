@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useTableSort } from "./useTableSort";
+import type { SortAccessors } from "./useTableSort";
 
 interface Row {
   id: string;
@@ -127,5 +128,26 @@ describe("useTableSort", () => {
     rerender({ multiplier: -1 });
 
     expect(result.current.sortedItems.map((r) => r.id)).toEqual(["2", "1"]);
+  });
+
+  it("downgrades to an unsorted, consistent state if the active column's accessor disappears -- sort and sortedItems never disagree (review finding, PR #202: a caller's accessors map can be conditionally built, e.g. a column that stops being sortable)", () => {
+    const { result, rerender } = renderHook(({ accessors }) => useTableSort(ROWS, accessors), {
+      initialProps: { accessors: ACCESSORS as SortAccessors<Row> },
+    });
+    act(() => result.current.toggleSort("score"));
+    expect(result.current.sort).toEqual({ columnId: "score", direction: "asc" });
+
+    rerender({ accessors: { name: ACCESSORS.name } });
+
+    expect(result.current.sort).toEqual({ columnId: null, direction: null });
+    expect(result.current.sortedItems).toEqual(ROWS);
+  });
+
+  it("toggling a columnId with no accessor at all reports as unsorted, not as a phantom active sort", () => {
+    const { result } = renderHook(() => useTableSort(ROWS, ACCESSORS));
+    act(() => result.current.toggleSort("does-not-exist"));
+
+    expect(result.current.sort).toEqual({ columnId: null, direction: null });
+    expect(result.current.sortedItems).toEqual(ROWS);
   });
 });

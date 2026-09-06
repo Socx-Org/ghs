@@ -2,10 +2,16 @@ import { useMemo, useState } from "react";
 
 export type SortDirection = "asc" | "desc";
 
-export interface SortState {
-  columnId: string | null;
-  direction: SortDirection | null;
-}
+// Review finding, PR #202: a plain { columnId: string | null; direction:
+// SortDirection | null } interface lets both fields vary independently,
+// so a value like { columnId: "name", direction: null } type-checks even
+// though nothing in this hook (or SortableTableHeaderCell, which assumes
+// "both set or both null") should ever produce or accept it. A
+// discriminated union makes that combination genuinely unrepresentable,
+// not just conventionally avoided.
+export type SortState = { columnId: null; direction: null } | { columnId: string; direction: SortDirection };
+
+const UNSORTED: SortState = { columnId: null, direction: null };
 
 // One accessor per sortable column, keyed by the same columnId a caller
 // passes to SortableTableHeaderCell -- deliberately decoupled from
@@ -31,14 +37,29 @@ export type SortAccessors<T> = Record<string, (item: T) => string | number | nul
 // missing data (e.g. no handicap index yet) reads as "nothing to rank"
 // rather than jumping to the top on a descending sort.
 export function useTableSort<T>(items: T[], accessors: SortAccessors<T>) {
-  const [sort, setSort] = useState<SortState>({ columnId: null, direction: null });
+  const [rawSort, setRawSort] = useState<SortState>(UNSORTED);
+
+  // Review finding, PR #202: if the current sort's column has no
+  // matching accessor (e.g. a caller's accessors map is conditionally
+  // built -- a column that was sortable stops being one, but this hook's
+  // own state still remembers it), sortedItems below can't actually sort
+  // by it and falls back to returning items unsorted. Reporting the RAW
+  // state as `sort` in that case would tell the UI "this column is
+  // sorted ascending" while the data it renders is plainly not -- so the
+  // publicly returned `sort` is this "effective" state instead, always
+  // consistent with what sortedItems actually reflects. toggleSort below
+  // reads this same effective value, not the raw one, for the same
+  // reason: from the caller's perspective there IS no active sort to
+  // cycle away from once its accessor is gone.
+  const sort: SortState = rawSort.columnId !== null && accessors[rawSort.columnId] ? rawSort : UNSORTED;
 
   const sortedItems = useMemo(() => {
-    if (!sort.columnId || !sort.direction) return items;
-    const getValue = accessors[sort.columnId];
-    if (!getValue) return items;
-
+    if (sort.columnId === null) return items;
+    // sort is always consistent with a real accessor (see above) -- no
+    // "accessor missing" fallback needed here.
+    const getValue = accessors[sort.columnId]!;
     const direction = sort.direction;
+
     return [...items].sort((a, b) => {
       const aValue = getValue(a);
       const bValue = getValue(b);
@@ -79,11 +100,13 @@ export function useTableSort<T>(items: T[], accessors: SortAccessors<T>) {
   }, [items, accessors, sort.columnId, sort.direction]);
 
   function toggleSort(columnId: string): void {
-    setSort((previous) => {
-      if (previous.columnId !== columnId) return { columnId, direction: "asc" };
-      if (previous.direction === "asc") return { columnId, direction: "desc" };
-      return { columnId: null, direction: null };
-    });
+    if (sort.columnId !== columnId) {
+      setRawSort({ columnId, direction: "asc" });
+    } else if (sort.direction === "asc") {
+      setRawSort({ columnId, direction: "desc" });
+    } else {
+      setRawSort(UNSORTED);
+    }
   }
 
   return { sortedItems, sort, toggleSort };
