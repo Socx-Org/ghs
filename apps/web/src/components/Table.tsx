@@ -1,5 +1,7 @@
 import type { HTMLAttributes, TableHTMLAttributes, ThHTMLAttributes, TdHTMLAttributes } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { cn } from "../lib/cn";
+import type { SortState } from "../lib/useTableSort";
 
 // Wrapped in its own horizontal-scroll container by default -- a fixed
 // table with many columns is unusable on a phone otherwise. Round history
@@ -37,4 +39,36 @@ export function TableHeaderCell({ className, ...rest }: ThHTMLAttributes<HTMLTab
 
 export function TableCell({ className, ...rest }: TdHTMLAttributes<HTMLTableCellElement>) {
   return <td className={cn("px-4 py-3 text-text", className)} {...rest} />;
+}
+
+export interface SortableTableHeaderCellProps extends ThHTMLAttributes<HTMLTableCellElement> {
+  // Matches whatever key the same column is registered under in the
+  // SortAccessors map passed to useTableSort (lib/useTableSort.ts).
+  columnId: string;
+  sort: SortState;
+  onSort: (columnId: string) => void;
+}
+
+// ghs#201: built on TableHeaderCell, not a parallel styled <th> -- same
+// visual base as every other header cell, just with a real <button>
+// (native keyboard/focus behaviour for free) wrapping the label and a
+// direction icon. aria-sort lives on the <th> itself, per the ARIA
+// table-sort convention -- not on the button, which merely triggers it.
+export function SortableTableHeaderCell({ columnId, sort, onSort, className, children, ...rest }: SortableTableHeaderCellProps) {
+  const direction = sort.columnId === columnId ? sort.direction : null;
+  const ariaSort = direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none";
+  const Icon = direction === "asc" ? ArrowUp : direction === "desc" ? ArrowDown : ArrowUpDown;
+
+  return (
+    <TableHeaderCell aria-sort={ariaSort} className={className} {...rest}>
+      <button
+        type="button"
+        onClick={() => onSort(columnId)}
+        className="inline-flex items-center gap-1 rounded text-inherit hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        {children}
+        <Icon aria-hidden="true" className={cn("h-3.5 w-3.5", direction === null && "opacity-40")} />
+      </button>
+    </TableHeaderCell>
+  );
 }

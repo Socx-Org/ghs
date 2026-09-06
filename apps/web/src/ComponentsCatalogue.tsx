@@ -52,6 +52,7 @@ import {
   SegmentedBar,
   Select,
   Skeleton,
+  SortableTableHeaderCell,
   Spinner,
   Stat,
   Table,
@@ -69,6 +70,7 @@ import {
 import type { WidgetStatus } from "./components";
 import { useToast } from "./components/useToast";
 import { ROUND_STATUS_OPTIONS } from "./lib/domain-labels";
+import { useTableSort } from "./lib/useTableSort";
 import type { HandicapHistoryRecord, PlayerRoundListItem, RoundStatus, UserRole } from "./types/domain";
 
 // ghs#78/#82: the living visual reference for GHS. Every component
@@ -205,6 +207,16 @@ export default function ComponentsCatalogue() {
   const [activeNav, setActiveNav] = useState("dashboard");
   const [showSkeletons, setShowSkeletons] = useState(true);
   const [widgetStatus, setWidgetStatus] = useState<WidgetStatus>("ready");
+  // ghs#201: the sortable-columns demo -- SAMPLE_ROUNDS itself never
+  // changes, so this is the same "sort a small in-memory page of data"
+  // shape every real table using useTableSort will follow.
+  const roundsSort = useTableSort(SAMPLE_ROUNDS, {
+    course: (r) => r.course,
+    tee: (r) => r.tee,
+    playedAt: (r) => r.playedAt,
+    status: (r) => r.status,
+    differential: (r) => r.differential,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -729,19 +741,29 @@ export default function ComponentsCatalogue() {
             </div>
           </Example>
 
-          <Example label="Table -- desktop-dense round history (horizontal scroll on narrow widths)">
+          <Example label="Table -- desktop-dense round history, sortable columns (ghs#201, click a header to sort, click again to reverse, a third time to reset)">
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableHeaderCell>Course</TableHeaderCell>
-                  <TableHeaderCell>Tee</TableHeaderCell>
-                  <TableHeaderCell>Played</TableHeaderCell>
-                  <TableHeaderCell>Status</TableHeaderCell>
-                  <TableHeaderCell>Differential</TableHeaderCell>
+                  <SortableTableHeaderCell columnId="course" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Course
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="tee" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Tee
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="playedAt" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Played
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="status" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Status
+                  </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="differential" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Differential
+                  </SortableTableHeaderCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {SAMPLE_ROUNDS.map((r) => (
+                {roundsSort.sortedItems.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell>{r.course}</TableCell>
                     <TableCell>{r.tee}</TableCell>
