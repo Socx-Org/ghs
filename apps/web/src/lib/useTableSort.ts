@@ -61,17 +61,22 @@ export function useTableSort<T>(items: T[], accessors: SortAccessors<T>) {
           : String(aValue).localeCompare(String(bValue), undefined, { sensitivity: "accent" });
       return direction === "desc" ? -comparison : comparison;
     });
-    // accessors is a plain object literal at nearly every call site (not
-    // memoized) -- deliberately not a dependency here. Every table this
-    // hook sorts is a single already-loaded, in-memory page of data (tens
-    // to low hundreds of rows), so recomputing on every render this
-    // hook's caller re-renders for any reason is cheap enough that
-    // requiring callers to useMemo/useCallback their own accessor map
-    // would be defensive complexity with no real payoff -- same "small
-    // in-memory list, don't over-engineer it" posture ListView's own
-    // filterKey/pagination logic already takes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, sort.columnId, sort.direction]);
+    // Review finding, PR #202: accessors WAS omitted from these deps on
+    // the theory that it's "just a perf optimization" to skip it -- that
+    // was wrong. Omitting a value useMemo actually reads doesn't just
+    // skip unnecessary recomputes, it can also skip NECESSARY ones: a
+    // caller whose accessor closes over reactive state (locale, a
+    // feature flag, a formatting preference) would get back a stale
+    // sortedItems after that state changes, as long as items/sort
+    // themselves happened not to change too. Since this hook is meant to
+    // be genuinely reusable, correctness here matters more than the
+    // recompute this accessors dependency costs -- and that cost is
+    // cheap regardless (every table this hook sorts is a single already-
+    // loaded, in-memory page of tens to low-hundreds of rows), which is
+    // exactly why accepting "most callers pass a fresh object literal
+    // every render, so this often recomputes anyway" is the right
+    // trade-off rather than something to engineer around.
+  }, [items, accessors, sort.columnId, sort.direction]);
 
   function toggleSort(columnId: string): void {
     setSort((previous) => {

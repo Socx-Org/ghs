@@ -108,4 +108,24 @@ describe("useTableSort", () => {
     act(() => result.current.toggleSort("name"));
     expect(ROWS).toEqual(original);
   });
+
+  it("re-sorts when the accessors themselves change, even though items and the sort column/direction stay the same (review finding, PR #202: accessors was previously missing from the memo's own dependency array, so this would silently return a stale sort)", () => {
+    const rows: Row[] = [
+      { id: "1", name: "A", score: 1 },
+      { id: "2", name: "B", score: 2 },
+    ];
+    const { result, rerender } = renderHook(
+      ({ multiplier }) => useTableSort(rows, { name: (r) => r.name, score: (r) => (r.score ?? 0) * multiplier }),
+      { initialProps: { multiplier: 1 } },
+    );
+    act(() => result.current.toggleSort("score"));
+    expect(result.current.sortedItems.map((r) => r.id)).toEqual(["1", "2"]);
+
+    // Same rows, same sort column/direction -- only the accessor's own
+    // behaviour changes (a stand-in for a caller whose accessor closes
+    // over reactive state, e.g. locale or a formatting preference).
+    rerender({ multiplier: -1 });
+
+    expect(result.current.sortedItems.map((r) => r.id)).toEqual(["2", "1"]);
+  });
 });
