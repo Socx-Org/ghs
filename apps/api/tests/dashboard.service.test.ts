@@ -25,7 +25,7 @@ const SAMPLE_HISTORY: HandicapHistoryRecord[] = [
 ];
 
 const SAMPLE_ROUNDS: PlayerRoundListItem[] = [
-  { id: "r1", playerId: "player-1", courseId: "c1", courseName: "Sunningdale", teeConfigurationId: "t1", teeConfigurationName: "White", playedAt: "2026-05-01T09:00:00.000Z", status: "approved" },
+  { id: "r1", playerId: "player-1", courseId: "c1", courseName: "Sunningdale", teeConfigurationId: "t1", teeConfigurationName: "White", playedAt: "2026-05-01T09:00:00.000Z", status: "approved", grossScore: 88 },
 ];
 
 const SAMPLE_STATS: PlayerStats = {

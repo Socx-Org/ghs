@@ -124,6 +124,12 @@ export interface PlayerRoundListItem {
   teeConfigurationName: string;
   playedAt: string;
   status: RoundStatus;
+  // ghs#205: real for a pending round too (ghs#168 moved scoring to
+  // submission time) -- every player-facing renderer must withhold it
+  // until status === 'approved', same rule RoundDetailsPage's own Stat
+  // already enforces. This type carries the raw value regardless of
+  // status, same as Round itself.
+  grossScore: number | null;
 }
 
 // Mirrors apps/api/src/data/rounds.repository.ts's PlayerStats exactly

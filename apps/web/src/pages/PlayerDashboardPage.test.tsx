@@ -82,7 +82,7 @@ function historyRecord(id: string, calculationDate: string, handicapIndex: numbe
 }
 
 function roundItem(id: string, playedAt: string, status: PlayerRoundListItem["status"]): PlayerRoundListItem {
-  return { id, playerId: "player-1", courseId: "c1", courseName: "Sunningdale", teeConfigurationId: "t1", teeConfigurationName: "White", playedAt, status };
+  return { id, playerId: "player-1", courseId: "c1", courseName: "Sunningdale", teeConfigurationId: "t1", teeConfigurationName: "White", playedAt, status, grossScore: null };
 }
 
 // A real, internally-consistent stats fixture (roundsCount > 0, so

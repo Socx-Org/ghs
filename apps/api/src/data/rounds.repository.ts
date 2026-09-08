@@ -66,6 +66,13 @@ export interface PlayerRoundListItem {
   teeConfigurationName: string;
   playedAt: string;
   status: RoundStatus;
+  // ghs#205: the Player Dashboard's Recent Rounds widget. Real for a
+  // pending round too (ghs#168 moved scoring to submission time), but
+  // every player-facing caller must withhold it until status ===
+  // 'approved' -- same rule RoundDetailsPage's own Stat already
+  // enforces -- this type carries the raw value regardless of status,
+  // same as Round itself.
+  grossScore: number | null;
 }
 
 // ghs#61: a purpose-built, lightweight projection for the admin pending-
@@ -654,12 +661,13 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         tee_configuration_name: string;
         played_at: Date;
         status: RoundStatus;
+        gross_score: number | null;
       }>(
         `SELECT
            r.id, r.player_id,
            c.id AS course_id, c.name AS course_name,
            tc.id AS tee_configuration_id, tc.name AS tee_configuration_name,
-           r.played_at, r.status
+           r.played_at, r.status, r.gross_score
          FROM rounds r
          JOIN tee_configurations tc ON tc.id = r.tee_configuration_id
          JOIN courses c ON c.id = tc.course_id
@@ -676,6 +684,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         teeConfigurationName: row.tee_configuration_name,
         playedAt: row.played_at.toISOString(),
         status: row.status,
+        grossScore: row.gross_score,
       }));
     },
 

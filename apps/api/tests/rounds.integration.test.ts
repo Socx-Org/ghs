@@ -183,6 +183,9 @@ test("listByPlayer (ghs#147): real course/tee names joined in, ordered newest-pl
   const older = await rounds.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
   const newer = await rounds.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-05T09:00:00.000Z" });
   await rounds.create({ playerId: otherPlayer.id, teeConfigurationId, playedAt: "2026-05-06T09:00:00.000Z" });
+  // ghs#205: a real, non-null gross score -- proves listByPlayer's own
+  // query actually selects it, not just that the column exists.
+  await rounds.updateScores(newer.id, { grossScore: 88 });
 
   const list = await rounds.listByPlayer(player.id);
 
@@ -192,6 +195,8 @@ test("listByPlayer (ghs#147): real course/tee names joined in, ordered newest-pl
   assert.equal(list[0]!.teeConfigurationName, "Blue");
   assert.equal(list[0]!.courseId, course.id);
   assert.equal(list[0]!.teeConfigurationId, teeConfigurationId);
+  assert.equal(list[0]!.grossScore, 88, "newer round's real gross score");
+  assert.equal(list[1]!.grossScore, null, "older round was never scored");
 });
 
 test("HTTP: a player can submit their own round and add hole scores, but not another player's", async () => {

@@ -13,6 +13,14 @@ function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+// ghs#205: same withholding rule as RoundDetailsPage's own Stat --
+// grossScore is already real for a pending round (ghs#168 moved scoring
+// to submission time), but is deliberately hidden from the player until
+// the round is actually approved.
+function displayScore(round: PlayerRoundListItem): string {
+  return round.status === "approved" ? String(round.grossScore ?? "—") : "—";
+}
+
 export interface RecentRoundsWidgetProps {
   // ghs#178: forwarded straight to the inner Widget -- placement within
   // a DashboardGrid is this widget's caller's concern, not something
@@ -67,7 +75,9 @@ export function RecentRoundsWidget({ colSpan, isIdle, isLoading, isError, errorM
       <Table>
         <TableHead>
           <TableRow>
+            <TableHeaderCell>Course</TableHeaderCell>
             <TableHeaderCell>Date</TableHeaderCell>
+            <TableHeaderCell>Score</TableHeaderCell>
             <TableHeaderCell>Status</TableHeaderCell>
             <TableHeaderCell>
               <span className="sr-only">Action</span>
@@ -77,7 +87,9 @@ export function RecentRoundsWidget({ colSpan, isIdle, isLoading, isError, errorM
         <TableBody>
           {recent.map((round) => (
             <TableRow key={round.id}>
+              <TableCell>{round.courseName}</TableCell>
               <TableCell>{formatPlayedAt(round.playedAt)}</TableCell>
+              <TableCell>{displayScore(round)}</TableCell>
               <TableCell>
                 <RoundStatusBadge status={round.status} />
               </TableCell>
