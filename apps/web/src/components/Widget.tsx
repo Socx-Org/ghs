@@ -1,8 +1,11 @@
 import type { ComponentType, ReactNode } from "react";
+import { Info } from "lucide-react";
 import { Alert } from "./Alert";
+import { Button } from "./Button";
 import { Card, CardBody, CardHeader } from "./Card";
 import { EmptyState } from "./EmptyState";
 import { Skeleton } from "./Skeleton";
+import { Tooltip } from "./Tooltip";
 import { cn } from "../lib/cn";
 
 // ghs#116 (design doc section 10): the shared Dashboard widget shell --
@@ -90,6 +93,11 @@ export interface WidgetProps {
   // stays useful (arguably most useful) while the widget is empty, and
   // shouldn't disappear just because there's nothing to show yet.
   actions?: ReactNode;
+  // ghs#207: plain-text help shown in a Tooltip behind an info icon in
+  // the header's top-right corner. Rendered in every status, same
+  // reasoning as `actions` -- this explains what the widget IS, which
+  // is just as true before its data has loaded as after.
+  infoTooltip?: string;
   status: WidgetStatus;
   errorMessage?: ReactNode;
   emptyState?: ReactNode;
@@ -108,6 +116,7 @@ export function Widget({
   description,
   secondaryMetric,
   actions,
+  infoTooltip,
   status,
   errorMessage,
   emptyState,
@@ -147,10 +156,26 @@ export function Widget({
             {description && <p className="mt-0.5 text-xs text-text-muted">{description}</p>}
           </div>
         </div>
-        {(actions || (status === "ready" && secondaryMetric)) && (
+        {(actions || (status === "ready" && secondaryMetric) || infoTooltip) && (
           <div className="flex shrink-0 items-center gap-2">
             {status === "ready" && secondaryMetric && <span className="text-sm text-text-muted">{secondaryMetric}</span>}
             {actions}
+            {infoTooltip && (
+              // placement="bottom": the icon sits at the very top of the
+              // card, so a "top"-placed tooltip risks rendering above the
+              // widget entirely (crowding the page header for a first-row
+              // widget) -- "bottom" always has the widget's own body
+              // underneath to render into instead.
+              <Tooltip content={infoTooltip} placement="bottom">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<Info aria-hidden="true" className="h-4 w-4" />}
+                  aria-label={`About ${title}`}
+                  className="text-text-muted"
+                />
+              </Tooltip>
+            )}
           </div>
         )}
       </CardHeader>

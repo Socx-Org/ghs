@@ -77,6 +77,7 @@ export function ActiveUsersSparklineWidget({
       errorMessage={errorMessage}
       emptyState={<EmptyState title="No one active" />}
       loadingSkeleton={<Skeleton height={140} />}
+      infoTooltip={`Users active in the last 5 minutes, with a sparkline comparing this ${periodLabel} to the previous ${periodLabel}.`}
     >
       <div className="flex flex-col gap-3">
         <KpiStat label="Active right now" value={current} />

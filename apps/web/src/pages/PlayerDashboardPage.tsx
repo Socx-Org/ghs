@@ -117,6 +117,7 @@ export default function PlayerDashboardPage() {
         secondaryMetric={stats ? `${stats.coursesCount} course${stats.coursesCount === 1 ? "" : "s"}` : undefined}
         errorMessage={isNetworkError ? networkErrorMessage : undefined}
         emptyState={<EmptyState title="No rounds yet" description="Play and get a round approved to see your activity here." />}
+        infoTooltip="Your total approved rounds and the number of distinct courses you've played."
       >
         {stats && <KpiStat label="Rounds played" value={stats.roundsCount} />}
       </Widget>
@@ -142,6 +143,7 @@ export default function PlayerDashboardPage() {
         status={firStatus}
         errorMessage={isNetworkError ? networkErrorMessage : undefined}
         emptyState={<EmptyState title="No fairway data yet" description="Approved rounds with a recorded fairway result will show up here." />}
+        infoTooltip="Across your approved rounds' fairway holes: the share hit, and the split between missing left and missing right."
       >
         {stats && (
           <SegmentedBar
@@ -163,6 +165,7 @@ export default function PlayerDashboardPage() {
         status={puttingStatus}
         errorMessage={isNetworkError ? networkErrorMessage : undefined}
         emptyState={<EmptyState title="No putting data yet" description="Approved rounds with recorded putts will show up here." />}
+        infoTooltip="Your average putts per round, and the split between 1-putt, 2-putt, and 3+ putt holes."
       >
         {stats && (
           <SegmentedBar
@@ -193,6 +196,7 @@ export default function PlayerDashboardPage() {
           status={statsStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="No rounds yet" />}
+          infoTooltip="The share of holes across your approved rounds where you hit the green in regulation."
         >
           {stats && <KpiStat label="GIR" value={percentLabel(stats.girPercentage)} />}
         </Widget>
@@ -203,6 +207,7 @@ export default function PlayerDashboardPage() {
           status={statsStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="No rounds yet" />}
+          infoTooltip="The share of holes across your approved rounds where you had a sand interaction (e.g. a bunker shot)."
         >
           {/* "Sand interaction", not "sand shots" -- in_sand is a
               per-hole boolean, not a shot count (PlayerStats's own doc
@@ -216,6 +221,7 @@ export default function PlayerDashboardPage() {
           status={statsStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="No rounds yet" />}
+          infoTooltip="Your average number of penalty strokes per approved round."
         >
           {stats && <KpiStat label="Penalties" value={stats.penaltiesPerRound === null ? "--" : `${stats.penaltiesPerRound}/round`} />}
         </Widget>

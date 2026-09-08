@@ -91,6 +91,7 @@ export function HandicapTrendWidget({ colSpan, isIdle, isLoading, isError, error
         )
       }
       loadingSkeleton={<Skeleton height={220} />}
+      infoTooltip="Your WHS handicap index over time, recalculated after each approved round."
     >
       <div className="h-56 w-full" aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%">

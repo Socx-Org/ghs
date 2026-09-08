@@ -139,6 +139,7 @@ export default function AdminDashboardPage() {
           status={totalUsersStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="No users yet" />}
+          infoTooltip="Every account in the system, broken down by role: player, admin, and super admin."
         >
           {totalUsers && (
             <KpiStat
@@ -157,6 +158,7 @@ export default function AdminDashboardPage() {
           status={totalCoursesStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="No courses yet" />}
+          infoTooltip="Every course in the system, with a breakdown of the top 2 countries by course count."
         >
           {totalCourses !== undefined && (
             <KpiStat label="Total courses" value={totalCourses.total} secondary={formatCourseCountryBreakdown(totalCourses)} />
@@ -171,6 +173,7 @@ export default function AdminDashboardPage() {
           status={totalRoundsStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="No rounds yet" />}
+          infoTooltip="Every round ever submitted, of any status, with a breakdown of 18-hole vs. 9-hole rounds."
         >
           {totalRounds && (
             <KpiStat label="Total rounds" value={totalRounds.total} secondary={formatRoundsHoleCountBreakdown(totalRounds)} />
@@ -185,6 +188,7 @@ export default function AdminDashboardPage() {
           status={totalRoundsStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="Nothing pending" />}
+          infoTooltip="Rounds submitted by players that are still waiting on an admin's approval or rejection."
         >
           {totalRounds && <KpiStat label="Pending review" value={totalRounds.pending} accent={totalRounds.pending > 0 ? "warning" : undefined} />}
         </Widget>
@@ -219,6 +223,7 @@ export default function AdminDashboardPage() {
         status={topCoursesStatus}
         errorMessage={isNetworkError ? networkErrorMessage : undefined}
         emptyState={<EmptyState title="No rounds yet" description="Top courses by rounds played will show up here." />}
+        infoTooltip="The courses with the most rounds played, ranked highest first."
       >
         <RankingList items={toCourseRankingItems(topCourses)} />
       </Widget>
@@ -230,6 +235,7 @@ export default function AdminDashboardPage() {
         status={mostActivePlayersStatus}
         errorMessage={isNetworkError ? networkErrorMessage : undefined}
         emptyState={<EmptyState title="No rounds yet" description="Most active players by rounds played will show up here." />}
+        infoTooltip="The players with the most rounds played, ranked highest first, alongside their current handicap index."
       >
         <RankingList items={toPlayerRankingItems(mostActivePlayers)} />
       </Widget>

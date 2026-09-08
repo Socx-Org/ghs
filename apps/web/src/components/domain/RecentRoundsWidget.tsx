@@ -71,6 +71,7 @@ export function RecentRoundsWidget({ colSpan, isIdle, isLoading, isError, errorM
       errorMessage={errorMessage}
       actions={actions}
       emptyState={<EmptyState title="No rounds yet" description="Rounds you play and submit will show up here." />}
+      infoTooltip="Your 3 most recently played rounds. A round's score is hidden here until an admin approves it."
     >
       <Table>
         <TableHead>

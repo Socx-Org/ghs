@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Flag } from "lucide-react";
 import { Widget } from "./Widget";
 
@@ -150,5 +151,40 @@ describe("Widget", () => {
       </Widget>,
     );
     expect(screen.getByRole("button", { name: "New round" })).toBeInTheDocument();
+  });
+
+  it("ghs#207: infoTooltip renders an info button whose Tooltip reveals the given text on hover", async () => {
+    const user = userEvent.setup();
+    render(
+      <Widget title="Recent rounds" status="ready" infoTooltip="Your 3 most recently played rounds.">
+        Content
+      </Widget>,
+    );
+    const infoButton = screen.getByRole("button", { name: "About Recent rounds" });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    await user.hover(infoButton);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Your 3 most recently played rounds.");
+  });
+
+  it("ghs#207: infoTooltip renders in every status, not just ready (it explains the widget itself, not its loaded data)", () => {
+    const { rerender } = render(
+      <Widget title="Recent rounds" status="loading" infoTooltip="Your 3 most recently played rounds.">
+        Content
+      </Widget>,
+    );
+    expect(screen.getByRole("button", { name: "About Recent rounds" })).toBeInTheDocument();
+
+    rerender(
+      <Widget title="Recent rounds" status="empty" infoTooltip="Your 3 most recently played rounds.">
+        Content
+      </Widget>,
+    );
+    expect(screen.getByRole("button", { name: "About Recent rounds" })).toBeInTheDocument();
+  });
+
+  it("infoTooltip is omitted entirely when not given -- no stray info button", () => {
+    render(<Widget title="Recent rounds" status="ready">Content</Widget>);
+    expect(screen.queryByRole("button", { name: /About/ })).not.toBeInTheDocument();
   });
 });

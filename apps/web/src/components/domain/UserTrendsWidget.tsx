@@ -66,6 +66,7 @@ export function UserTrendsWidget({ colSpan, period, onPeriodChange, isLoading, i
       errorMessage={errorMessage}
       emptyState={<EmptyState title="No registrations yet" description="New account registrations will show up here." />}
       loadingSkeleton={<Skeleton height={220} />}
+      infoTooltip="New account registrations per day, over the selected period."
       actions={
         <ToggleGroup
           name="user-trends-period"
