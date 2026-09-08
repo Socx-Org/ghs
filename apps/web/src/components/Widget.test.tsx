@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Flag } from "lucide-react";
 import { Widget } from "./Widget";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 describe("Widget", () => {
@@ -153,8 +153,11 @@ describe("Widget", () => {
     expect(screen.getByRole("button", { name: "New round" })).toBeInTheDocument();
   });
 
-  it("ghs#207: infoTooltip renders an info button whose Tooltip reveals the given text on hover", async () => {
-    const user = userEvent.setup();
+  it("ghs#207: infoTooltip renders an info button whose Tooltip reveals the given text on hover", () => {
+    // Fake timers, same pattern as Tooltip.test.tsx's own hover test --
+    // Tooltip has a real 400ms hover-intent delay, and this test only
+    // needs to prove Widget wires it up correctly, not re-time it.
+    vi.useFakeTimers();
     render(
       <Widget title="Recent rounds" status="ready" infoTooltip="Your 3 most recently played rounds.">
         Content
@@ -163,24 +166,22 @@ describe("Widget", () => {
     const infoButton = screen.getByRole("button", { name: "About Recent rounds" });
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
 
-    await user.hover(infoButton);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("Your 3 most recently played rounds.");
+    fireEvent.mouseEnter(infoButton);
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Your 3 most recently played rounds.");
   });
 
-  it("ghs#207: infoTooltip renders in every status, not just ready (it explains the widget itself, not its loaded data)", () => {
-    const { rerender } = render(
-      <Widget title="Recent rounds" status="loading" infoTooltip="Your 3 most recently played rounds.">
-        Content
-      </Widget>,
-    );
-    expect(screen.getByRole("button", { name: "About Recent rounds" })).toBeInTheDocument();
-
-    rerender(
-      <Widget title="Recent rounds" status="empty" infoTooltip="Your 3 most recently played rounds.">
-        Content
-      </Widget>,
-    );
-    expect(screen.getByRole("button", { name: "About Recent rounds" })).toBeInTheDocument();
+  it("ghs#207: infoTooltip renders in every status (loading/error/empty/idle/ready), not just ready -- it explains the widget itself, not its loaded data", () => {
+    const statuses = ["loading", "error", "empty", "idle", "ready"] as const;
+    for (const status of statuses) {
+      const { unmount } = render(
+        <Widget title="Recent rounds" status={status} infoTooltip="Your 3 most recently played rounds.">
+          Content
+        </Widget>,
+      );
+      expect(screen.getByRole("button", { name: "About Recent rounds" })).toBeInTheDocument();
+      unmount();
+    }
   });
 
   it("infoTooltip is omitted entirely when not given -- no stray info button", () => {
