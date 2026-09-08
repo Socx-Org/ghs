@@ -184,6 +184,7 @@ const ADMIN_GATED_ROUTES: RouteCase[] = [
   { name: "PUT /admin/settings/maintenance-mode", method: "PUT", path: "/admin/settings/maintenance-mode", body: { value: false } },
   { name: "PUT /admin/settings/self-registration-enabled", method: "PUT", path: "/admin/settings/self-registration-enabled", body: { value: false } },
   { name: "PUT /admin/settings/notifications/:type", method: "PUT", path: "/admin/settings/notifications/round-submitted", body: { value: true } },
+  { name: "PUT /admin/settings/player-stats-rounds-window", method: "PUT", path: "/admin/settings/player-stats-rounds-window", body: { value: 20 } },
   { name: "PATCH /admin/users/:id/status", method: "PATCH", path: "/admin/users/00000000-0000-0000-0000-000000000000/status", body: { status: "active" } },
   { name: "DELETE /admin/users/:id/mfa", method: "DELETE", path: "/admin/users/00000000-0000-0000-0000-000000000000/mfa" },
   // ghs#98. The dummy UUID never matches the caller's own real id (a

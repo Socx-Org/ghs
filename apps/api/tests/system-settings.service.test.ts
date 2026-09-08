@@ -65,6 +65,25 @@ test("notification poll interval defaults to 10 seconds (ghs#42's approved confi
   await assert.rejects(() => service.setNotificationPollIntervalSeconds(-5, "admin-1"));
 });
 
+test("ghs#209: player stats rounds window defaults to 20, is system_settings-configurable, and rejects anything outside 1-200", async () => {
+  const service = createSystemSettingsService(fakeRepository());
+  assert.equal(await service.getPlayerStatsRoundsWindow(), 20);
+
+  await service.setPlayerStatsRoundsWindow(50, "admin-1");
+  assert.equal(await service.getPlayerStatsRoundsWindow(), 50);
+
+  await service.setPlayerStatsRoundsWindow(1, "admin-1");
+  assert.equal(await service.getPlayerStatsRoundsWindow(), 1, "the lower bound is a valid value, not exclusive");
+
+  await service.setPlayerStatsRoundsWindow(200, "admin-1");
+  assert.equal(await service.getPlayerStatsRoundsWindow(), 200, "the upper bound is a valid value, not exclusive");
+
+  await assert.rejects(() => service.setPlayerStatsRoundsWindow(0, "admin-1"), InvalidSettingValueError);
+  await assert.rejects(() => service.setPlayerStatsRoundsWindow(201, "admin-1"), InvalidSettingValueError);
+  await assert.rejects(() => service.setPlayerStatsRoundsWindow(-5, "admin-1"), InvalidSettingValueError);
+  await assert.rejects(() => service.setPlayerStatsRoundsWindow(2.5, "admin-1"), InvalidSettingValueError, "not an integer");
+});
+
 test("ghs#195: active users chart period defaults to 24h, is system_settings-configurable across all three real values, and rejects anything outside that vocabulary", async () => {
   const service = createSystemSettingsService(fakeRepository());
   assert.equal(await service.getActiveUsersChartPeriod(), "24h");

@@ -144,8 +144,18 @@ export interface PlayerRoundListItem {
 // no hole has a real fairway_result, or -- for puttsPerRound -- no
 // hole has putts recorded at all) -- never NaN or a misleading 0.
 export interface PlayerStats {
+  // ghs#209: a lifetime total, deliberately NOT windowed by the
+  // configurable player-stats-rounds-window setting (see
+  // statsWindowRoundsCount below) -- matches the Activity widget's own
+  // "your TOTAL approved rounds" framing.
   roundsCount: number;
   coursesCount: number;
+  // ghs#209: how many of the player's most recent approved rounds were
+  // actually used for every field below (<= the configured window --
+  // naturally smaller when the player has fewer approved rounds than
+  // the window). What a widget's infoTooltip states as "your last N
+  // rounds."
+  statsWindowRoundsCount: number;
   holesCount: number;
   girPercentage: number | null;
   fairwayHitPercentage: number | null;

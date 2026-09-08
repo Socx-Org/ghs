@@ -648,7 +648,10 @@ export function createRoundsService(
     },
 
     async getPlayerStats(playerId) {
-      return repository.getPlayerStats(playerId);
+      // ghs#209: read live, no caching, matching every other
+      // system_settings-backed read in this codebase (APP-020).
+      const windowSize = await systemSettings.getPlayerStatsRoundsWindow();
+      return repository.getPlayerStats(playerId, windowSize);
     },
 
     async getTopCourses(limit) {

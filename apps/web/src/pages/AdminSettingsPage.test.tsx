@@ -29,6 +29,7 @@ const SETTINGS = {
   selfRegistrationEnabled: false,
   notifications: { roundSubmitted: true, roundApproved: true, maintenanceAlerts: true },
   activeUsersChartPeriod: "24h",
+  playerStatsRoundsWindow: 20,
 };
 
 let mock: MockAdapter;
@@ -71,6 +72,7 @@ describe("AdminSettingsPage", () => {
       selfRegistrationEnabled: false,
       notifications: { roundSubmitted: true, roundApproved: false, maintenanceAlerts: true },
       activeUsersChartPeriod: "week",
+      playerStatsRoundsWindow: 35,
     });
     renderAsRole("admin");
 
@@ -80,6 +82,7 @@ describe("AdminSettingsPage", () => {
     expect(screen.getByRole("checkbox", { name: /Notify on round approved/ })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: /Maintenance alert notifications/ })).toBeChecked();
     expect(screen.getByRole("radio", { name: "Week" })).toBeChecked();
+    expect(screen.getByRole("spinbutton", { name: "Player stats rounds window" })).toHaveValue(35);
   });
 
   it("shows an error alert when the request fails", async () => {
@@ -129,6 +132,41 @@ describe("AdminSettingsPage", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Active Right Now chart period set to Month."));
     const [request] = mock.history.put?.filter((r) => r.url === "/admin/settings/active-users-chart-period") ?? [];
     expect(JSON.parse(request!.data)).toEqual({ value: "month" });
+  });
+
+  it("ghs#209: changing the player stats rounds window calls the real endpoint and shows a toast", async () => {
+    mock.onGet("/admin/settings").reply(200, SETTINGS);
+    mock.onPut("/admin/settings/player-stats-rounds-window").reply(200, { playerStatsRoundsWindow: 15 });
+
+    renderAsRole("admin");
+    const input = await screen.findByRole("spinbutton", { name: "Player stats rounds window" });
+    expect(input).toHaveValue(20);
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "15");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Player stats rounds window set to 15."));
+    const [request] = mock.history.put?.filter((r) => r.url === "/admin/settings/player-stats-rounds-window") ?? [];
+    expect(JSON.parse(request!.data)).toEqual({ value: 15 });
+  });
+
+  it("ghs#209: the player stats rounds window's Save button is disabled for an out-of-range or unchanged value", async () => {
+    mock.onGet("/admin/settings").reply(200, SETTINGS);
+
+    renderAsRole("admin");
+    const input = await screen.findByRole("spinbutton", { name: "Player stats rounds window" });
+    const saveButton = screen.getByRole("button", { name: "Save" });
+    expect(saveButton).toBeDisabled();
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "201");
+    expect(saveButton).toBeDisabled();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "20");
+    expect(saveButton).toBeDisabled();
   });
 
   it("toggling each notification setting hits its own endpoint independently", async () => {

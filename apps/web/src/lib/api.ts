@@ -610,6 +610,10 @@ export interface AdminSettings {
   notifications: NotificationSettings;
   // ghs#195: the Active Right Now sparkline's comparison period.
   activeUsersChartPeriod: ActiveUsersChartPeriod;
+  // ghs#209: how many of a player's most recent approved rounds the
+  // Player Dashboard's GIR/Fairways/Putting/Sand/Penalties widgets
+  // aggregate over.
+  playerStatsRoundsWindow: number;
 }
 
 export interface NotificationSettings {
@@ -633,6 +637,10 @@ export async function setSelfRegistrationEnabled(value: boolean): Promise<void> 
 
 export async function setActiveUsersChartPeriod(value: ActiveUsersChartPeriod): Promise<void> {
   await api.put("/admin/settings/active-users-chart-period", { value });
+}
+
+export async function setPlayerStatsRoundsWindow(value: number): Promise<void> {
+  await api.put("/admin/settings/player-stats-rounds-window", { value });
 }
 
 // Matches admin-settings.ts's own NOTIFICATION_KEYS route params exactly
