@@ -629,9 +629,13 @@ test("getPlayerStats (ghs#101/#176): real aggregation math over approved rounds'
   await roundsRepo.addHoleScore(otherRound.id, { holeNumber: 1, strokes: 10, gir: false, fairwayResult: "missed_left", inSand: true, putts: 5, penalties: 3 });
   await roundsRepo.setStatus(otherRound.id, "approved");
 
-  const stats = await roundsRepo.getPlayerStats(player.id);
+  // A window far larger than the 3 rounds this fixture creates -- every
+  // assertion below is unaffected by ghs#209's windowing (proven
+  // separately, by the dedicated windowing test further down).
+  const stats = await roundsRepo.getPlayerStats(player.id, 100);
 
   assert.equal(stats.roundsCount, 3);
+  assert.equal(stats.statsWindowRoundsCount, 3, "all 3 approved rounds fit inside the window");
   assert.equal(stats.coursesCount, 2, "round1 and round3 share a course; round2 is on a second, distinct one");
   assert.equal(stats.holesCount, 6);
   assert.equal(stats.girPercentage, 50.0, "3 of 6 holes -> 50%");
@@ -663,7 +667,7 @@ test("getPlayerStats (ghs#178 review fix, PR #184): puttsHolesCount excludes hol
   await roundsRepo.addHoleScore(round.id, { holeNumber: 2, strokes: 5, gir: false, fairwayResult: "missed_left", inSand: false, penalties: 0 });
   await roundsRepo.setStatus(round.id, "approved");
 
-  const noPuttsStats = await roundsRepo.getPlayerStats(noPuttsPlayer.id);
+  const noPuttsStats = await roundsRepo.getPlayerStats(noPuttsPlayer.id, 100);
   assert.equal(noPuttsStats.holesCount, 2, "the holes themselves are real and counted");
   assert.equal(noPuttsStats.puttsHolesCount, 0, "but none of them have putts recorded");
   assert.equal(noPuttsStats.puttsPerRound, null, "null, not 0 -- 0 total putts across real holes is never a genuine value");
@@ -680,7 +684,7 @@ test("getPlayerStats (ghs#178 review fix, PR #184): puttsHolesCount excludes hol
   await roundsRepo.addHoleScore(mixedRound.id, { holeNumber: 3, strokes: 3, putts: 1, penalties: 0 });
   await roundsRepo.setStatus(mixedRound.id, "approved");
 
-  const mixedStats = await roundsRepo.getPlayerStats(mixedPlayer.id);
+  const mixedStats = await roundsRepo.getPlayerStats(mixedPlayer.id, 100);
   assert.equal(mixedStats.holesCount, 3);
   assert.equal(mixedStats.puttsHolesCount, 2, "only holes 1 and 3 have putts recorded");
   assert.equal(mixedStats.puttsPerRound, 3.0, "(2+1)=3 putts over 1 round -> 3.0, averaged per round not per putts-hole");
@@ -692,10 +696,11 @@ test("getPlayerStats (ghs#101): a player with no approved rounds gets real zeros
   const roundsRepo = createRoundsRepository(pool);
   const player = await players.create({ firstName: "No", lastName: "Rounds" });
 
-  const stats = await roundsRepo.getPlayerStats(player.id);
+  const stats = await roundsRepo.getPlayerStats(player.id, 20);
 
   assert.equal(stats.roundsCount, 0);
   assert.equal(stats.coursesCount, 0);
+  assert.equal(stats.statsWindowRoundsCount, 0);
   assert.equal(stats.holesCount, 0);
   assert.equal(stats.puttsHolesCount, 0);
   assert.equal(stats.girPercentage, null, "null, not NaN or a misleading 0, when there's nothing to divide by");
@@ -705,6 +710,47 @@ test("getPlayerStats (ghs#101): a player with no approved rounds gets real zeros
   assert.equal(stats.sandInteractionPercentage, null);
   assert.equal(stats.onePuttHoles, 0);
   assert.equal(stats.threePlusPuttHoles, 0);
+});
+
+test("getPlayerStats (ghs#209): windowSize caps the hole-level aggregation to the N most recently played approved rounds; roundsCount/coursesCount stay lifetime totals", async () => {
+  const teeConfigurationId = await createTeeConfiguration();
+  const roundsRepo = createRoundsRepository(pool);
+  const players = createPlayersRepository(pool);
+  const player = await players.create({ firstName: "Window", lastName: "Player" });
+
+  // 4 approved rounds, oldest to newest, each with one hole scored
+  // 1/1/0/1 putts so the two windows below (last 2 vs. all 4) produce
+  // genuinely different putts/GIR numbers, not just different counts.
+  const oldest = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(oldest.id, { holeNumber: 1, strokes: 4, gir: false, putts: 3, penalties: 1 });
+  await roundsRepo.setStatus(oldest.id, "approved");
+
+  const second = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-02T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(second.id, { holeNumber: 1, strokes: 4, gir: false, putts: 3, penalties: 1 });
+  await roundsRepo.setStatus(second.id, "approved");
+
+  // The 2 most recent -- these are the only ones a windowSize of 2 must
+  // include.
+  const third = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-03T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(third.id, { holeNumber: 1, strokes: 4, gir: true, putts: 1, penalties: 0 });
+  await roundsRepo.setStatus(third.id, "approved");
+
+  const newest = await roundsRepo.create({ playerId: player.id, teeConfigurationId, playedAt: "2026-05-04T09:00:00.000Z" });
+  await roundsRepo.addHoleScore(newest.id, { holeNumber: 1, strokes: 4, gir: true, putts: 1, penalties: 0 });
+  await roundsRepo.setStatus(newest.id, "approved");
+
+  const windowed = await roundsRepo.getPlayerStats(player.id, 2);
+  assert.equal(windowed.roundsCount, 4, "lifetime total, unaffected by the window");
+  assert.equal(windowed.statsWindowRoundsCount, 2, "only the 2 most recent approved rounds are in the window");
+  assert.equal(windowed.holesCount, 2, "1 hole each from `third` and `newest` only -- `oldest`/`second` excluded");
+  assert.equal(windowed.girPercentage, 100.0, "both windowed holes hit GIR; the two older, missed-GIR holes are excluded");
+  assert.equal(windowed.puttsPerRound, 1.0, "(1+1)=2 putts over the 2 windowed rounds -> 1.0, not diluted by the older rounds' 3-putt holes");
+  assert.equal(windowed.penaltiesPerRound, 0, "both windowed rounds have 0 penalties; the older rounds' penalties are excluded");
+
+  const lifetime = await roundsRepo.getPlayerStats(player.id, 100);
+  assert.equal(lifetime.statsWindowRoundsCount, 4, "a window larger than the player's real history includes all of it");
+  assert.equal(lifetime.holesCount, 4);
+  assert.equal(lifetime.girPercentage, 50.0, "2 of 4 holes -> 50%, once the older rounds are back in scope");
 });
 
 test("getTopCourses (ghs#180): real GROUP BY ranking over approved rounds, ordered by count, excluding pending rounds and soft-deleted courses", async () => {

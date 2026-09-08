@@ -228,12 +228,25 @@ export interface RoundDifferentialRow {
 // with a sand interaction." Named accordingly so a consuming frontend
 // can't mislabel it as a shot count.
 export interface PlayerStats {
+  // ghs#209: a lifetime total, deliberately NOT windowed by
+  // playerStatsRoundsWindow -- the Activity widget's own tooltip already
+  // says "your TOTAL approved rounds," a framing this issue preserves
+  // rather than reverses. Every other field below (everything derived
+  // from hole_scores) IS windowed.
   roundsCount: number;
   // ghs#176: the Dashboard's Activity widget pairs this with roundsCount
   // (rounds played / distinct courses played) -- added to this existing
   // query rather than a second round-trip, same join rounds.repository.ts's
-  // own listByPlayer already has to make for course/tee names.
+  // own listByPlayer already has to make for course/tee names. Lifetime,
+  // same reasoning as roundsCount above.
   coursesCount: number;
+  // ghs#209: how many of the player's most recent approved rounds were
+  // actually included below (<= the configured playerStatsRoundsWindow --
+  // naturally smaller when the player has fewer approved rounds than the
+  // window). This is what a widget's infoTooltip states, since "how many
+  // rounds are being used" is about the real data, not the configured
+  // cap.
+  statsWindowRoundsCount: number;
   holesCount: number;
   girPercentage: number | null;
   fairwayHitPercentage: number | null;
@@ -350,7 +363,11 @@ export interface RoundsRepository {
   // pure SQL aggregation over a player's approved rounds' hole_scores,
   // no WHS-engine business logic (see PlayerStats's own doc comment for
   // the sand-metric naming decision this issue explicitly requires).
-  getPlayerStats(playerId: string): Promise<PlayerStats>;
+  // windowSize (ghs#209): caps the hole-level aggregation to the
+  // player's `windowSize` most-recently-played approved rounds --
+  // roundsCount/coursesCount stay lifetime regardless (see PlayerStats's
+  // own doc comment).
+  getPlayerStats(playerId: string, windowSize: number): Promise<PlayerStats>;
   // ghs#180: the Admin Dashboard's Top Courses / Most Active Players
   // widgets -- approved rounds grouped by course/player, ranked, capped
   // to `limit`. Deterministic ordering (a count-only ORDER BY has real
@@ -855,7 +872,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       }));
     },
 
-    async getPlayerStats(playerId) {
+    async getPlayerStats(playerId, windowSize) {
       // Scoped to approved rounds only, matching listApprovedDifferentials
       // ForPlayer's own reasoning -- a round only genuinely represents the
       // player's play once it's been approved, not while still draft/
@@ -867,9 +884,18 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       // conservative) `T | undefined` typing of result.rows[0], not
       // because Postgres could genuinely return zero rows here (review
       // finding: an earlier version of this comment claimed the latter).
+      //
+      // ghs#209: `windowed_rounds` caps the hole-level aggregation to the
+      // player's `windowSize` most-recently-played approved rounds (a
+      // player with fewer than `windowSize` just gets all of them --
+      // LIMIT needs no special-casing for that). rounds_count/
+      // courses_count are deliberately independent subqueries over EVERY
+      // approved round, not `windowed_rounds` -- a lifetime total, per
+      // PlayerStats's own doc comment, not something this issue windows.
       const result = await pool.query<{
         rounds_count: number;
         courses_count: number;
+        stats_window_rounds_count: number;
         holes_count: number;
         gir_holes: number;
         fairway_relevant_holes: number;
@@ -887,9 +913,20 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         total_putts: number;
         total_penalties: number;
       }>(
-        `SELECT
-           count(DISTINCT r.id)::int AS rounds_count,
-           count(DISTINCT tc.course_id)::int AS courses_count,
+        `WITH windowed_rounds AS (
+           SELECT r.id
+           FROM rounds r
+           WHERE r.player_id = $1 AND r.status = 'approved' AND r.deleted_at IS NULL
+           ORDER BY r.played_at DESC, r.id DESC
+           LIMIT $2
+         )
+         SELECT
+           (SELECT count(*)::int FROM rounds r WHERE r.player_id = $1 AND r.status = 'approved' AND r.deleted_at IS NULL) AS rounds_count,
+           (SELECT count(DISTINCT tc.course_id)::int
+              FROM rounds r
+              JOIN tee_configurations tc ON tc.id = r.tee_configuration_id
+              WHERE r.player_id = $1 AND r.status = 'approved' AND r.deleted_at IS NULL) AS courses_count,
+           count(DISTINCT wr.id)::int AS stats_window_rounds_count,
            count(*)::int AS holes_count,
            count(*) FILTER (WHERE hs.gir)::int AS gir_holes,
            count(*) FILTER (WHERE hs.fairway_result IS NOT NULL)::int AS fairway_relevant_holes,
@@ -902,15 +939,13 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
            count(*) FILTER (WHERE hs.putts >= 3)::int AS three_plus_putt_holes,
            coalesce(sum(hs.putts) FILTER (WHERE hs.putts IS NOT NULL), 0)::int AS total_putts,
            coalesce(sum(hs.penalties), 0)::int AS total_penalties
-         FROM hole_scores hs
-         JOIN rounds r ON r.id = hs.round_id
-         JOIN tee_configurations tc ON tc.id = r.tee_configuration_id
-         WHERE r.player_id = $1 AND r.status = 'approved' AND r.deleted_at IS NULL`,
-        [playerId],
+         FROM windowed_rounds wr
+         JOIN hole_scores hs ON hs.round_id = wr.id`,
+        [playerId, windowSize],
       );
 
       const row = result.rows[0] ?? {
-        rounds_count: 0, courses_count: 0, holes_count: 0, gir_holes: 0, fairway_relevant_holes: 0,
+        rounds_count: 0, courses_count: 0, stats_window_rounds_count: 0, holes_count: 0, gir_holes: 0, fairway_relevant_holes: 0,
         fairway_hit_holes: 0, fairway_missed_left_holes: 0, fairway_missed_right_holes: 0,
         sand_holes: 0, putts_holes_count: 0, one_putt_holes: 0, three_plus_putt_holes: 0, total_putts: 0, total_penalties: 0,
       };
@@ -929,12 +964,18 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       // storage precision instead).
       const percentage = (count: number, denominator: number): number | null =>
         denominator === 0 ? null : Number(((count / denominator) * 100).toFixed(1));
+      // ghs#209: divides by the WINDOWED round count, not lifetime
+      // rounds_count -- puttsPerRound/penaltiesPerRound's numerator
+      // (total_putts/total_penalties) only ever sums windowed_rounds'
+      // hole_scores, so lifetime rounds_count would silently understate
+      // both whenever the two counts differ.
       const averagePerRound = (total: number): number | null =>
-        row.rounds_count === 0 ? null : Number((total / row.rounds_count).toFixed(1));
+        row.stats_window_rounds_count === 0 ? null : Number((total / row.stats_window_rounds_count).toFixed(1));
 
       return {
         roundsCount: row.rounds_count,
         coursesCount: row.courses_count,
+        statsWindowRoundsCount: row.stats_window_rounds_count,
         holesCount: row.holes_count,
         girPercentage: percentage(row.gir_holes, row.holes_count),
         fairwayHitPercentage: percentage(row.fairway_hit_holes, row.fairway_relevant_holes),

@@ -35,6 +35,12 @@ const KEYS = {
   // vocabulary" framing, admin-settings.ts's own comment), not a
   // free-form value.
   activeUsersChartPeriod: "active_users_chart_period",
+  // ghs#209: how many of a player's most recent approved rounds the
+  // Player Dashboard's GIR/Fairways/Putting/Sand/Penalties widgets
+  // aggregate over. Activity's own roundsCount/coursesCount stay a
+  // lifetime total, unaffected by this -- see PlayerStats's own doc
+  // comment in rounds.repository.ts.
+  playerStatsRoundsWindow: "player_stats_rounds_window",
 } as const;
 
 export class InvalidSettingValueError extends Error {}
@@ -49,6 +55,27 @@ function parsePositiveInteger(raw: string): number {
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0) {
     throw new InvalidSettingValueError(`expected a positive integer, got ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
+// ghs#209: playerStatsRoundsWindow's own bounds -- 1-200, generous enough
+// to cover even a very active multi-year player's approved-round
+// history, while still bounding the windowed query's cost against an
+// accidentally huge value (e.g. a stray extra zero).
+const PLAYER_STATS_ROUNDS_WINDOW_MIN = 1;
+const PLAYER_STATS_ROUNDS_WINDOW_MAX = 200;
+
+function isValidPlayerStatsRoundsWindow(value: number): boolean {
+  return Number.isInteger(value) && value >= PLAYER_STATS_ROUNDS_WINDOW_MIN && value <= PLAYER_STATS_ROUNDS_WINDOW_MAX;
+}
+
+function parsePlayerStatsRoundsWindow(raw: string): number {
+  const value = Number(raw);
+  if (!isValidPlayerStatsRoundsWindow(value)) {
+    throw new InvalidSettingValueError(
+      `expected an integer between ${PLAYER_STATS_ROUNDS_WINDOW_MIN} and ${PLAYER_STATS_ROUNDS_WINDOW_MAX}, got ${JSON.stringify(raw)}`,
+    );
   }
   return value;
 }
@@ -91,6 +118,9 @@ export interface SystemSettingsService {
 
   getActiveUsersChartPeriod(): Promise<ActiveUsersChartPeriod>;
   setActiveUsersChartPeriod(value: ActiveUsersChartPeriod, updatedBy: string | null): Promise<void>;
+
+  getPlayerStatsRoundsWindow(): Promise<number>;
+  setPlayerStatsRoundsWindow(value: number, updatedBy: string | null): Promise<void>;
 }
 
 export function createSystemSettingsService(repo: SystemSettingsRepository): SystemSettingsService {
@@ -174,6 +204,25 @@ export function createSystemSettingsService(repo: SystemSettingsRepository): Sys
         KEYS.activeUsersChartPeriod,
         value,
         "Comparison period for the Admin Dashboard's Active Right Now sparkline (24h/week/month)",
+        updatedBy,
+      );
+    },
+
+    async getPlayerStatsRoundsWindow() {
+      const row = await repo.get(KEYS.playerStatsRoundsWindow);
+      return row ? parsePlayerStatsRoundsWindow(row.value) : 20; // default: this issue's own requested value
+    },
+
+    async setPlayerStatsRoundsWindow(value, updatedBy) {
+      if (!isValidPlayerStatsRoundsWindow(value)) {
+        throw new InvalidSettingValueError(
+          `player stats rounds window must be an integer between ${PLAYER_STATS_ROUNDS_WINDOW_MIN} and ${PLAYER_STATS_ROUNDS_WINDOW_MAX}, got ${value}`,
+        );
+      }
+      await repo.upsert(
+        KEYS.playerStatsRoundsWindow,
+        String(value),
+        "How many of a player's most recent approved rounds the Player Dashboard's performance-stats widgets (GIR/Fairways/Putting/Sand/Penalties) aggregate over",
         updatedBy,
       );
     },

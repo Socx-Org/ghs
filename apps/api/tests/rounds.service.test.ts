@@ -10,6 +10,7 @@ import type {
   CreateRoundInput,
   HoleScore,
   PlayerRoundListItem,
+  PlayerStats,
   Round,
   RoundForUpdate,
   RoundScoreUpdate,
@@ -186,7 +187,7 @@ function fakeNotificationsRepository(): NotificationsRepository & { recordedCall
 // own default), so tests that don't care about gating (almost all of
 // them) see the exact same behaviour as before ghs#41 without having to
 // pass anything.
-function fakeSystemSettingsService(overrides: Partial<NotificationSettings> = {}): SystemSettingsService {
+function fakeSystemSettingsService(overrides: Partial<NotificationSettings> = {}, playerStatsRoundsWindow = 20): SystemSettingsService {
   const settings: NotificationSettings = { roundSubmitted: true, roundApproved: true, maintenanceAlerts: true, ...overrides };
   return {
     async getMaintenanceMode() { throw new Error("not used by these tests"); },
@@ -199,6 +200,8 @@ function fakeSystemSettingsService(overrides: Partial<NotificationSettings> = {}
     async setNotificationSetting() { throw new Error("not used by these tests"); },
     async getActiveUsersChartPeriod() { throw new Error("not used by these tests"); },
     async setActiveUsersChartPeriod() { throw new Error("not used by these tests"); },
+    async getPlayerStatsRoundsWindow() { return playerStatsRoundsWindow; },
+    async setPlayerStatsRoundsWindow() { throw new Error("not used by these tests"); },
   };
 }
 
@@ -235,7 +238,7 @@ function roundsService(
   return createRoundsService(fakePool(), repository, courses, scoring, recalculation, notifications, players, systemSettings, silentLogger);
 }
 
-function fakeRepository(): RoundsRepository & { getCallCount: number } {
+function fakeRepository(): RoundsRepository & { getCallCount: number; getPlayerStatsCalls: number[] } {
   const rounds = new Map<string, Round>();
   const deleted = new Set<string>();
   // ghs#100: tracked separately from the public Round type above (which
@@ -245,10 +248,14 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
   let nextRoundId = 1;
   let nextHoleId = 1;
   const state = { getCallCount: 0 };
+  const getPlayerStatsCalls: number[] = [];
 
   return {
     get getCallCount() {
       return state.getCallCount;
+    },
+    get getPlayerStatsCalls() {
+      return getPlayerStatsCalls;
     },
     async create(input: CreateRoundInput) {
       const round: Round = {
@@ -346,7 +353,15 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
     async listPendingQueue() { throw new Error("not used by these tests"); },
     async listAdminRounds() { throw new Error("not used by these tests"); },
     async getHoleCountBreakdown() { throw new Error("not used by these tests"); },
-    async getPlayerStats() { throw new Error("not used by these tests"); },
+    async getPlayerStats(_playerId: string, windowSize: number): Promise<PlayerStats> {
+      getPlayerStatsCalls.push(windowSize);
+      return {
+        roundsCount: 0, coursesCount: 0, statsWindowRoundsCount: 0, holesCount: 0, girPercentage: null,
+        fairwayHitPercentage: null, fairwayMissedLeftPercentage: null, fairwayMissedRightPercentage: null,
+        puttsPerRound: null, puttsHolesCount: 0, onePuttHoles: 0, threePlusPuttHoles: 0,
+        penaltiesPerRound: null, sandInteractionPercentage: null,
+      };
+    },
     async getTopCourses() { throw new Error("not used by these tests"); },
     async getMostActivePlayers() { throw new Error("not used by these tests"); },
     async getCreatedByRole(id: string) {
@@ -1060,4 +1075,14 @@ test("listRoundsForPlayer only returns that player's rounds", async () => {
   const player1Rounds = await service.listRoundsForPlayer("player-1");
   assert.equal(player1Rounds.length, 1);
   assert.equal(player1Rounds[0]!.playerId, "player-1");
+});
+
+test("ghs#209: getPlayerStats reads the configured window size live from system settings and forwards it to the repository, unchanged, on every call", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo, undefined, undefined, undefined, undefined, fakeSystemSettingsService({}, 42));
+
+  await service.getPlayerStats("player-1");
+  await service.getPlayerStats("player-1");
+
+  assert.deepEqual(repo.getPlayerStatsCalls, [42, 42], "read live on every call, not cached after the first");
 });

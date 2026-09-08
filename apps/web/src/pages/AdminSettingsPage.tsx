@@ -1,9 +1,25 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Alert, BackButton, Card, CardBody, Checkbox, Skeleton, ToggleGroup, useToast } from "../components";
-import { ApiError, getAdminSettings, setActiveUsersChartPeriod, setMaintenanceMode, setNotificationSetting, setSelfRegistrationEnabled } from "../lib/api";
+import { Alert, BackButton, Button, Card, CardBody, Checkbox, Input, Skeleton, ToggleGroup, useToast } from "../components";
+import {
+  ApiError,
+  getAdminSettings,
+  setActiveUsersChartPeriod,
+  setMaintenanceMode,
+  setNotificationSetting,
+  setPlayerStatsRoundsWindow,
+  setSelfRegistrationEnabled,
+} from "../lib/api";
 import type { NotificationSettingType } from "../lib/api";
 import type { ActiveUsersChartPeriod } from "../types/domain";
+
+// ghs#209: playerStatsRoundsWindow's own bounds -- mirrors the backend's
+// (admin-settings.ts/system-settings.service.ts), duplicated here rather
+// than fetched, matching how this page's other rows already hardcode
+// their own vocabulary (e.g. ACTIVE_USERS_CHART_PERIOD_OPTIONS below).
+const PLAYER_STATS_ROUNDS_WINDOW_MIN = 1;
+const PLAYER_STATS_ROUNDS_WINDOW_MAX = 200;
 
 const ACTIVE_USERS_CHART_PERIOD_OPTIONS: { value: ActiveUsersChartPeriod; label: string }[] = [
   { value: "24h", label: "24h" },
@@ -90,6 +106,82 @@ function ChartPeriodSettingRow({ label, description, value, isLoading, onChange 
   );
 }
 
+interface NumberSettingRowProps {
+  label: string;
+  description: string;
+  value: number;
+  min: number;
+  max: number;
+  isLoading: boolean;
+  onSave: (next: number) => void;
+}
+
+// ghs#209: this settings vocabulary's first free-form numeric value --
+// unlike SettingRow/ChartPeriodSettingRow above, a number needs local
+// draft state to hold what's been typed so far (an "on change" commit,
+// fine for a single click/keypress toggle, would try to save on every
+// keystroke of a multi-digit number). Resyncs to the server's confirmed
+// value whenever it changes -- e.g. after a successful save's
+// invalidate/refetch -- same "no manual revert, the query cache is the
+// single source of truth" philosophy as the rest of this page, just
+// applied to a draft that can legitimately differ from it while typing.
+//
+// Resetting `draft` when `value` changes during render (React's own
+// documented "adjusting state when a prop changes" pattern), not a
+// useEffect -- setState synchronously inside an effect just to mirror a
+// prop is a real anti-pattern (a whole extra render pass for something
+// this render can do itself), flagged directly by the
+// react-hooks/set-state-in-effect lint rule.
+function NumberSettingRow({ label, description, value, min, max, isLoading, onSave }: NumberSettingRowProps) {
+  const [draft, setDraft] = useState(String(value));
+  const [lastValue, setLastValue] = useState(value);
+  if (value !== lastValue) {
+    setLastValue(value);
+    setDraft(String(value));
+  }
+
+  const parsed = Number(draft);
+  const isValid = draft.trim() !== "" && Number.isInteger(parsed) && parsed >= min && parsed <= max;
+  // Review finding, PR #210: compares the PARSED number, not the raw
+  // strings -- a numerically-equivalent draft like "020" for a saved 20
+  // would otherwise stay "dirty" forever (the prop value never actually
+  // changes on save, so the render-time resync above never fires
+  // either), letting Save re-enable and re-fire the same no-op PUT
+  // indefinitely.
+  const isDirty = isValid && parsed !== value;
+
+  return (
+    <div className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <span>
+        <span className="block text-sm font-medium text-text">{label}</span>
+        <span className="block text-sm text-text-muted">{description}</span>
+      </span>
+      <div className="flex shrink-0 items-center gap-2">
+        {/* aria-label, not FormField -- the row's own visible label/
+            description above already serves as this input's label,
+            same bare-Input-with-aria-label convention as
+            TeeConfigurationForm's compact per-hole number inputs. */}
+        <Input
+          type="number"
+          inputMode="numeric"
+          aria-label={label}
+          min={min}
+          max={max}
+          step={1}
+          value={draft}
+          disabled={isLoading}
+          invalid={!isValid}
+          onChange={(event) => setDraft(event.target.value)}
+          className="w-20"
+        />
+        <Button size="sm" variant="secondary" disabled={!isDirty || !isValid || isLoading} onClick={() => onSave(parsed)}>
+          Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminSettingsPage() {
   const navigate = useNavigate();
   const { show } = useToast();
@@ -126,6 +218,15 @@ export default function AdminSettingsPage() {
       show({ variant: "success", message: `Active Right Now chart period set to ${activeUsersChartPeriodLabel(value)}.`, duration: 2500 });
     },
     onError: (error) => show({ variant: "error", message: describeError(error, "Couldn't update the chart period. Try again.") }),
+  });
+
+  const playerStatsRoundsWindowMutation = useMutation({
+    mutationFn: setPlayerStatsRoundsWindow,
+    onSuccess: async (_data, value) => {
+      await invalidate();
+      show({ variant: "success", message: `Player stats rounds window set to ${value}.`, duration: 2500 });
+    },
+    onError: (error) => show({ variant: "error", message: describeError(error, "Couldn't update the rounds window. Try again.") }),
   });
 
   // One shared mutation for all three notification toggles, disambiguated
@@ -184,6 +285,15 @@ export default function AdminSettingsPage() {
                 value={settingsQuery.data.activeUsersChartPeriod}
                 isLoading={activeUsersChartPeriodMutation.isPending}
                 onChange={(value) => activeUsersChartPeriodMutation.mutate(value)}
+              />
+              <NumberSettingRow
+                label="Player stats rounds window"
+                description="How many of a player's most recent approved rounds the Dashboard's GIR/Fairways/Putting/Sand/Penalties widgets are based on."
+                value={settingsQuery.data.playerStatsRoundsWindow}
+                min={PLAYER_STATS_ROUNDS_WINDOW_MIN}
+                max={PLAYER_STATS_ROUNDS_WINDOW_MAX}
+                isLoading={playerStatsRoundsWindowMutation.isPending}
+                onSave={(value) => playerStatsRoundsWindowMutation.mutate(value)}
               />
               <SettingRow
                 label="Notify on round submitted"

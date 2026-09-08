@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -36,6 +36,7 @@ afterEach(() => {
   mock.restore();
   setTokens(null);
   localStorage.clear();
+  vi.useRealTimers();
 });
 
 function renderDashboard() {
@@ -92,6 +93,7 @@ function statsFixture(overrides: Partial<PlayerStats> = {}): PlayerStats {
   return {
     roundsCount: 4,
     coursesCount: 2,
+    statsWindowRoundsCount: 4,
     holesCount: 10,
     girPercentage: 40,
     fairwayHitPercentage: 50,
@@ -262,6 +264,39 @@ describe("PlayerDashboardPage", () => {
       renderDashboard();
 
       expect(await screen.findByText("1 course")).toBeInTheDocument();
+    });
+
+    it("ghs#209: GIR's info tooltip states the real number of rounds the stat is based on, not the lifetime roundsCount", async () => {
+      mock.onGet("/dashboard/player").reply(200, dashboardResponse({ stats: { data: statsFixture({ roundsCount: 50, statsWindowRoundsCount: 12 }) } }));
+
+      renderDashboard();
+      // Waits for the real, data-dependent GIR value -- the info button
+      // itself renders in every status (including before stats has
+      // loaded), so finding it alone wouldn't prove `stats` is populated
+      // yet.
+      await screen.findByText("40%");
+      const infoButton = screen.getByRole("button", { name: "About GIR" });
+
+      // Fake timers only AFTER the async fetch above has resolved --
+      // real timers are what let findByRole's own polling work at all.
+      vi.useFakeTimers();
+      fireEvent.mouseEnter(infoButton);
+      act(() => vi.advanceTimersByTime(400));
+      expect(screen.getByRole("tooltip")).toHaveTextContent("your last 12 approved rounds");
+    });
+
+    it("ghs#209: a stats widget's info tooltip falls back to generic wording while stats hasn't loaded yet, rather than showing a placeholder number", async () => {
+      // Never resolves -- isLoading stays true, same technique the
+      // suite's own loading-state tests use elsewhere in this file.
+      mock.onGet("/dashboard/player").reply(() => new Promise(() => {}));
+
+      renderDashboard();
+      const infoButton = await screen.findByRole("button", { name: "About GIR" });
+
+      vi.useFakeTimers();
+      fireEvent.mouseEnter(infoButton);
+      act(() => vi.advanceTimersByTime(400));
+      expect(screen.getByRole("tooltip")).toHaveTextContent("your most recent approved rounds");
     });
 
     it("FIR renders a spatially-ordered segmented bar with real percentages", async () => {

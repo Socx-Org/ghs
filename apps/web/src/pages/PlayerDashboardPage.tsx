@@ -47,6 +47,18 @@ function twoPuttHoles(stats: PlayerStats): number {
   return Math.max(0, stats.puttsHolesCount - stats.onePuttHoles - stats.threePlusPuttHoles);
 }
 
+// ghs#209: how many rounds GIR/Fairways/Putting/Sand/Penalties are
+// actually based on -- a real number once `stats` has loaded
+// (statsWindowRoundsCount, which is <= the admin-configured window --
+// smaller whenever the player has fewer approved rounds than it), a
+// generic fallback beforehand (loading/error/empty/idle), since the
+// exact count isn't known yet and showing a placeholder number would
+// look like real data.
+function statsWindowPhrase(stats: PlayerStats | undefined): string {
+  if (!stats) return "your most recent approved rounds";
+  return `your last ${stats.statsWindowRoundsCount} approved round${stats.statsWindowRoundsCount === 1 ? "" : "s"}`;
+}
+
 type SectionStatus = "loading" | "error" | "empty" | "ready";
 
 // ghs#96: no header/logo/sign-out here any more -- AppShell now
@@ -143,7 +155,7 @@ export default function PlayerDashboardPage() {
         status={firStatus}
         errorMessage={isNetworkError ? networkErrorMessage : undefined}
         emptyState={<EmptyState title="No fairway data yet" description="Approved rounds with a recorded fairway result will show up here." />}
-        infoTooltip="Across your approved rounds' fairway holes: the share hit, and the split between missing left and missing right."
+        infoTooltip={`Across ${statsWindowPhrase(stats)}: the share of fairway holes hit, and the split between missing left and missing right.`}
       >
         {stats && (
           <SegmentedBar
@@ -165,7 +177,7 @@ export default function PlayerDashboardPage() {
         status={puttingStatus}
         errorMessage={isNetworkError ? networkErrorMessage : undefined}
         emptyState={<EmptyState title="No putting data yet" description="Approved rounds with recorded putts will show up here." />}
-        infoTooltip="Your average putts per round, and the split between 1-putt, 2-putt, and 3+ putt holes."
+        infoTooltip={`Your average putts per round, and the split between 1-putt, 2-putt, and 3+ putt holes, across ${statsWindowPhrase(stats)}.`}
       >
         {stats && (
           <SegmentedBar
@@ -196,7 +208,7 @@ export default function PlayerDashboardPage() {
           status={statsStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="No rounds yet" />}
-          infoTooltip="The share of holes across your approved rounds where you hit the green in regulation."
+          infoTooltip={`The share of holes hit in regulation, across ${statsWindowPhrase(stats)}.`}
         >
           {stats && <KpiStat label="GIR" value={percentLabel(stats.girPercentage)} />}
         </Widget>
@@ -207,7 +219,7 @@ export default function PlayerDashboardPage() {
           status={statsStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="No rounds yet" />}
-          infoTooltip="The share of holes across your approved rounds where you had a sand interaction (e.g. a bunker shot)."
+          infoTooltip={`The share of holes with a sand interaction (e.g. a bunker shot), across ${statsWindowPhrase(stats)}.`}
         >
           {/* "Sand interaction", not "sand shots" -- in_sand is a
               per-hole boolean, not a shot count (PlayerStats's own doc
@@ -221,7 +233,7 @@ export default function PlayerDashboardPage() {
           status={statsStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
           emptyState={<EmptyState title="No rounds yet" />}
-          infoTooltip="Your average number of penalty strokes per approved round."
+          infoTooltip={`Your average number of penalty strokes per round, across ${statsWindowPhrase(stats)}.`}
         >
           {stats && <KpiStat label="Penalties" value={stats.penaltiesPerRound === null ? "--" : `${stats.penaltiesPerRound}/round`} />}
         </Widget>
