@@ -130,7 +130,21 @@ export function Tooltip({ content, children, placement = "top" }: TooltipProps) 
           role="tooltip"
           id={tooltipId}
           className={cn(
-            "pointer-events-none absolute z-50 max-w-xs whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-medium text-text",
+            // ghs#207: wraps rather than forcing one long nowrap line --
+            // a widget's infoTooltip copy runs well past the short
+            // one-line labels (e.g. ThemeToggle's) this component
+            // originally shipped for. `w-max` (not the default
+            // `width:auto`, and not `line-clamp`'s `-webkit-box`) is
+            // required here: this span is absolutely positioned inside a
+            // `relative` wrapper sized to the trigger button itself
+            // (~44px), and a plain `width:auto` box computes its shrink-
+            // to-fit available width from THAT tiny containing block,
+            // wrapping the text far too early regardless of max-w-xs.
+            // `w-max` sizes to the content's own natural (unwrapped)
+            // width instead, still capped by max-w-xs, giving the
+            // intended "one line if it fits, wrap up to max-w-xs if
+            // not" behaviour.
+            "pointer-events-none absolute z-50 w-max max-w-xs rounded-lg px-3 py-1.5 text-xs font-medium text-text",
             // Liquid glass: a blurred, translucent panel (never opaque)
             // that frosts whatever is behind it, a soft light-sheen
             // gradient layered over the base tint for a sense of

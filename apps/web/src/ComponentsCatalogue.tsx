@@ -917,6 +917,7 @@ export default function ComponentsCatalogue() {
                   status={widgetStatus}
                   errorMessage="Couldn't load your handicap index."
                   emptyState={<EmptyState title="Not yet established" description="Submit at least 3 rounds to get your first handicap index." />}
+                  infoTooltip="ghs#207: this text appears in every status -- try toggling above."
                 >
                   <Stat label="Handicap Index" value="14.2" />
                 </Widget>

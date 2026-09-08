@@ -42,6 +42,28 @@ describe("Tooltip", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
+  // ghs#207: regression test for a real bug -- the tooltip span is
+  // absolutely positioned inside a `relative` wrapper sized to the
+  // trigger itself, so plain `width:auto` computed its shrink-to-fit
+  // width from that tiny containing block and wrapped multi-line
+  // copy far too early (a ~44px-wide box, not max-w-xs's 320px), no
+  // matter how long the content actually was. `w-max` (content's own
+  // natural width, still capped by max-w-xs) is what fixes that --
+  // this only checks the class names, since jsdom doesn't lay out
+  // real box widths, but a regression back to `whitespace-nowrap` or
+  // a bare `width:auto` would fail this immediately.
+  it("ghs#207: sizes to its own content (w-max), not the tiny trigger-sized containing block, so long copy wraps within max-w-xs instead of collapsing to one word per line", async () => {
+    render(
+      <Tooltip content="A much longer piece of help text than any of this component's original one-line labels.">
+        <Button aria-label="Info">i</Button>
+      </Tooltip>,
+    );
+    await userEvent.tab();
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveClass("w-max", "max-w-xs");
+    expect(tooltip).not.toHaveClass("whitespace-nowrap");
+  });
+
   it("shows immediately on touchstart and auto-hides shortly after, without blocking the button's own click", async () => {
     vi.useFakeTimers();
     const onClick = vi.fn();
