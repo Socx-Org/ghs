@@ -142,7 +142,13 @@ function NumberSettingRow({ label, description, value, min, max, isLoading, onSa
 
   const parsed = Number(draft);
   const isValid = draft.trim() !== "" && Number.isInteger(parsed) && parsed >= min && parsed <= max;
-  const isDirty = draft !== String(value);
+  // Review finding, PR #210: compares the PARSED number, not the raw
+  // strings -- a numerically-equivalent draft like "020" for a saved 20
+  // would otherwise stay "dirty" forever (the prop value never actually
+  // changes on save, so the render-time resync above never fires
+  // either), letting Save re-enable and re-fire the same no-op PUT
+  // indefinitely.
+  const isDirty = isValid && parsed !== value;
 
   return (
     <div className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">

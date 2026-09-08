@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -167,6 +167,18 @@ describe("AdminSettingsPage", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "20");
     expect(saveButton).toBeDisabled();
+  });
+
+  it("review finding, PR #210: Save stays disabled for a numerically-equivalent draft like '020' -- comparing raw strings would treat it as dirty forever, since the saved value never actually changes. fireEvent.change, not userEvent.type: a real browser's number input keeps a literal '020' while focused (confirmed live), but userEvent's own typing simulation normalizes it before this component ever sees it, which would silently defeat this exact regression test", async () => {
+    mock.onGet("/admin/settings").reply(200, SETTINGS);
+
+    renderAsRole("admin");
+    const input = await screen.findByRole("spinbutton", { name: "Player stats rounds window" });
+    const saveButton = screen.getByRole("button", { name: "Save" });
+
+    fireEvent.change(input, { target: { value: "020" } });
+    expect(saveButton).toBeDisabled();
+    expect(mock.history.put?.filter((r) => r.url === "/admin/settings/player-stats-rounds-window").length ?? 0).toBe(0);
   });
 
   it("toggling each notification setting hits its own endpoint independently", async () => {
