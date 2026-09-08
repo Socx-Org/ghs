@@ -121,9 +121,9 @@ const SAMPLE_ROUNDS_SORT_ACCESSORS: SortAccessors<(typeof SAMPLE_ROUNDS)[number]
 // enriched, ghs#147), distinct from SAMPLE_ROUNDS above -- the exact
 // shape RecentRoundsWidget's real caller (PlayerDashboardPage) passes.
 const SAMPLE_PLAYER_ROUNDS: PlayerRoundListItem[] = [
-  { id: "1", playerId: "p1", courseId: "c1", courseName: "Sunningdale (Old)", teeConfigurationId: "t1", teeConfigurationName: "Yellow", playedAt: "2026-08-17T09:00:00.000Z", status: "draft" },
-  { id: "2", playerId: "p1", courseId: "c2", courseName: "St Andrews (Old)", teeConfigurationId: "t2", teeConfigurationName: "White", playedAt: "2026-08-14T09:00:00.000Z", status: "pending" },
-  { id: "3", playerId: "p1", courseId: "c1", courseName: "Sunningdale (Old)", teeConfigurationId: "t1", teeConfigurationName: "Yellow", playedAt: "2026-08-10T09:00:00.000Z", status: "approved" },
+  { id: "1", playerId: "p1", courseId: "c1", courseName: "Sunningdale (Old)", teeConfigurationId: "t1", teeConfigurationName: "Yellow", playedAt: "2026-08-17T09:00:00.000Z", status: "draft", grossScore: null },
+  { id: "2", playerId: "p1", courseId: "c2", courseName: "St Andrews (Old)", teeConfigurationId: "t2", teeConfigurationName: "White", playedAt: "2026-08-14T09:00:00.000Z", status: "pending", grossScore: 92 },
+  { id: "3", playerId: "p1", courseId: "c1", courseName: "Sunningdale (Old)", teeConfigurationId: "t1", teeConfigurationName: "Yellow", playedAt: "2026-08-10T09:00:00.000Z", status: "approved", grossScore: 88 },
 ];
 
 // ghs#117: HandicapHistoryRecord-shaped, oldest-first isn't required

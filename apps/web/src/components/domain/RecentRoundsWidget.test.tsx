@@ -8,8 +8,8 @@ afterEach(() => {
   cleanup();
 });
 
-function round(id: string, playedAt: string, status: PlayerRoundListItem["status"]): PlayerRoundListItem {
-  return { id, playerId: "player-1", courseId: "course-1", courseName: "Pebble Beach", teeConfigurationId: "tee-1", teeConfigurationName: "Blue", playedAt, status };
+function round(id: string, playedAt: string, status: PlayerRoundListItem["status"], grossScore: number | null = null): PlayerRoundListItem {
+  return { id, playerId: "player-1", courseId: "course-1", courseName: "Pebble Beach", teeConfigurationId: "tee-1", teeConfigurationName: "Blue", playedAt, status, grossScore };
 }
 
 describe("RecentRoundsWidget", () => {
@@ -42,6 +42,31 @@ describe("RecentRoundsWidget", () => {
     const rows = await screen.findAllByRole("row");
     // 3 data rows + 1 header row.
     expect(rows).toHaveLength(4);
+  });
+
+  it("ghs#205: shows the course name and, for an approved round, its real gross score", () => {
+    const rounds = [round("r1", "2026-05-01T09:00:00.000Z", "approved", 88)];
+    render(<RecentRoundsWidget isLoading={false} isError={false} rounds={rounds} onContinue={vi.fn()} />);
+
+    expect(screen.getByText("Pebble Beach")).toBeInTheDocument();
+    expect(screen.getByText("88")).toBeInTheDocument();
+  });
+
+  it("ghs#205: withholds the score (shows '—') for a pending round, even though it already has a real, non-null gross score (ghs#168 -- scoring happens at submission, display stays gated on approval, same rule as RoundDetailsPage)", () => {
+    const rounds = [round("r1", "2026-05-01T09:00:00.000Z", "pending", 90)];
+    render(<RecentRoundsWidget isLoading={false} isError={false} rounds={rounds} onContinue={vi.fn()} />);
+
+    expect(screen.queryByText("90")).not.toBeInTheDocument();
+    const row = screen.getByText("Pebble Beach").closest("tr")!;
+    expect(row.textContent).toContain("—");
+  });
+
+  it("ghs#205: shows '—' for an approved round with no recorded score (a real null, not withheld data)", () => {
+    const rounds = [round("r1", "2026-05-01T09:00:00.000Z", "approved", null)];
+    render(<RecentRoundsWidget isLoading={false} isError={false} rounds={rounds} onContinue={vi.fn()} />);
+
+    const row = screen.getByText("Pebble Beach").closest("tr")!;
+    expect(row.textContent).toContain("—");
   });
 
   it("offers Continue for every not-yet-approved round, never for an approved one, and calls onContinue with the right id", async () => {

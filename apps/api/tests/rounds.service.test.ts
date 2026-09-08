@@ -336,11 +336,11 @@ function fakeRepository(): RoundsRepository & { getCallCount: number } {
       // without fabricating a whole courses fixture just for this.
       return [...rounds.values()]
         .filter((r) => r.playerId === playerId && !deleted.has(r.id))
-        .map(({ id, playerId: p, teeConfigurationId, playedAt, status }) => ({
+        .map(({ id, playerId: p, teeConfigurationId, playedAt, status, grossScore }) => ({
           id, playerId: p, teeConfigurationId,
           courseId: "course-1", courseName: "Fake Course",
           teeConfigurationName: "Fake Tee",
-          playedAt, status,
+          playedAt, status, grossScore,
         }));
     },
     async listPendingQueue() { throw new Error("not used by these tests"); },
