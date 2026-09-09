@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Logo } from "../Logo";
-import { navItemClasses, useNavEntries } from "./nav-entries";
+import { isNavEntryActive, navItemClasses, useNavEntries } from "./nav-entries";
 
 export interface MobileNavProps {
   open: boolean;
@@ -26,6 +26,7 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
   // dialog.close() call echoes back through the "close" listener below.
   const closingProgrammaticallyRef = useRef(false);
   const entries = useNavEntries();
+  const { pathname } = useLocation();
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -75,22 +76,29 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
         </button>
       </div>
       <nav aria-label="Primary" className="flex flex-col gap-1 px-3 py-4">
-        {entries.map((entry) => (
-          <NavLink
-            key={entry.to}
-            to={entry.to}
-            end={entry.to === "/"}
-            // Closes on selection (design doc section 8's own
-            // requirement) -- a real dialog.close(), not just a state
-            // flip, so it goes through the exact same "close" handling
-            // as Escape/backdrop dismissal above.
-            onClick={() => dialogRef.current?.close()}
-            className={({ isActive }) => navItemClasses(isActive)}
-          >
-            <entry.icon aria-hidden="true" className="h-5 w-5 shrink-0" />
-            {entry.label}
-          </NavLink>
-        ))}
+        {entries.map((entry) => {
+          // ghs#211: same isNavEntryActive computation as Sidebar --
+          // see nav-entries.ts's own doc comment for why NavLink's
+          // built-in prefix matching marks the wrong entry active for
+          // sibling routes like /admin/rounds/pending vs. /admin/rounds.
+          const isActive = isNavEntryActive(entry, entries, pathname);
+          return (
+            <Link
+              key={entry.to}
+              to={entry.to}
+              aria-current={isActive ? "page" : undefined}
+              // Closes on selection (design doc section 8's own
+              // requirement) -- a real dialog.close(), not just a state
+              // flip, so it goes through the exact same "close" handling
+              // as Escape/backdrop dismissal above.
+              onClick={() => dialogRef.current?.close()}
+              className={navItemClasses(isActive)}
+            >
+              <entry.icon aria-hidden="true" className="h-5 w-5 shrink-0" />
+              {entry.label}
+            </Link>
+          );
+        })}
       </nav>
     </dialog>
   );

@@ -35,21 +35,22 @@ function ControlledMobileNav({ onClose }: { onClose?: () => void }) {
   );
 }
 
-function renderMobileNav(props: { open?: boolean; onClose?: () => void; role?: string } = {}) {
+function renderMobileNav(props: { open?: boolean; onClose?: () => void; role?: string; path?: string } = {}) {
   setTokens({
     accessToken: makeAccessToken({ sub: "user-1", email: "a@example.com", ghs_role: props.role ?? "player" }),
     refreshToken: "refresh-1",
     expiresIn: 900,
   });
+  const initialEntries = [props.path ?? "/"];
   if (props.open === undefined) {
     return render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <ControlledMobileNav onClose={props.onClose} />
       </MemoryRouter>,
     );
   }
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <MobileNav open={props.open} onClose={props.onClose ?? (() => {})} />
     </MemoryRouter>,
   );
@@ -116,5 +117,17 @@ describe("MobileNav", () => {
     renderMobileNav({ onClose });
     await userEvent.click(screen.getByRole("button", { name: "Close navigation" }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("ghs#211: on /admin/rounds/pending, only Pending Rounds is active -- not All Rounds", () => {
+    renderMobileNav({ role: "admin", path: "/admin/rounds/pending" });
+    expect(screen.getByRole("link", { name: /Pending Rounds/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /All Rounds/ })).not.toHaveAttribute("aria-current");
+  });
+
+  it("ghs#211: on /admin/rounds/:id (a round's review page), All Rounds stays active", () => {
+    renderMobileNav({ role: "admin", path: "/admin/rounds/11111111-1111-1111-1111-111111111111" });
+    expect(screen.getByRole("link", { name: /All Rounds/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /Pending Rounds/ })).not.toHaveAttribute("aria-current");
   });
 });
