@@ -56,6 +56,26 @@ export function useNavEntries(): NavEntry[] {
   return entries;
 }
 
+// ghs#211: NavLink's own default (non-`end`) matching is a plain path-
+// prefix test -- correct for a real parent/child pair (e.g.
+// /admin/rounds/:id under "All Rounds"'s /admin/rounds), but wrong for
+// two sibling top-level destinations that happen to share a URL prefix
+// (/admin/rounds/pending under "Pending Rounds" ALSO starts with "All
+// Rounds"'s /admin/rounds, so NavLink's default matching marked both
+// active at once). "Longest matching `to` wins" resolves that
+// generically: an entry matches (exact, or `${to}/`-prefixed) only if
+// no OTHER entry with a strictly longer, also-matching `to` exists --
+// the more specific destination always takes it.
+export function isNavEntryActive(entry: NavEntry, entries: NavEntry[], pathname: string): boolean {
+  if (entry.to === "/") return pathname === "/";
+  const matchesSelf = pathname === entry.to || pathname.startsWith(`${entry.to}/`);
+  if (!matchesSelf) return false;
+  return !entries.some((other) => {
+    if (other === entry || other.to.length <= entry.to.length) return false;
+    return pathname === other.to || pathname.startsWith(`${other.to}/`);
+  });
+}
+
 // Soft accent, not a filled background, for the active item -- the
 // design doc's own instruction ("use the emerald brand colour as an
 // accent... do not overuse emerald backgrounds"), and the exact

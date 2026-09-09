@@ -112,10 +112,31 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /Dashboard/ })).not.toHaveAttribute("aria-current");
   });
 
-  it("marks Dashboard active only for an exact match, not every route (end prop)", () => {
+  it("marks Dashboard active only for an exact match, not every route", () => {
     setTokens(tokensFor("player"));
     renderSidebar("/rounds");
     expect(screen.getByRole("link", { name: /Dashboard/ })).not.toHaveAttribute("aria-current", "page");
+  });
+
+  it("ghs#211: on /admin/rounds/pending, only Pending Rounds is active -- not All Rounds, even though /admin/rounds/pending also starts with All Rounds' own /admin/rounds path", () => {
+    setTokens(tokensFor("admin"));
+    renderSidebar("/admin/rounds/pending");
+    expect(screen.getByRole("link", { name: /Pending Rounds/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /All Rounds/ })).not.toHaveAttribute("aria-current");
+  });
+
+  it("ghs#211: on /admin/rounds, only All Rounds is active", () => {
+    setTokens(tokensFor("admin"));
+    renderSidebar("/admin/rounds");
+    expect(screen.getByRole("link", { name: /All Rounds/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /Pending Rounds/ })).not.toHaveAttribute("aria-current");
+  });
+
+  it("ghs#211: on /admin/rounds/:id (a round's review page), All Rounds stays active -- a real child of that list, unlike the sibling /admin/rounds/pending case above", () => {
+    setTokens(tokensFor("admin"));
+    renderSidebar("/admin/rounds/11111111-1111-1111-1111-111111111111");
+    expect(screen.getByRole("link", { name: /All Rounds/ })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /Pending Rounds/ })).not.toHaveAttribute("aria-current");
   });
 
   it("real logo is present", () => {
