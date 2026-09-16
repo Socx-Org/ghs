@@ -32,11 +32,11 @@ const PROFILE = {
 const ROUNDS = [
   {
     id: "round-1", playerId: "player-1", courseId: "course-1", courseName: "Pebble Beach Golf Links",
-    teeConfigurationId: "tee-1", teeConfigurationName: "Blue", playedAt: "2026-05-05T00:00:00.000Z", status: "approved",
+    teeConfigurationId: "tee-1", teeConfigurationName: "Blue", playedAt: "2026-05-05T00:00:00.000Z", status: "approved", grossScore: 82,
   },
   {
     id: "round-2", playerId: "player-1", courseId: "course-2", courseName: "St Andrews Links",
-    teeConfigurationId: "tee-2", teeConfigurationName: "White", playedAt: "2026-05-01T00:00:00.000Z", status: "draft",
+    teeConfigurationId: "tee-2", teeConfigurationName: "White", playedAt: "2026-05-01T00:00:00.000Z", status: "draft", grossScore: null,
   },
 ];
 
@@ -106,6 +106,61 @@ describe("MyRoundsPage", () => {
     // real chronological sort).
     await userEvent.click(screen.getByRole("button", { name: /^Played/ }));
     expect(courseColumn()).toEqual(["St Andrews Links", "Pebble Beach Golf Links"]);
+  });
+
+  it("ghs#213: shows each round's score, withheld ('—') until approved, exactly matching Recent Rounds' existing rule", async () => {
+    const pendingWithRealScore = {
+      id: "round-3", playerId: "player-1", courseId: "course-3", courseName: "Carnoustie Golf Links",
+      teeConfigurationId: "tee-3", teeConfigurationName: "Championship", playedAt: "2026-05-03T00:00:00.000Z", status: "pending", grossScore: 95,
+    };
+    mock.onGet("/players/player-1/rounds").reply(200, [...ROUNDS, pendingWithRealScore]);
+    renderAsRole("player");
+
+    await screen.findByText("Pebble Beach Golf Links");
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("82")).toBeInTheDocument();
+    // round-3 has a real, non-null score (95) but is still 'pending' --
+    // it must never render, even though the number itself already
+    // exists server-side.
+    expect(within(table).queryByText("95")).not.toBeInTheDocument();
+    const pendingRow = within(table).getByText("Carnoustie Golf Links").closest("tr")!;
+    expect(within(pendingRow).getByRole("cell", { name: "—" })).toBeInTheDocument();
+  });
+
+  it("ghs#213: Score sorts by the effective (withheld-aware) value, not the raw grossScore -- a hidden score never influences row order", async () => {
+    const pendingWithHigherRealScore = {
+      id: "round-3", playerId: "player-1", courseId: "course-3", courseName: "Carnoustie Golf Links",
+      teeConfigurationId: "tee-3", teeConfigurationName: "Championship", playedAt: "2026-05-03T00:00:00.000Z", status: "pending", grossScore: 999,
+    };
+    mock.onGet("/players/player-1/rounds").reply(200, [...ROUNDS, pendingWithHigherRealScore]);
+    renderAsRole("player");
+    await screen.findByText("Pebble Beach Golf Links");
+
+    const table = screen.getByRole("table");
+    function courseColumn(): string[] {
+      return within(table)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[0]!.textContent!);
+    }
+
+    // Ascending: only round-1 (82) has a real, visible score -- round-2
+    // (null) and round-3 (999, but hidden) both sort after it, as if
+    // neither had a score at all. If this sorted by the raw grossScore
+    // instead, round-3's real 999 would sort last on its own merits
+    // anyway (ascending), so this assertion alone wouldn't distinguish
+    // the two implementations -- descending (below) is what actually
+    // proves it.
+    await userEvent.click(screen.getByRole("button", { name: /^Score/ }));
+    expect(courseColumn()[0]).toEqual("Pebble Beach Golf Links");
+
+    // Descending: the raw-value implementation would put round-3 (999)
+    // first; the effective-value implementation keeps every withheld
+    // score sorted last regardless of direction (useTableSort's own
+    // nulls-last-regardless-of-direction rule), so round-1 (the only
+    // real, visible score) still sorts first.
+    await userEvent.click(screen.getByRole("button", { name: /^Score/ }));
+    expect(courseColumn()[0]).toEqual("Pebble Beach Golf Links");
   });
 
   it("links each row to its own RoundDetailsPage, not the edit screen", async () => {

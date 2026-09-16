@@ -6,19 +6,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } fro
 import { Widget } from "../Widget";
 import type { WidgetColSpan } from "../Widget";
 import { RoundStatusBadge } from "./RoundStatusBadge";
+import { displayGrossScore } from "../../lib/rounds";
 import { AMENDABLE_ROUND_STATUSES } from "../../types/domain";
 import type { PlayerRoundListItem } from "../../types/domain";
 
 function formatPlayedAt(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
-
-// ghs#205: same withholding rule as RoundDetailsPage's own Stat --
-// grossScore is already real for a pending round (ghs#168 moved scoring
-// to submission time), but is deliberately hidden from the player until
-// the round is actually approved.
-function displayScore(round: PlayerRoundListItem): string {
-  return round.status === "approved" ? String(round.grossScore ?? "—") : "—";
 }
 
 export interface RecentRoundsWidgetProps {
@@ -90,7 +83,7 @@ export function RecentRoundsWidget({ colSpan, isIdle, isLoading, isError, errorM
             <TableRow key={round.id}>
               <TableCell>{round.courseName}</TableCell>
               <TableCell>{formatPlayedAt(round.playedAt)}</TableCell>
-              <TableCell>{displayScore(round)}</TableCell>
+              <TableCell>{displayGrossScore(round)}</TableCell>
               <TableCell>
                 <RoundStatusBadge status={round.status} />
               </TableCell>
