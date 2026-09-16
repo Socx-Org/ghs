@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { displayGrossScore } from "./rounds";
+import { displayGrossScore, effectiveGrossScore } from "./rounds";
 import type { PlayerRoundListItem } from "../types/domain";
 
 function round(status: PlayerRoundListItem["status"], grossScore: number | null): PlayerRoundListItem {
@@ -23,5 +23,13 @@ describe("displayGrossScore", () => {
 
   it("shows '—' for an approved round with no recorded score (a real null, not withheld data)", () => {
     expect(displayGrossScore(round("approved", null))).toBe("—");
+  });
+});
+
+describe("effectiveGrossScore", () => {
+  it("review finding, PR #214: is the single shared source both displayGrossScore and MyRoundsPage's Score sort accessor build on -- returns the real number once approved, null otherwise, so the two can never drift on what 'withheld' means", () => {
+    expect(effectiveGrossScore(round("approved", 88))).toBe(88);
+    expect(effectiveGrossScore(round("pending", 90))).toBe(null);
+    expect(effectiveGrossScore(round("approved", null))).toBe(null);
   });
 });

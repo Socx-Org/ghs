@@ -5,7 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, SortableTableHeaderCell, TableCell, TableHeaderCell, Tooltip, useToast } from "../components";
 import { ApiError, deleteRound, getMyPlayerProfile, getPlayerRounds } from "../lib/api";
 import { ROUND_STATUS_OPTIONS } from "../lib/domain-labels";
-import { displayGrossScore } from "../lib/rounds";
+import { displayGrossScore, effectiveGrossScore } from "../lib/rounds";
 import { useTableSort } from "../lib/useTableSort";
 import { AMENDABLE_ROUND_STATUSES, EDITABLE_ROUND_STATUSES } from "../types/domain";
 import type { PlayerRoundListItem } from "../types/domain";
@@ -65,15 +65,16 @@ export default function MyRoundsPage() {
   // non-approved round (ghs#168), but sorting by it anyway would leak
   // its relative ranking via row order even though the cell itself
   // shows "—" (displayGrossScore's own withholding rule). Sorting by
-  // the EFFECTIVE (withheld-aware) value instead means a hidden score
-  // can never influence sort order -- it sorts last, same as a real
-  // null, alongside every other non-approved round.
+  // effectiveGrossScore (the same withheld-aware value displayGrossScore
+  // is itself built on, lib/rounds.ts) means a hidden score can never
+  // influence sort order -- it sorts last, same as a real null,
+  // alongside every other non-approved round.
   const roundsSort = useTableSort(roundsQuery.data ?? [], {
     course: (item) => item.courseName,
     tee: (item) => item.teeConfigurationName,
     playedAt: (item) => item.playedAt,
     status: (item) => item.status,
-    score: (item) => (item.status === "approved" ? item.grossScore : null),
+    score: effectiveGrossScore,
   });
 
   const deleteMutation = useMutation({
