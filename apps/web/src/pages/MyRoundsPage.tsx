@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, SortableTableHeaderCell, TableCell, TableHeaderCell, Tooltip, useToast } from "../components";
 import { ApiError, deleteRound, getMyPlayerProfile, getPlayerRounds } from "../lib/api";
 import { ROUND_STATUS_OPTIONS } from "../lib/domain-labels";
+import { displayGrossScore, effectiveGrossScore } from "../lib/rounds";
 import { useTableSort } from "../lib/useTableSort";
 import { AMENDABLE_ROUND_STATUSES, EDITABLE_ROUND_STATUSES } from "../types/domain";
 import type { PlayerRoundListItem } from "../types/domain";
@@ -58,11 +59,22 @@ export default function MyRoundsPage() {
   });
   // ghs#203: Played sorts by the raw ISO playedAt, not formatPlayedAt's
   // own locale-formatted display string.
+  //
+  // ghs#213: Score is the one deliberate exception to that same "sort by
+  // the raw underlying value" rule -- grossScore is already real for a
+  // non-approved round (ghs#168), but sorting by it anyway would leak
+  // its relative ranking via row order even though the cell itself
+  // shows "—" (displayGrossScore's own withholding rule). Sorting by
+  // effectiveGrossScore (the same withheld-aware value displayGrossScore
+  // is itself built on, lib/rounds.ts) means a hidden score can never
+  // influence sort order -- it sorts last, same as a real null,
+  // alongside every other non-approved round.
   const roundsSort = useTableSort(roundsQuery.data ?? [], {
     course: (item) => item.courseName,
     tee: (item) => item.teeConfigurationName,
     playedAt: (item) => item.playedAt,
     status: (item) => item.status,
+    score: effectiveGrossScore,
   });
 
   const deleteMutation = useMutation({
@@ -168,6 +180,9 @@ export default function MyRoundsPage() {
                   <SortableTableHeaderCell columnId="playedAt" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
                     Played
                   </SortableTableHeaderCell>
+                  <SortableTableHeaderCell columnId="score" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
+                    Score
+                  </SortableTableHeaderCell>
                   <SortableTableHeaderCell columnId="status" sort={roundsSort.sort} onSort={roundsSort.toggleSort}>
                     Status
                   </SortableTableHeaderCell>
@@ -185,6 +200,7 @@ export default function MyRoundsPage() {
                   </TableCell>
                   <TableCell>{item.teeConfigurationName}</TableCell>
                   <TableCell>{formatPlayedAt(item.playedAt)}</TableCell>
+                  <TableCell>{displayGrossScore(item)}</TableCell>
                   <TableCell>
                     <RoundStatusBadge status={item.status} />
                   </TableCell>
@@ -202,6 +218,7 @@ export default function MyRoundsPage() {
                     </div>
                     <p className="text-xs text-text-muted">{item.teeConfigurationName}</p>
                     <p className="text-xs text-text-muted">{formatPlayedAt(item.playedAt)}</p>
+                    <p className="text-xs text-text-muted">Score: {displayGrossScore(item)}</p>
                     {renderActions(item)}
                   </CardBody>
                 </Card>
