@@ -53,10 +53,9 @@ export function EditRemarksButton({ roundId, remarks, size = "sm" }: EditRemarks
   });
 
   function handleSave() {
-    // Empty/whitespace-only clears it -- the backend itself already
-    // normalizes this the same way, but doing it here too means the
-    // Remarks card immediately shows "No remarks yet" rather than
-    // whatever the invalidated refetch eventually resolves to.
+    // Empty/whitespace-only clears it. The backend normalizes the same way,
+    // but doing it here avoids sending meaningless whitespace and keeps the
+    // payload consistent with what will be persisted.
     const trimmed = value.trim();
     mutation.mutate(trimmed.length > 0 ? trimmed : null);
   }
