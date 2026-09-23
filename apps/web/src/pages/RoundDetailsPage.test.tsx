@@ -38,7 +38,7 @@ function makeRound(overrides: Partial<Round> = {}): Round {
     id: "round-1", playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T00:00:00.000Z",
     playingHandicap: null, grossScore: null, adjustedGrossScore: null, scoreDifferential: null, pcc: null,
     totalPutts: null, totalGir: null, totalFairwaysHit: null, totalPenalties: null,
-    isTournament: false, is9Hole: false, status: "approved", rejectionReason: null,
+    isTournament: false, is9Hole: false, status: "approved", rejectionReason: null, remarks: null,
     holeScores: [
       { id: "hs-1", holeNumber: 1, strokes: 5, putts: 2, gir: false, fairwayResult: "hit", inSand: false, penalties: 0, netDoubleBogeyAdjusted: 5 },
       { id: "hs-2", holeNumber: 2, strokes: 3, putts: 1, gir: true, fairwayResult: null, inSand: false, penalties: 0, netDoubleBogeyAdjusted: 3 },
@@ -161,6 +161,32 @@ describe("RoundDetailsPage", () => {
     await screen.findByText("Blue");
     expect(screen.queryByRole("button", { name: "Edit date" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit round" })).not.toBeInTheDocument();
+  });
+
+  it("ghs#215: shows the round's remarks, and offers Edit remarks while amendable", async () => {
+    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "pending", remarks: "Windy, played the back nine twice." }));
+    renderAsRole("player");
+
+    await screen.findByText("Blue");
+    expect(screen.getByText("Windy, played the back nine twice.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit remarks" })).toBeInTheDocument();
+  });
+
+  it("ghs#215: shows 'No remarks yet' when there are none", async () => {
+    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "pending", remarks: null }));
+    renderAsRole("player");
+
+    await screen.findByText("Blue");
+    expect(screen.getByText("No remarks yet.")).toBeInTheDocument();
+  });
+
+  it("ghs#215: remarks are still shown, but Edit remarks is not offered, once a round is approved", async () => {
+    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "approved", remarks: "Great round." }));
+    renderAsRole("player");
+
+    await screen.findByText("Blue");
+    expect(screen.getByText("Great round.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit remarks" })).not.toBeInTheDocument();
   });
 
   it("changes a pending round's played date and reflects it after refetch", async () => {

@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Check, Trash2, X } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, BackButton, Button, Card, CardBody, CardHeader, HolesTable, Modal, RoundStatusBadge, Skeleton, Stat, Textarea, useToast } from "../components";
+import { Alert, BackButton, Button, Card, CardBody, CardHeader, EditRemarksButton, HolesTable, Modal, RoundStatusBadge, Skeleton, Stat, Textarea, useToast } from "../components";
 import { ApiError, approveRound, deleteRound, getPlayer, getRound, getTeeConfiguration, rejectRound } from "../lib/api";
+import { AMENDABLE_ROUND_STATUSES } from "../types/domain";
 
 // ghs#67: the admin's round-review screen -- reached from the pending
 // queue, but not itself queue-scoped (it re-fetches everything for
@@ -136,6 +137,9 @@ export default function AdminRoundReviewPage() {
   const teeConfiguration = teeQuery.data;
   const isPending = round?.status === "pending";
   const runningGross = round?.holeScores.reduce((sum, hole) => sum + hole.strokes, 0) ?? 0;
+  // ghs#215: same boundary as RoundDetailsPage's own remarks edit --
+  // every status except 'approved'.
+  const isAmendable = round ? AMENDABLE_ROUND_STATUSES.has(round.status) : false;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 sm:p-6">
@@ -172,6 +176,18 @@ export default function AdminRoundReviewPage() {
               <Stat label="Tee configuration" value={teeConfiguration.name} />
               <Stat label="Played" value={formatPlayedAt(round.playedAt)} />
               <Stat label="Gross so far" value={runningGross} />
+            </CardBody>
+          </Card>
+
+          {/* ghs#215: its own full-width card, not squeezed into the
+              Stat row above -- remarks is prose, not a short stat. */}
+          <Card>
+            <CardHeader className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-text">Remarks</h2>
+              {isAmendable && <EditRemarksButton roundId={round.id} remarks={round.remarks} />}
+            </CardHeader>
+            <CardBody>
+              <p className="whitespace-pre-wrap text-sm text-text">{round.remarks ?? <span className="text-text-muted">No remarks yet.</span>}</p>
             </CardBody>
           </Card>
 

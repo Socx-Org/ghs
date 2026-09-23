@@ -54,6 +54,7 @@ function makeRound(overrides: Partial<Round> = {}): Round {
     is9Hole: false,
     status: "draft",
     rejectionReason: null,
+    remarks: null,
     holeScores: [],
     ...overrides,
   };

@@ -523,6 +523,13 @@ export async function updateRoundPlayedAt(roundId: string, playedAt: string): Pr
   return data.round;
 }
 
+// ghs#215. `remarks: null` (or an empty/whitespace-only string, which
+// the backend itself normalizes to null) clears it.
+export async function updateRoundRemarks(roundId: string, remarks: string | null): Promise<Round> {
+  const { data } = await api.patch<{ round: Round }>(`/rounds/${roundId}/remarks`, { remarks });
+  return data.round;
+}
+
 // ghs#67. Deliberately narrow -- no pagination/filtering/sorting query
 // params, matching the backend's own approved scope (rounds.ts's own
 // comment). Not a generic admin rounds browser -- that's #113,

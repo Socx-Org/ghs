@@ -172,6 +172,12 @@ export interface RoundsService {
   // the next approval's own rescore picks up whatever played_at is
   // current at that point).
   updatePlayedAt(id: string, playedAt: string): Promise<RoundWorkflowResult>;
+
+  // ghs#215: same "every status except 'approved'" boundary and
+  // no-recalculation reasoning as updatePlayedAt above -- remarks carry
+  // no handicap-relevant data at all, so unlike updatePlayedAt there's
+  // no rescore step needed afterward either.
+  updateRemarks(id: string, remarks: string | null): Promise<RoundWorkflowResult>;
 }
 
 // A hole's net_double_bogey_adjusted only depends on that hole's own
@@ -902,6 +908,23 @@ export function createRoundsService(
       }
 
       logger.info("round played date updated", { roundId: id, playedAt, status: result.round?.status });
+      return result;
+    },
+
+    async updateRemarks(id, remarks) {
+      const result = await runWorkflowTransition(
+        id,
+        (existing) => {
+          if (!isNotYetApprovedStatus(existing.status)) {
+            throw new InvalidRoundTransitionError(`cannot change remarks on a round in status '${existing.status}'`);
+          }
+        },
+        async (client) => {
+          await repository.updateRemarks(id, remarks, client);
+          return null;
+        },
+      );
+      logger.info("round remarks updated", { roundId: id, status: result.round?.status });
       return result;
     },
   };
