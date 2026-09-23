@@ -346,6 +346,142 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
   }
 });
 
+test("HTTP: PATCH /rounds/:id/remarks -- ghs#215", async () => {
+  const authConfig: AuthConfig = {
+    jwtSecret: "rounds-test-secret-remarks",
+    jwtAccessExpiresInSeconds: 900,
+    jwtRefreshExpiresInSeconds: 2_592_000,
+    mfaPendingExpiresInSeconds: 300,
+    mfaEncryptionKey: randomBytes(32),
+  };
+
+  const users = createUsersRepository(pool);
+  const players = createPlayersRepository(pool);
+  const activationTokens = createActivationTokenRepository(pool);
+  const passwordResetTokens = createPasswordResetTokenRepository(pool);
+  const refreshTokens = createRefreshTokensRepository(pool);
+  const mfaRepo = createMfaRepository(pool);
+  const clubsRepo = createClubsRepository(pool);
+  const coursesRepo = createCoursesRepository(pool);
+  const settingsRepo = createSystemSettingsRepository(pool);
+  const roundsRepo = createRoundsRepository(pool);
+  const notificationsRepository = createNotificationsRepository(pool);
+
+  const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
+  const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
+  const systemSettingsService = createSystemSettingsService(settingsRepo);
+  const authService = createAuthService({
+    pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+  });
+  const clubsService = createClubsService(clubsRepo, logger);
+  const coursesService = createCoursesService(coursesRepo, logger);
+  const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
+  const pccService = createPccService(createPccRepository(pool));
+  const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
+  const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
+  const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
+  const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
+  const handicapOverridesService = createHandicapOverridesService(pool, createHandicapOverridesRepository(pool), handicapHistoryService, notificationsRepository, players, logger);
+  const dashboardService = createDashboardService(handicapHistoryService, roundsService, users, coursesRepo, createPresenceSnapshotsRepository(pool), systemSettingsService, logger);
+
+  const app = createApp({
+    logger, clubsService, coursesService, authService, mfaService,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
+  });
+
+  const server = app.listen(0);
+  await new Promise((resolve) => server.once("listening", resolve));
+  const { port } = server.address() as { port: number };
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const teeConfigurationId = await createTeeConfiguration();
+
+    const playerA = await adminUsersService.adminCreateUser({
+      email: "remarks-a@example.com", password: "player-a-pw-1", role: "player",
+      firstName: "Remarks", lastName: "A", autoActivate: true,
+    });
+    const playerB = await adminUsersService.adminCreateUser({
+      email: "remarks-b@example.com", password: "player-b-pw-1", role: "player",
+      firstName: "Remarks", lastName: "B", autoActivate: true,
+    });
+    const playerARecord = await players.findByUserId(playerA.userId);
+
+    const loginA = await authService.login("remarks-a@example.com", "player-a-pw-1");
+    if (loginA.status !== "authenticated") throw new Error("unreachable");
+    const tokenA = loginA.tokens.accessToken;
+    const loginB = await authService.login("remarks-b@example.com", "player-b-pw-1");
+    if (loginB.status !== "authenticated") throw new Error("unreachable");
+    const tokenB = loginB.tokens.accessToken;
+
+    const createResponse = await fetch(`${baseUrl}/api/v1/rounds`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ playerId: playerARecord!.id, teeConfigurationId, playedAt: "2026-05-01T09:00:00.000Z" }),
+    });
+    assert.equal(createResponse.status, 201);
+    const round = await createResponse.json() as { id: string };
+
+    // A real HTTP round-trip -- the owner can set remarks on their own,
+    // still-draft round.
+    const setResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/remarks`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ remarks: "Windy, played the back nine twice." }),
+    });
+    assert.equal(setResponse.status, 200);
+    const setBody = await setResponse.json() as { round: { remarks: string | null } };
+    assert.equal(setBody.round.remarks, "Windy, played the back nine twice.");
+
+    // Another player cannot change this round's remarks.
+    const otherPlayerResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/remarks`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenB}` },
+      body: JSON.stringify({ remarks: "Trying to overwrite someone else's round." }),
+    });
+    assert.equal(otherPlayerResponse.status, 403);
+
+    // A whitespace-only string normalizes to null (clears it), same as
+    // an explicit null -- there's no meaningful difference between "the
+    // player cleared the field" and "the player typed only spaces."
+    const clearResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/remarks`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ remarks: "   " }),
+    });
+    assert.equal(clearResponse.status, 200);
+    const clearBody = await clearResponse.json() as { round: { remarks: string | null } };
+    assert.equal(clearBody.round.remarks, null);
+
+    // A non-string, non-null value is a validation error (400), not an
+    // unhandled type coercion reaching the database.
+    const invalidResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/remarks`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ remarks: 42 }),
+    });
+    assert.equal(invalidResponse.status, 400);
+
+    // Once approved, remarks can no longer be changed -- matches every
+    // other round-metadata edit's own boundary (ghs#169's played-at).
+    // Set directly via the repository (same technique this file's own
+    // getPlayerStats tests use to reach 'approved') -- the workflow
+    // path to get there is already covered by other tests in this
+    // file; this one only needs a real approved round to exist.
+    await roundsRepo.setStatus(round.id, "approved");
+
+    const afterApprovalResponse = await fetch(`${baseUrl}/api/v1/rounds/${round.id}/remarks`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ remarks: "Too late now." }),
+    });
+    assert.equal(afterApprovalResponse.status, 409);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole updates it (200) rather than erroring (ghs#92)", async () => {
   const authConfig: AuthConfig = {
     jwtSecret: "rounds-test-secret-92",

@@ -39,6 +39,9 @@ export interface Round {
   is9Hole: boolean;
   status: RoundStatus;
   rejectionReason: string | null;
+  // ghs#215: free-text, player/admin-editable metadata, unrelated to
+  // scoring -- see RoundsRepository.updateRemarks's own doc comment.
+  remarks: string | null;
   holeScores: HoleScore[];
 }
 
@@ -408,6 +411,10 @@ export interface RoundsRepository {
   // isNotYetApprovedStatus). client: same row-locked-transaction
   // threading convention as setStatus above.
   updatePlayedAt(id: string, playedAt: string, client?: PoolClient): Promise<void>;
+  // ghs#215: same bare-column-update, no-recalculation shape as
+  // updatePlayedAt above -- remarks carry no handicap-relevant data.
+  // `remarks: null` clears it.
+  updateRemarks(id: string, remarks: string | null, client?: PoolClient): Promise<void>;
   // Soft delete (rounds.deleted_at), matching the players/clubs
   // convention. No return value -- callers already have the round's
   // pre-deletion state from getForUpdate, called just before this.
@@ -432,6 +439,7 @@ interface RoundRow {
   is_9_hole: boolean;
   status: RoundStatus;
   rejection_reason: string | null;
+  remarks: string | null;
 }
 
 interface HoleScoreRow {
@@ -486,13 +494,14 @@ function toRound(row: RoundRow, holeScores: HoleScore[]): Round {
     isTournament: row.is_tournament,
     is9Hole: row.is_9_hole,
     rejectionReason: row.rejection_reason,
+    remarks: row.remarks,
     holeScores,
   };
 }
 
 const ROUND_COLUMNS = `id, player_id, tee_configuration_id, played_at, playing_handicap, gross_score,
   adjusted_gross_score, score_differential, pcc, total_putts, total_gir, total_fairways_hit, total_penalties,
-  is_tournament, is_9_hole, status, rejection_reason`;
+  is_tournament, is_9_hole, status, rejection_reason, remarks`;
 
 const HOLE_SCORE_COLUMNS = `id, round_id, hole_number, strokes, putts, gir, fairway_result, in_sand,
   penalties, net_double_bogey_adjusted`;
@@ -1096,6 +1105,13 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
       await (client ?? pool).query(
         `UPDATE rounds SET played_at = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
         [id, playedAt],
+      );
+    },
+
+    async updateRemarks(id, remarks, client) {
+      await (client ?? pool).query(
+        `UPDATE rounds SET remarks = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+        [id, remarks],
       );
     },
 

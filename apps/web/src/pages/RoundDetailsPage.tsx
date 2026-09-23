@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, BackButton, Button, Card, CardBody, CardHeader, EditPlayedDateButton, HolesTable, RoundStatusBadge, Skeleton, Stat } from "../components";
+import { Alert, BackButton, Button, Card, CardBody, CardHeader, EditPlayedDateButton, EditRemarksButton, HolesTable, RoundStatusBadge, Skeleton, Stat } from "../components";
 import { ApiError, getPlayerRounds, getRound, getTeeConfiguration } from "../lib/api";
 import { AMENDABLE_ROUND_STATUSES } from "../types/domain";
 
@@ -113,6 +113,18 @@ export default function RoundDetailsPage() {
               {round.rejectionReason}
             </Alert>
           )}
+
+          {/* ghs#215: its own full-width card, not squeezed into the
+              Stat row above -- remarks is prose, not a short stat. */}
+          <Card>
+            <CardHeader className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-text">Remarks</h2>
+              {isAmendable && <EditRemarksButton roundId={round.id} remarks={round.remarks} />}
+            </CardHeader>
+            <CardBody>
+              <p className="whitespace-pre-wrap text-sm text-text">{round.remarks ?? <span className="text-text-muted">No remarks yet.</span>}</p>
+            </CardBody>
+          </Card>
 
           <Card>
             <CardHeader>

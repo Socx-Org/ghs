@@ -276,6 +276,7 @@ function fakeRepository(): RoundsRepository & { getCallCount: number; getPlayerS
         is9Hole: input.is9Hole ?? false,
         status: "draft",
         rejectionReason: null,
+        remarks: null,
         holeScores: (input.holeScores ?? []).map((h) => ({
           id: String(nextHoleId++),
           holeNumber: h.holeNumber,
@@ -380,6 +381,10 @@ function fakeRepository(): RoundsRepository & { getCallCount: number; getPlayerS
     async updatePlayedAt(id: string, playedAt: string) {
       const round = rounds.get(id)!;
       round.playedAt = playedAt;
+    },
+    async updateRemarks(id: string, remarks: string | null) {
+      const round = rounds.get(id)!;
+      round.remarks = remarks;
     },
     async getForUpdate(id: string): Promise<RoundForUpdate | null> {
       if (deleted.has(id)) return null;
@@ -972,6 +977,61 @@ test("updatePlayedAt never triggers a handicap recalculation -- none of its four
   await repo.setStatus(round.id, "amending");
 
   const result = await service.updatePlayedAt(round.id, "2026-06-15T12:00:00.000Z");
+
+  assert.equal(result.recalculation, null);
+  assert.equal(recalculation.calls.length, 0);
+});
+
+test("ghs#215: updateRemarks succeeds for every status the issue names -- draft, pending, rejected, amending -- and persists the new remarks", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo, fakeRecalculationOrchestrator(), zeroPccService());
+  for (const status of ["draft", "pending", "rejected", "amending"] as const) {
+    const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+    await repo.setStatus(round.id, status);
+
+    const result = await service.updateRemarks(round.id, "Windy, played the back nine twice.");
+
+    assert.equal(result.round!.remarks, "Windy, played the back nine twice.");
+    assert.equal(result.round!.status, status, "the status itself must be untouched by a remarks-only edit");
+  }
+});
+
+test("ghs#215: updateRemarks(id, null) clears existing remarks", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await service.updateRemarks(round.id, "Something worth noting.");
+
+  const result = await service.updateRemarks(round.id, null);
+
+  assert.equal(result.round!.remarks, null);
+});
+
+test("ghs#215: updateRemarks rejects an approved round -- the one status this issue deliberately excludes", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.setStatus(round.id, "approved");
+
+  await assert.rejects(() => service.updateRemarks(round.id, "Too late now."), InvalidRoundTransitionError);
+  assert.equal((await service.getRound(round.id))!.remarks, null);
+});
+
+test("ghs#215: updateRemarks on a missing round throws RoundNotFoundError", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+
+  await assert.rejects(() => service.updateRemarks("no-such-round", "Note"), RoundNotFoundError);
+});
+
+test("ghs#215: updateRemarks never triggers a handicap recalculation -- remarks carry no scoring-relevant data", async () => {
+  const repo = fakeRepository();
+  const recalculation = fakeRecalculationOrchestrator();
+  const service = roundsService(repo, recalculation);
+  const round = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.setStatus(round.id, "amending");
+
+  const result = await service.updateRemarks(round.id, "Note");
 
   assert.equal(result.recalculation, null);
   assert.equal(recalculation.calls.length, 0);

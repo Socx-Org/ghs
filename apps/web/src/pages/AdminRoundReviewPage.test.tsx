@@ -67,6 +67,7 @@ function makeRound(overrides: Partial<Round> = {}): Round {
     is9Hole: false,
     status: "pending",
     rejectionReason: null,
+    remarks: null,
     holeScores: [
       { id: "hs-1", holeNumber: 1, strokes: 5, putts: 2, gir: false, fairwayResult: "hit", inSand: false, penalties: 0, netDoubleBogeyAdjusted: 5 },
       { id: "hs-2", holeNumber: 2, strokes: 3, putts: 1, gir: true, fairwayResult: null, inSand: false, penalties: 0, netDoubleBogeyAdjusted: 3 },
@@ -120,6 +121,23 @@ describe("AdminRoundReviewPage", () => {
     expect(screen.getAllByText("5").length).toBeGreaterThan(0);
     expect(screen.getByText("Hit")).toBeInTheDocument();
     expect(screen.getByText("8")).toBeInTheDocument(); // running gross: 5 + 3
+  });
+
+  it("ghs#215: shows the round's remarks, and offers Edit remarks while amendable", async () => {
+    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "pending", remarks: "Windy, played the back nine twice." }));
+    renderAsRole("admin");
+
+    expect(await screen.findByText("Windy, played the back nine twice.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit remarks" })).toBeInTheDocument();
+  });
+
+  it("ghs#215: shows 'No remarks yet' when there are none, and Edit remarks is not offered once approved", async () => {
+    mock.onGet("/rounds/round-1").reply(200, makeRound({ status: "approved", remarks: null }));
+    renderAsRole("admin");
+
+    await screen.findByText("Alice Whitfield");
+    expect(screen.getByText("No remarks yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit remarks" })).not.toBeInTheDocument();
   });
 
   it("shows Approve and Reject actions for a pending round", async () => {

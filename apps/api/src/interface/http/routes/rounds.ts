@@ -325,6 +325,46 @@ export function roundsRouter(service: RoundsService, players: PlayersRepository,
     }
   });
 
+  // ghs#215: same narrow, single-field, ownership-checked, status-gated
+  // shape as PATCH /rounds/:id/played-at above. `remarks: null` (or an
+  // empty/whitespace-only string, normalized to null) clears it --
+  // unlike playedAt, which can never be empty, remarks is optional
+  // free text a player may want to remove entirely.
+  router.patch("/rounds/:id/remarks", auth, async (req, res, next) => {
+    try {
+      const roundId = String(req.params.id);
+      const round = await service.getRound(roundId);
+      if (!round) {
+        res.status(404).json({ error: "round not found" });
+        return;
+      }
+      const identity = req.identity!;
+      if (!(await authorizeForPlayer(identity.sub, identity.ghsRole, round.playerId))) {
+        res.status(403).json({ error: "cannot change remarks on another player's round" });
+        return;
+      }
+
+      const { remarks } = req.body as Record<string, unknown>;
+      if (remarks !== null && typeof remarks !== "string") {
+        res.status(400).json({ error: "remarks must be a string or null" });
+        return;
+      }
+      const normalizedRemarks = typeof remarks === "string" && remarks.trim().length > 0 ? remarks.trim() : null;
+
+      res.status(200).json(await service.updateRemarks(roundId, normalizedRemarks));
+    } catch (err) {
+      if (err instanceof RoundNotFoundError) {
+        res.status(404).json({ error: err.message });
+        return;
+      }
+      if (err instanceof InvalidRoundTransitionError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
   // ghs#61: the admin pending-review queue -- purpose-built and
   // deliberately narrow (no pagination/filtering/sorting query params),
   // matching the approved scope. Not a generic admin rounds browser;

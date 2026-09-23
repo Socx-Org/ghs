@@ -396,6 +396,10 @@ export interface Round {
   is9Hole: boolean;
   status: RoundStatus;
   rejectionReason: string | null;
+  // ghs#215: free-text, player/admin-editable metadata, unrelated to
+  // scoring -- editable via PATCH /rounds/:id/remarks while the round
+  // is any status except 'approved' (AMENDABLE_ROUND_STATUSES below).
+  remarks: string | null;
   holeScores: HoleScore[];
 }
 
