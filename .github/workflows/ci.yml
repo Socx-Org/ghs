@@ -205,3 +205,66 @@ jobs:
           ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo mkdir -p /var/www/ghs"
           ssh "${SSH_OPTS[@]}" "$REMOTE" \
             "sudo rsync -a --delete /opt/ghs/current/apps/web/dist/ /var/www/ghs/"
+
+      # ghs#217: previously a manual ops step (grep ghs-api.service's own
+      # startup drift warning in journalctl, then SSH in and run this by
+      # hand) -- automated here instead, so a shipped migration file is
+      # never silently left unapplied until someone notices. Deliberately
+      # a separate step from "Deploy to droplet" above, not folded into
+      # it -- a migration failure should read as its own distinct, clearly
+      # attributed CI failure, not buried inside the deploy step's own
+      # log.
+      #
+      # Runs AFTER deploy-release.sh's own health gate already passed
+      # (this issue's own confirmed trade-off, decided over extending the
+      # shared deploy-release.sh itself -- see ghs#217's own Decision
+      # section for the reasoning and the accepted risk: the new release
+      # is already live and serving for a brief window before its own
+      # migration applies). Targets /opt/ghs/current -- the release
+      # deploy-release.sh just cut over to, not the release still being
+      # packaged in this job's own working directory.
+      #
+      # applyMigrations (apps/api/src/data/migrations/apply.ts) is fully
+      # idempotent -- a real ledger (schema_migrations, ghs#71) records
+      # exactly which files already ran; this is always a safe no-op
+      # when nothing's pending, so it runs unconditionally on every
+      # deploy rather than needing its own separate "is anything
+      # pending?" check first.
+      #
+      # Exact same commands the ops runbook this replaces used manually
+      # (deploy/README.md) -- DB_PASSWORD/JWT_SECRET/MFA_ENCRYPTION_KEY
+      # are systemd-credential-provisioned files on the droplet itself
+      # (reference/security), never GitHub Actions secrets. migrate.ts
+      # calls the full app config loader (loadConfig()), so all three
+      # must be set even though only the database config is actually
+      # used -- not something this step can simplify away on its own.
+      # `set -euo pipefail` on both the local runner and the remote
+      # script -- a failed migration must fail this CI step loudly, the
+      # same convention every other step in this job already follows,
+      # not a swallowed non-zero exit.
+      - name: Run database migrations
+        env:
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          KEY_FILE="$(mktemp)"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+
+          SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=accept-new)
+          REMOTE="${DEPLOY_USER}@${DROPLET_HOST}"
+
+          ssh "${SSH_OPTS[@]}" "$REMOTE" '
+            set -euo pipefail
+            DB_PASSWORD=$(sudo cat /etc/credentials/ghs/db_password)
+            JWT_SECRET=$(sudo cat /etc/credentials/ghs/jwt_secret)
+            MFA_ENCRYPTION_KEY=$(sudo cat /etc/credentials/ghs/mfa_encryption_key)
+            sudo -u ghs env \
+              DB_PASSWORD="$DB_PASSWORD" \
+              JWT_SECRET="$JWT_SECRET" \
+              MFA_ENCRYPTION_KEY="$MFA_ENCRYPTION_KEY" \
+              bash -c "cd /opt/ghs/current/apps/api && node dist/migrate.js"
+          '

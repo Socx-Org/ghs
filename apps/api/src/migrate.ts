@@ -3,14 +3,19 @@ import { createLogger } from "./logger.ts";
 import { createPool } from "./data/pool.ts";
 import { applyMigrations } from "./data/migrations/apply.ts";
 
-// Production migration runner (ghs#35, Phase 3) -- a deliberate, manually
-// triggered step (`npm run migrate`, or `node dist/migrate.js` directly),
-// not folded into the automatic deploy path (reference/deployment's
-// deploy-release.sh only restarts services and health-gates; it doesn't
-// touch schema). Matches the same convention RMS already established with
-// its own infra/scripts/apply-migration.sh. Reuses applyMigrations() --
-// the same function the test suite's own database setup calls -- so
-// there is exactly one migration-application implementation, not two.
+// Production migration runner (ghs#35, Phase 3). Originally a deliberate,
+// manually triggered step (`npm run migrate`, or `node dist/migrate.js`
+// directly) -- ghs#217 automated that trigger into the CI deploy job
+// itself (a new step, run against /opt/ghs/current, after
+// reference/deployment's deploy-release.sh has already extracted the
+// release and health-gated the restart -- that script still has no
+// concept of migrations of its own; the automation lives one layer up,
+// in ghs's own ci.yml). `npm run migrate`/`node dist/migrate.js` still
+// work identically for a manual/out-of-band run (e.g. local dev) --
+// nothing about this entry point itself changed, only who calls it and
+// when. Reuses applyMigrations() -- the same function the test suite's
+// own database setup calls -- so there is exactly one migration-
+// application implementation, not two.
 const logger = createLogger("ghs-migrate");
 const config = loadConfig();
 const pool = createPool(config.database);

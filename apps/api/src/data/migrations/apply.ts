@@ -121,21 +121,26 @@ export interface MigrationDriftReport {
 
 // ghs#154: a read-only diagnostic, never DDL -- reports migration files
 // present on disk that schema_migrations has no record of applying yet.
-// migrate.ts's own doc comment already establishes that migrations are
-// deliberately manual, not folded into the automatic deploy path
-// (deploy-release.sh only extracts the release and restarts services);
-// that gap between "new code is live" and "someone ran `npm run
-// migrate`" is expected, by design, not a bug to close here. What WAS a
-// real gap: that drift was completely invisible until a request
-// happened to hit a code path depending on the missing column/table,
-// surfacing only as an unexplained 500 (ghs#154's own root cause --
-// migration 012 added tee_configurations.deleted_at, GET /courses/:id
-// depends on it, and production hadn't had the manual step run yet).
-// This makes the same drift visible in every boot's own logs instead,
-// without ever gating startup or the deploy health check on it -- doing
-// that would break every legitimate deploy that ships a new migration,
-// since the manual step is expected to lag the automatic code deploy by
-// design.
+// Originally existed because migrations were deliberately manual, and
+// the gap between "new code is live" and "someone ran `npm run
+// migrate`" was expected, by design -- production had a real incident
+// where that drift was completely invisible until a request happened
+// to hit a code path depending on the missing column/table, surfacing
+// only as an unexplained 500 (ghs#154's own root cause -- migration 012
+// added tee_configurations.deleted_at, GET /courses/:id depends on it,
+// and production hadn't had the manual step run yet). This made the
+// same drift visible in every boot's own logs instead, without ever
+// gating startup or the deploy health check on it.
+//
+// ghs#217 later automated the manual step itself (the CI deploy job now
+// runs migrate.ts against every release), so in the normal deploy path
+// this should now always report clean. Kept regardless, unchanged, as a
+// safety net for anything that reaches this schema outside that one
+// automated path (a manual `psql` session, a local/other environment, a
+// deploy that for whatever reason skipped the CI step) -- still never
+// gating startup or the health check, since a real anomaly here is
+// something to investigate, not something this diagnostic should try to
+// fix on its own by blocking the process.
 //
 // Postgres error code for "relation does not exist" -- the one specific,
 // expected failure mode (schema_migrations itself was never created)
