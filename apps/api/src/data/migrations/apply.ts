@@ -133,9 +133,19 @@ export interface MigrationDriftReport {
 // gating startup or the deploy health check on it.
 //
 // ghs#217 later automated the manual step itself (the CI deploy job now
-// runs migrate.ts against every release), so in the normal deploy path
-// this should now always report clean. Kept regardless, unchanged, as a
-// safety net for anything that reaches this schema outside that one
+// runs migrate.ts against every release) -- but review finding, PR
+// #218: that doesn't make this check always report clean even in the
+// normal deploy path. deploy-release.sh restarts ghs-api.service (which
+// runs this very check at its own boot) BEFORE the CI job's separate,
+// later migration step actually applies anything -- so a deploy that
+// ships a new migration file will still genuinely, correctly log a
+// pending-migrations warning for the brief window between that restart
+// and the migration step completing seconds later. What ghs#217
+// actually changed is that this is now always transient (settles to
+// clean by the time the CI job finishes), not that it stops firing --
+// unlike before, when it could stay warning indefinitely until a human
+// noticed and ran the manual step. Kept regardless, unchanged, as a
+// safety net for anything that reaches this schema outside that
 // automated path (a manual `psql` session, a local/other environment, a
 // deploy that for whatever reason skipped the CI step) -- still never
 // gating startup or the health check, since a real anomaly here is
