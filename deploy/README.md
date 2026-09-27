@@ -11,6 +11,10 @@ The canonical templates this directory's contents will be copied and adapted fro
 - `reference/security` — `.env.example`, credential provisioning
 - `reference/terraform` — infrastructure-as-code
 
+## Deploy pipeline secrets
+
+`ci.yml`'s `deploy` job (both its "Deploy to droplet" and "Run database migrations" steps) requires `DROPLET_HOST`, `DROPLET_HOST_KEY`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` as CI-provider secrets (`reference/deployment`'s own Prerequisites). `DROPLET_HOST_KEY` (ghs#219, socx-platform#108) is the droplet's real SSH host key — `ssh-keyscan {{DROPLET_HOST}}`'s own output, captured and verified out-of-band exactly once (e.g. against the fingerprint the hosting provider's own console/API shows), never a live `ssh-keyscan` result trusted with nothing to check it against. Pinned via `StrictHostKeyChecking=yes` rather than the previous `accept-new`, which trusted whatever host key it saw on first connection — a real gap on GitHub-hosted runners, where "first connection" is every single deploy, not a genuine one-time bootstrap. Without this secret configured, every deploy fails closed (a missing/empty `known_hosts` is a hard SSH refusal under `StrictHostKeyChecking=yes`), never silently falling back to trusting an unverified key.
+
 ## API versioning & the frontend split (ghs#57, ghs#62)
 
 `nginx-ghs.conf` splits the domain into three locations: `/api/` (proxied to the API process, full path preserved — the application itself owns the `/api/v1` version boundary internally, so a future `/api/v2` needs no nginx change), `/healthz` (the same process, unversioned), and `/` (the built React SPA, served as static files from `/var/www/ghs` with an `index.html` fallback for client-side routing). This extends `reference/nginx`'s single-upstream template rather than replacing it — the shared template itself is unchanged; the pattern is RMS's own real, already-deployed split (`infra/nginx/rms-prod-lab-01.conf` in the `rms` repo), adapted to GHS's ports/paths.

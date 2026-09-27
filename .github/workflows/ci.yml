@@ -154,21 +154,35 @@ jobs:
       - name: Deploy to droplet
         env:
           DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+          DROPLET_HOST_KEY: ${{ secrets.DROPLET_HOST_KEY }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           KEY_FILE="$(mktemp)"
-          trap 'rm -f "$KEY_FILE"' EXIT
+          KNOWN_HOSTS_FILE="$(mktemp)"
+          trap 'rm -f "$KEY_FILE" "$KNOWN_HOSTS_FILE"' EXIT
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
           chmod 600 "$KEY_FILE"
+
+          # Pinned, not accept-new (socx-platform#108/PR #109, Copilot
+          # review on this PR): accept-new trusts whatever host key it
+          # sees on first connection, and every GitHub-hosted runner is a
+          # fresh, ephemeral machine with an empty known_hosts -- so
+          # "first connection" was really "every single deploy," open to
+          # an unnoticed MITM'd host key. DROPLET_HOST_KEY is the
+          # droplet's real host key (`ssh-keyscan <host>`'s own output,
+          # captured and verified out-of-band once against the hosting
+          # provider's own displayed fingerprint) written to a per-run
+          # known_hosts file, never the runner's own persistent one.
+          printf '%s\n' "$DROPLET_HOST_KEY" > "$KNOWN_HOSTS_FILE"
 
           # Array, not a single string -- expanding an unquoted string
           # (e.g. `scp $SSH_OPTS ...`) is subject to word-splitting, a
           # latent fragility even though none of these fixed values
           # currently contain a space (caught in review, PR #37).
-          SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=accept-new)
+          SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}")
           REMOTE="${DEPLOY_USER}@${DROPLET_HOST}"
           REMOTE_TARBALL="/tmp/release-${VERSION}.tar.gz"
 
@@ -245,16 +259,21 @@ jobs:
       - name: Run database migrations
         env:
           DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+          DROPLET_HOST_KEY: ${{ secrets.DROPLET_HOST_KEY }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           set -euo pipefail
           KEY_FILE="$(mktemp)"
-          trap 'rm -f "$KEY_FILE"' EXIT
+          KNOWN_HOSTS_FILE="$(mktemp)"
+          trap 'rm -f "$KEY_FILE" "$KNOWN_HOSTS_FILE"' EXIT
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
           chmod 600 "$KEY_FILE"
 
-          SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=accept-new)
+          # Pinned host key -- see "Deploy to droplet" above for the
+          # full reasoning (socx-platform#108/PR #109).
+          printf '%s\n' "$DROPLET_HOST_KEY" > "$KNOWN_HOSTS_FILE"
+          SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}")
           REMOTE="${DEPLOY_USER}@${DROPLET_HOST}"
 
           ssh "${SSH_OPTS[@]}" "$REMOTE" '
