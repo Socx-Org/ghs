@@ -349,6 +349,9 @@ function fakeRepository(): RoundsRepository & { getCallCount: number; getPlayerS
           courseId: "course-1", courseName: "Fake Course",
           teeConfigurationName: "Fake Tee",
           playedAt, status, grossScore,
+          // Placeholder -- see PlayerRoundListItem's own doc comment;
+          // rounds.service.ts's listRoundsForPlayer always overwrites it.
+          usedInHandicapCalculation: false,
         }));
     },
     async listPendingQueue() { throw new Error("not used by these tests"); },
@@ -1135,6 +1138,71 @@ test("listRoundsForPlayer only returns that player's rounds", async () => {
   const player1Rounds = await service.listRoundsForPlayer("player-1");
   assert.equal(player1Rounds.length, 1);
   assert.equal(player1Rounds[0]!.playerId, "player-1");
+});
+
+test("ghs#223: listRoundsForPlayer flags only the rounds actually selected by the live WHS calculation, not every approved round", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+
+  // 3 approved rounds -- exactly the minimum for eligibility (54 holes),
+  // and the WHS count table's own 3-round row selects only the single
+  // lowest differential (count: 1). Differentials deliberately out of
+  // creation order so this can't pass by accident if the flag were ever
+  // computed from array position instead of the real selection.
+  const low = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z" });
+  await repo.updateScores(low.id, { scoreDifferential: 8.0 });
+  await repo.setStatus(low.id, "approved");
+
+  const mid = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-02T09:00:00.000Z" });
+  await repo.updateScores(mid.id, { scoreDifferential: 12.0 });
+  await repo.setStatus(mid.id, "approved");
+
+  const high = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-03T09:00:00.000Z" });
+  await repo.updateScores(high.id, { scoreDifferential: 16.0 });
+  await repo.setStatus(high.id, "approved");
+
+  const items = await service.listRoundsForPlayer("player-1");
+  const usedById = new Map(items.map((item) => [item.id, item.usedInHandicapCalculation]));
+
+  assert.equal(usedById.get(low.id), true, "the one round with the lowest differential is the one WHS actually selects");
+  assert.equal(usedById.get(mid.id), false);
+  assert.equal(usedById.get(high.id), false);
+});
+
+test("ghs#223: both rounds of a selected paired 9-hole differential are flagged together", async () => {
+  const repo = fakeRepository();
+  const service = roundsService(repo);
+
+  // Two 9-hole rounds pair into one effective differential (whs-
+  // calculation.ts's buildEffectiveDifferentials) -- plus two ordinary
+  // 18-hole rounds, giving 3 effective differentials total (the 54-hole
+  // eligibility floor), count: 1 selects only the lowest of the three.
+  // The paired 9-hole differential (3.0 + 4.0 = 7.0) is deliberately the
+  // lowest, so both of ITS rounds must come back flagged true together
+  // -- not just one of them.
+  const nine1 = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-01T09:00:00.000Z", is9Hole: true });
+  await repo.updateScores(nine1.id, { scoreDifferential: 3.0 });
+  await repo.setStatus(nine1.id, "approved");
+
+  const nine2 = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-02T09:00:00.000Z", is9Hole: true });
+  await repo.updateScores(nine2.id, { scoreDifferential: 4.0 });
+  await repo.setStatus(nine2.id, "approved");
+
+  const full1 = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-03T09:00:00.000Z" });
+  await repo.updateScores(full1.id, { scoreDifferential: 12.0 });
+  await repo.setStatus(full1.id, "approved");
+
+  const full2 = await service.createRound({ playerId: "player-1", teeConfigurationId: "tee-1", playedAt: "2026-05-04T09:00:00.000Z" });
+  await repo.updateScores(full2.id, { scoreDifferential: 16.0 });
+  await repo.setStatus(full2.id, "approved");
+
+  const items = await service.listRoundsForPlayer("player-1");
+  const usedById = new Map(items.map((item) => [item.id, item.usedInHandicapCalculation]));
+
+  assert.equal(usedById.get(nine1.id), true);
+  assert.equal(usedById.get(nine2.id), true);
+  assert.equal(usedById.get(full1.id), false);
+  assert.equal(usedById.get(full2.id), false);
 });
 
 test("ghs#209: getPlayerStats reads the configured window size live from system settings and forwards it to the repository, unchanged, on every call", async () => {

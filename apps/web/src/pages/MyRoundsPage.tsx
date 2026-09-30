@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { BadgeCheck, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, Button, Card, CardBody, EmptyState, ListView, Modal, RoundStatusBadge, Skeleton, SortableTableHeaderCell, TableCell, TableHeaderCell, Tooltip, useToast } from "../components";
@@ -42,6 +42,37 @@ function formatPlayedAt(iso: string): string {
 
 function describeQueryError(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
+}
+
+// ghs#223: usedInHandicapCalculation is already false for a withheld
+// (non-approved) score server-side (rounds.service.ts computes it only
+// from the player's approved rounds), so this never needs its own
+// withheld-state check -- the icon and the score it sits beside always
+// agree by construction.
+//
+// Icon-only ghost Button + Tooltip whose content mirrors the button's
+// own aria-label -- same convention as Widget's own infoTooltip icon
+// (avoids a screen reader announcing the same text twice, per Tooltip's
+// own shouldDescribe logic).
+const HANDICAP_CALC_LABEL = "Counts toward your current handicap index";
+
+function renderScore(item: PlayerRoundListItem) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {displayGrossScore(item)}
+      {item.usedInHandicapCalculation && (
+        <Tooltip content={HANDICAP_CALC_LABEL}>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<BadgeCheck aria-hidden="true" className="h-4 w-4 text-primary" />}
+            aria-label={HANDICAP_CALC_LABEL}
+            className="text-text-muted"
+          />
+        </Tooltip>
+      )}
+    </span>
+  );
 }
 
 export default function MyRoundsPage() {
@@ -200,7 +231,7 @@ export default function MyRoundsPage() {
                   </TableCell>
                   <TableCell>{item.teeConfigurationName}</TableCell>
                   <TableCell>{formatPlayedAt(item.playedAt)}</TableCell>
-                  <TableCell>{displayGrossScore(item)}</TableCell>
+                  <TableCell>{renderScore(item)}</TableCell>
                   <TableCell>
                     <RoundStatusBadge status={item.status} />
                   </TableCell>
@@ -218,7 +249,7 @@ export default function MyRoundsPage() {
                     </div>
                     <p className="text-xs text-text-muted">{item.teeConfigurationName}</p>
                     <p className="text-xs text-text-muted">{formatPlayedAt(item.playedAt)}</p>
-                    <p className="text-xs text-text-muted">Score: {displayGrossScore(item)}</p>
+                    <p className="text-xs text-text-muted">Score: {renderScore(item)}</p>
                     {renderActions(item)}
                   </CardBody>
                 </Card>

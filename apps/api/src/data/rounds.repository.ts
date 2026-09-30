@@ -76,6 +76,19 @@ export interface PlayerRoundListItem {
   // enforces -- this type carries the raw value regardless of status,
   // same as Round itself.
   grossScore: number | null;
+  // ghs#223: true when this round's effective differential is one of
+  // the ones actually selected by the player's current, live WHS
+  // calculation (whs-calculation.ts's calculateHandicapIndex) -- NOT
+  // read from handicap_history.calculation_snapshot, which only reflects
+  // the selection as of the last recalculation that actually changed the
+  // index (ghs#21's change-only write policy) and can silently go stale
+  // otherwise (see this issue's own investigation). This repository has
+  // no way to compute that on its own (it would need the full WHS
+  // engine, an application-layer concern) -- every row here is returned
+  // with a `false` placeholder; rounds.service.ts's listRoundsForPlayer
+  // always overwrites it with the real, live value before this ever
+  // reaches a caller.
+  usedInHandicapCalculation: boolean;
 }
 
 // ghs#61: a purpose-built, lightweight projection for the admin pending-
@@ -711,6 +724,10 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         playedAt: row.played_at.toISOString(),
         status: row.status,
         grossScore: row.gross_score,
+        // Placeholder -- see PlayerRoundListItem's own doc comment.
+        // Always overwritten by rounds.service.ts before this reaches a
+        // caller.
+        usedInHandicapCalculation: false,
       }));
     },
 

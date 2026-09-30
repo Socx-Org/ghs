@@ -163,6 +163,29 @@ describe("MyRoundsPage", () => {
     expect(courseColumn()[0]).toEqual("Pebble Beach Golf Links");
   });
 
+  it("ghs#223: shows an icon next to the score of a round used in the current handicap calculation, and not next to one that isn't", async () => {
+    const usedRound = {
+      id: "round-3", playerId: "player-1", courseId: "course-3", courseName: "Carnoustie Golf Links",
+      teeConfigurationId: "tee-3", teeConfigurationName: "Championship", playedAt: "2026-05-03T00:00:00.000Z",
+      status: "approved", grossScore: 79, usedInHandicapCalculation: true,
+    };
+    const notUsedApprovedRound = {
+      id: "round-4", playerId: "player-1", courseId: "course-4", courseName: "Royal Troon",
+      teeConfigurationId: "tee-4", teeConfigurationName: "Championship", playedAt: "2026-05-04T00:00:00.000Z",
+      status: "approved", grossScore: 91, usedInHandicapCalculation: false,
+    };
+    mock.onGet("/players/player-1/rounds").reply(200, [usedRound, notUsedApprovedRound]);
+    renderAsRole("player");
+
+    await screen.findByText("Carnoustie Golf Links");
+    const table = screen.getByRole("table");
+    const usedRow = within(table).getByText("Carnoustie Golf Links").closest("tr")!;
+    const notUsedRow = within(table).getByText("Royal Troon").closest("tr")!;
+
+    expect(within(usedRow).getByRole("button", { name: "Counts toward your current handicap index" })).toBeInTheDocument();
+    expect(within(notUsedRow).queryByRole("button", { name: "Counts toward your current handicap index" })).not.toBeInTheDocument();
+  });
+
   it("links each row to its own RoundDetailsPage, not the edit screen", async () => {
     mock.onGet("/players/player-1/rounds").reply(200, ROUNDS);
     renderAsRole("player");

@@ -130,6 +130,13 @@ export interface PlayerRoundListItem {
   // already enforces. This type carries the raw value regardless of
   // status, same as Round itself.
   grossScore: number | null;
+  // ghs#223: true when this round is one of the ones actually selected
+  // by the player's current, LIVE WHS calculation -- not merely
+  // "approved" (WHS only ever uses a subset of approved rounds, and
+  // which ones depends on differential value, not recency). Computed
+  // fresh server-side on every request (rounds.service.ts), never from a
+  // potentially-stale stored snapshot -- see that file's own comment.
+  usedInHandicapCalculation: boolean;
 }
 
 // Mirrors apps/api/src/data/rounds.repository.ts's PlayerStats exactly

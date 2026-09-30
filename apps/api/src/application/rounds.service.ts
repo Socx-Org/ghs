@@ -24,6 +24,7 @@ import type { NotificationEventType, NotificationsRepository, RecordNotification
 import type { PlayersRepository } from "../data/players.repository.ts";
 import type { SystemSettingsService } from "./system-settings.service.ts";
 import type { Logger } from "../logger.ts";
+import { calculateHandicapIndex } from "./whs-calculation.ts";
 
 export class RoundNotFoundError extends Error {}
 export class InvalidRoundTransitionError extends Error {}
@@ -642,7 +643,24 @@ export function createRoundsService(
     },
 
     async listRoundsForPlayer(playerId) {
-      return repository.listByPlayer(playerId);
+      // ghs#223: usedInHandicapCalculation is derived live here, not read
+      // from handicap_history.calculation_snapshot -- see
+      // PlayerRoundListItem's own doc comment (rounds.repository.ts) for
+      // why the stored snapshot can't be trusted for this. This re-runs
+      // the exact same pure, already-tested selection logic
+      // recalculation.service.ts itself uses, just read-only.
+      const [items, differentials] = await Promise.all([
+        repository.listByPlayer(playerId),
+        repository.listApprovedDifferentialsForPlayer(playerId),
+      ]);
+      const outcome = calculateHandicapIndex(differentials);
+      // Every other outcome status (insufficient_holes/insufficient_rounds)
+      // means no round is currently "in" a calculation at all -- an empty
+      // set correctly leaves every item's flag false below.
+      const usedRoundIds = new Set(
+        outcome.status === "eligible" ? outcome.selection.selected.flatMap((d) => d.roundIds) : [],
+      );
+      return items.map((item) => ({ ...item, usedInHandicapCalculation: usedRoundIds.has(item.id) }));
     },
 
     async listPendingQueue() {

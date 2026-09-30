@@ -6,6 +6,7 @@ function round(status: PlayerRoundListItem["status"], grossScore: number | null)
   return {
     id: "r1", playerId: "p1", courseId: "c1", courseName: "Pebble Beach", teeConfigurationId: "t1",
     teeConfigurationName: "Blue", playedAt: "2026-05-01T09:00:00.000Z", status, grossScore,
+    usedInHandicapCalculation: false,
   };
 }
 
