@@ -67,8 +67,8 @@ export function HandicapTrendWidget({ colSpan, isIdle, isLoading, isError, error
   const first = sorted[0];
 
   const chartData = sorted.map((record) => ({
+    id: record.id,
     calculationDate: record.calculationDate,
-    label: formatDate(record.calculationDate),
     handicapIndex: record.handicapIndex,
   }));
 
@@ -97,12 +97,49 @@ export function HandicapTrendWidget({ colSpan, isIdle, isLoading, isError, error
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" vertical={false} />
-            <XAxis dataKey="label" stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={{ stroke: "var(--color-border)" }} />
+            {/* ghs#221: dataKey is the record's own id, not a date-only
+                display string -- two rounds approved the same calendar
+                day (genuinely distinct calculationDate instants, just
+                the same *date*) would otherwise share an identical
+                category value, and recharts' own tooltip-matching for a
+                category axis conflates every entry sharing that value,
+                showing the same one regardless of which point is
+                actually hovered. tickFormatter keeps the axis showing a
+                real date, resolved by looking the id back up in
+                chartData -- review finding, PR #222: recharts' own
+                tickFormatter(value, index) passes the index into the
+                RENDERED tick set (post-thinning, once there are enough
+                points that not every tick fits), not the index into
+                chartData, so using it to index chartData directly
+                would show the wrong date once thinning kicks in. The
+                tick's own `value` (the id) is unaffected by thinning --
+                only which ticks get drawn changes, never what value a
+                drawn tick represents. */}
+            <XAxis
+              dataKey="id"
+              tickFormatter={(id) => {
+                const record = chartData.find((d) => d.id === id);
+                return record ? formatDate(record.calculationDate) : "";
+              }}
+              stroke="var(--color-text-muted)"
+              fontSize={12}
+              tickLine={false}
+              axisLine={{ stroke: "var(--color-border)" }}
+            />
             <YAxis stroke="var(--color-text-muted)" fontSize={12} tickLine={false} axisLine={false} width={32} />
             <Tooltip
               contentStyle={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 8, fontSize: 12 }}
               labelStyle={{ color: "var(--color-text)" }}
               itemStyle={{ color: "var(--color-text)" }}
+              // Same reasoning as the XAxis above -- reads the real date
+              // from the specific hovered point's own payload, same
+              // technique ActiveUsersSparklineWidget's own Tooltip
+              // already uses, rather than trusting recharts' own
+              // (here, unreliable) "label" resolution.
+              labelFormatter={(_label, payload) => {
+                const calculationDate = payload?.[0]?.payload?.calculationDate as string | undefined;
+                return calculationDate ? formatDate(calculationDate) : "";
+              }}
               formatter={(value) => [typeof value === "number" ? value.toFixed(1) : value, "Handicap Index"]}
             />
             <Line type="monotone" dataKey="handicapIndex" stroke="var(--color-primary)" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
