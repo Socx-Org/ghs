@@ -107,4 +107,25 @@ describe("HandicapTrendWidget", () => {
     expect(within(rows[1]!).getByText("14.2")).toBeInTheDocument();
     expect(within(rows[2]!).getByText("12.4")).toBeInTheDocument();
   });
+
+  it("ghs#221: two changes on the same calendar day (genuinely distinct calculationDate instants) each keep their own real, distinct handicap index -- not collapsed into one", () => {
+    render(
+      <HandicapTrendWidget
+        isLoading={false}
+        isError={false}
+        history={[
+          record("h1", "2026-05-01T09:00:00.000Z", 14.2),
+          record("h2", "2026-05-01T18:30:00.000Z", 13.6),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Current 13.6")).toBeInTheDocument();
+    const table = screen.getByRole("table");
+    const rows = within(table).getAllByRole("row");
+    expect(within(rows[1]!).getByText("May 1, 2026")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("14.2")).toBeInTheDocument();
+    expect(within(rows[2]!).getByText("May 1, 2026")).toBeInTheDocument();
+    expect(within(rows[2]!).getByText("13.6")).toBeInTheDocument();
+  });
 });
