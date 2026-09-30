@@ -105,11 +105,22 @@ export function HandicapTrendWidget({ colSpan, isIdle, isLoading, isError, error
                 category axis conflates every entry sharing that value,
                 showing the same one regardless of which point is
                 actually hovered. tickFormatter keeps the axis showing a
-                real date, just derived from the unique id via its
-                index rather than used as the key itself. */}
+                real date, resolved by looking the id back up in
+                chartData -- review finding, PR #222: recharts' own
+                tickFormatter(value, index) passes the index into the
+                RENDERED tick set (post-thinning, once there are enough
+                points that not every tick fits), not the index into
+                chartData, so using it to index chartData directly
+                would show the wrong date once thinning kicks in. The
+                tick's own `value` (the id) is unaffected by thinning --
+                only which ticks get drawn changes, never what value a
+                drawn tick represents. */}
             <XAxis
               dataKey="id"
-              tickFormatter={(_value, index) => formatDate(chartData[index]!.calculationDate)}
+              tickFormatter={(id) => {
+                const record = chartData.find((d) => d.id === id);
+                return record ? formatDate(record.calculationDate) : "";
+              }}
               stroke="var(--color-text-muted)"
               fontSize={12}
               tickLine={false}
