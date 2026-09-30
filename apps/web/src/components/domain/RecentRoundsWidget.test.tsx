@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 function round(id: string, playedAt: string, status: PlayerRoundListItem["status"], grossScore: number | null = null): PlayerRoundListItem {
-  return { id, playerId: "player-1", courseId: "course-1", courseName: "Pebble Beach", teeConfigurationId: "tee-1", teeConfigurationName: "Blue", playedAt, status, grossScore };
+  return { id, playerId: "player-1", courseId: "course-1", courseName: "Pebble Beach", teeConfigurationId: "tee-1", teeConfigurationName: "Blue", playedAt, status, grossScore, usedInHandicapCalculation: false };
 }
 
 describe("RecentRoundsWidget", () => {
