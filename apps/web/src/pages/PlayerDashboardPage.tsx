@@ -184,18 +184,44 @@ export default function PlayerDashboardPage() {
         )}
       </Widget>
 
+      {/* ghs#227: Putting/GIR/Sand/Penalties are flat siblings, each
+          carrying the SAME colSpan -- CSS grid's own auto-flow packs
+          them 1-per-row (base, 12/12 each), 2-per-row (md, 6/12 each,
+          two rows of two), 4-per-row (lg, 3/12 each, one row), with no
+          wrapper markup needed at all. Replaces the previous special-
+          cased mobile "horizontal swipe strip" wrapper (ghs#178's
+          design-doc-cited pattern) entirely -- resolved with the user
+          (ghs#227) in favour of plain stacking, same as every other
+          widget on this page, once Putting joined this group. */}
       <Widget
         title="Putting"
         icon={CircleDot}
-        colSpan={{ lg: 6 }}
+        colSpan={{ base: 12, md: 6, lg: 3 }}
         status={puttingStatus}
         errorMessage={isNetworkError ? networkErrorMessage : undefined}
         emptyState={<EmptyState title="No putting data yet" description="Approved rounds with recorded putts will show up here." />}
         infoTooltip={`Your average putts per round, and the split between 1-putt, 2-putt, and 3+ putt holes, across ${statsWindowPhrase(stats)}.`}
       >
+        {/* ghs#227: DonutStat's centerLabel is caller-supplied, not
+            auto-derived from one "favourable" segment -- there's no
+            single percentage that represents a 3-way split the way
+            GIR/Sand/Penalties' 2-way splits each have one. The existing
+            puttsPerRound average fills that role instead, same as it
+            did as SegmentedBar's own headline.
+            Review finding, PR #228: centerLabel sits inside DonutStat's
+            own aria-hidden chart container (decorative, like GIR/Sand/
+            Penalties' own centerLabel) -- for those three that's fine,
+            since the same percentage is ALSO in the real accessible
+            <dl> legend, but puttsPerRound appears nowhere else here, so
+            a bare "putts/round" caption (no number) would silently drop
+            it for screen-reader users, a real regression from
+            SegmentedBar's own accessible "2.1 putts/round" headline.
+            The caption carries the full phrase instead, same
+            convention Penalties' own caption below already uses. */}
         {stats && (
-          <SegmentedBar
-            headline={stats.puttsPerRound === null ? "--" : `${stats.puttsPerRound} putts/round`}
+          <DonutStat
+            centerLabel={stats.puttsPerRound === null ? "--" : stats.puttsPerRound}
+            caption={stats.puttsPerRound === null ? undefined : `${stats.puttsPerRound} putts/round`}
             segments={[
               { label: "1-putt", value: (stats.onePuttHoles / stats.puttsHolesCount) * 100, colorClass: "bg-success" },
               { label: "2-putt", value: (twoPuttHoles(stats) / stats.puttsHolesCount) * 100, colorClass: "bg-primary" },
@@ -204,71 +230,66 @@ export default function PlayerDashboardPage() {
           />
         )}
       </Widget>
-
-      {/* Design doc's own Mobile section: GIR/Sand/Penalties collapse
-          into one horizontally-scrollable row of small cards on mobile,
-          not three full-width stacked rows -- a full-width card for a
-          single number wastes most of a phone's width. This wrapper is
-          a real CSS grid item (col-span-12) that's ALSO a horizontal
-          flex-scroll container below md; at md and up it becomes
-          display:contents, vanishing from layout entirely so its three
-          Widget children become direct DashboardGrid items in their own
-          right (each carrying its own md/lg colSpan below). */}
-      {/* Review finding, PR #226: lg stays 2 (not widened for the new
-          donut), same as before this issue -- Putting (lg:6) + GIR +
-          Sand + Penalties share this grid row at the lg breakpoint
-          (Widget.tsx's own documented Row 3 invariant, 6+2+2+2=12); lg:3
-          would sum to 15, overflowing DashboardGrid's fixed 12 columns
-          and wrapping Penalties onto its own row. The donut fits fine
-          at this width (h-20 w-20, verified via real E2E). */}
-      <div className="col-span-12 flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1 md:contents">
-        <Widget
-          title="GIR"
-          colSpan={{ md: 4, lg: 2 }}
-          className="min-w-[70%] shrink-0 snap-start md:min-w-0"
-          status={girStatus}
-          errorMessage={isNetworkError ? networkErrorMessage : undefined}
-          emptyState={<EmptyState title="No GIR data yet" description="Approved rounds will show up here." />}
-          infoTooltip={`The share of holes hit in regulation, across ${statsWindowPhrase(stats)}.`}
-        >
-          {stats && <DonutStat value={stats.girPercentage ?? 0} primaryLabel="Hit" secondaryLabel="Missed" />}
-        </Widget>
-        <Widget
-          title="Sand"
-          colSpan={{ md: 4, lg: 2 }}
-          className="min-w-[70%] shrink-0 snap-start md:min-w-0"
-          status={sandStatus}
-          errorMessage={isNetworkError ? networkErrorMessage : undefined}
-          emptyState={<EmptyState title="No sand data yet" description="Approved rounds will show up here." />}
-          infoTooltip={`The share of holes with a sand interaction (e.g. a bunker shot), across ${statsWindowPhrase(stats)}.`}
-        >
-          {/* "Sand interaction", not "sand shots" -- in_sand is a
-              per-hole boolean, not a shot count (PlayerStats's own doc
-              comment, ghs#101). The donut's favourable (green) segment
-              is "No interaction", not "Interaction" -- DonutStat's
-              `value` is the FAVOURABLE share, so this is deliberately
-              100 - sandInteractionPercentage, not the raw field itself. */}
-          {stats && <DonutStat value={100 - (stats.sandInteractionPercentage ?? 0)} primaryLabel="No interaction" secondaryLabel="Sand interaction" />}
-        </Widget>
-        <Widget
-          title="Penalties"
-          colSpan={{ md: 4, lg: 2 }}
-          className="min-w-[70%] shrink-0 snap-start md:min-w-0"
-          status={penaltiesStatus}
-          errorMessage={isNetworkError ? networkErrorMessage : undefined}
-          emptyState={<EmptyState title="No penalty data yet" description="Approved rounds will show up here." />}
-          infoTooltip={`The share of holes with zero penalty strokes, and your average penalty strokes per round, across ${statsWindowPhrase(stats)}.`}
-        >
-          {stats && (
-            <DonutStat
-              value={stats.penaltyFreeHolesPercentage ?? 0}
-              primaryLabel="Penalty-free"
-              secondaryLabel="Penalty"
-              caption={stats.penaltiesPerRound === null ? undefined : `${stats.penaltiesPerRound}/round`}
-            />
-          )}
-        </Widget>
-      </div>
+      <Widget
+        title="GIR"
+        colSpan={{ base: 12, md: 6, lg: 3 }}
+        status={girStatus}
+        errorMessage={isNetworkError ? networkErrorMessage : undefined}
+        emptyState={<EmptyState title="No GIR data yet" description="Approved rounds will show up here." />}
+        infoTooltip={`The share of holes hit in regulation, across ${statsWindowPhrase(stats)}.`}
+      >
+        {stats && (
+          <DonutStat
+            centerLabel={percentLabel(stats.girPercentage)}
+            segments={[
+              { label: "Hit", value: stats.girPercentage ?? 0, colorClass: "bg-success" },
+              { label: "Missed", value: 100 - (stats.girPercentage ?? 0), colorClass: "bg-warning" },
+            ]}
+          />
+        )}
+      </Widget>
+      <Widget
+        title="Sand"
+        colSpan={{ base: 12, md: 6, lg: 3 }}
+        status={sandStatus}
+        errorMessage={isNetworkError ? networkErrorMessage : undefined}
+        emptyState={<EmptyState title="No sand data yet" description="Approved rounds will show up here." />}
+        infoTooltip={`The share of holes with a sand interaction (e.g. a bunker shot), across ${statsWindowPhrase(stats)}.`}
+      >
+        {/* "Sand interaction", not "sand shots" -- in_sand is a
+            per-hole boolean, not a shot count (PlayerStats's own doc
+            comment, ghs#101). The donut's favourable (green) segment
+            is "No interaction", not "Interaction" -- deliberately
+            100 - sandInteractionPercentage, not the raw field itself. */}
+        {stats && (
+          <DonutStat
+            centerLabel={percentLabel(100 - (stats.sandInteractionPercentage ?? 0))}
+            segments={[
+              { label: "No interaction", value: 100 - (stats.sandInteractionPercentage ?? 0), colorClass: "bg-success" },
+              { label: "Sand interaction", value: stats.sandInteractionPercentage ?? 0, colorClass: "bg-warning" },
+            ]}
+          />
+        )}
+      </Widget>
+      <Widget
+        title="Penalties"
+        colSpan={{ base: 12, md: 6, lg: 3 }}
+        status={penaltiesStatus}
+        errorMessage={isNetworkError ? networkErrorMessage : undefined}
+        emptyState={<EmptyState title="No penalty data yet" description="Approved rounds will show up here." />}
+        infoTooltip={`The share of holes with zero penalty strokes, and your average penalty strokes per round, across ${statsWindowPhrase(stats)}.`}
+      >
+        {stats && (
+          <DonutStat
+            centerLabel={percentLabel(stats.penaltyFreeHolesPercentage)}
+            caption={stats.penaltiesPerRound === null ? undefined : `${stats.penaltiesPerRound}/round`}
+            segments={[
+              { label: "Penalty-free", value: stats.penaltyFreeHolesPercentage ?? 0, colorClass: "bg-success" },
+              { label: "Penalty", value: 100 - (stats.penaltyFreeHolesPercentage ?? 0), colorClass: "bg-warning" },
+            ]}
+          />
+        )}
+      </Widget>
     </DashboardGrid>
   );
 }

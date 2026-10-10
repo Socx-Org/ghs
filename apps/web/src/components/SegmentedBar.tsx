@@ -36,10 +36,15 @@ export interface SegmentedBarProps {
 }
 
 // ghs#175 (design doc section D/L): the spatially-ordered content
-// primitive for FIR (missed-left/hit/missed-right) and Putting
-// (1-putt/2-putt/3+-putt), deliberately not a donut -- a donut's
-// clockwise segment order carries no real-world meaning for either
-// metric, where this bar's left-to-right order does.
+// primitive for FIR (missed-left/hit/missed-right), deliberately not a
+// donut -- a donut's clockwise segment order carries no real-world
+// meaning for missed-left/hit/missed-right, where this bar's
+// left-to-right order does. Putting (1-putt/2-putt/3+-putt) used to be
+// a second caller here for the identical reason, but ghs#227 moved it
+// to DonutStat instead (an explicit, requested reversal of that
+// reasoning for Putting specifically, in order to join GIR/Sand/
+// Penalties' shared donut row) -- FIR is this component's only
+// remaining caller.
 //
 // The coloured bar itself is aria-hidden (decorative, like
 // HandicapTrendWidget's chart) -- the <dl> legend beneath it is the real

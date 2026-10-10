@@ -1022,16 +1022,46 @@ export default function ComponentsCatalogue() {
             </div>
           </Example>
 
-          <Example label="DonutStat (ghs#225) -- plain hit/miss, present/absent splits (GIR/Sand/Penalties), unlike SegmentedBar's spatially-ordered segments above">
-            <div className="grid max-w-md grid-cols-3 gap-4">
+          <Example label="DonutStat (ghs#225/#227) -- categorical splits (2-segment for GIR/Sand/Penalties, N-segment for Putting), unlike SegmentedBar's spatially-ordered segments above">
+            <div className="grid max-w-2xl grid-cols-2 gap-4 sm:grid-cols-4">
+              <Widget title="Putting" status={widgetStatus} errorMessage="Couldn't load putting." emptyState={<EmptyState title="No putting data yet" />}>
+                <DonutStat
+                  centerLabel="2.1"
+                  caption="putts/round"
+                  segments={[
+                    { label: "1-putt", value: 30, colorClass: "bg-success" },
+                    { label: "2-putt", value: 50, colorClass: "bg-primary" },
+                    { label: "3+ putt", value: 20, colorClass: "bg-warning" },
+                  ]}
+                />
+              </Widget>
               <Widget title="GIR" status={widgetStatus} errorMessage="Couldn't load GIR." emptyState={<EmptyState title="No GIR data yet" />}>
-                <DonutStat value={62} primaryLabel="Hit" secondaryLabel="Missed" />
+                <DonutStat
+                  centerLabel="62%"
+                  segments={[
+                    { label: "Hit", value: 62, colorClass: "bg-success" },
+                    { label: "Missed", value: 38, colorClass: "bg-warning" },
+                  ]}
+                />
               </Widget>
               <Widget title="Sand" status={widgetStatus} errorMessage="Couldn't load sand." emptyState={<EmptyState title="No sand data yet" />}>
-                <DonutStat value={85} primaryLabel="No interaction" secondaryLabel="Sand interaction" />
+                <DonutStat
+                  centerLabel="85%"
+                  segments={[
+                    { label: "No interaction", value: 85, colorClass: "bg-success" },
+                    { label: "Sand interaction", value: 15, colorClass: "bg-warning" },
+                  ]}
+                />
               </Widget>
               <Widget title="Penalties" status={widgetStatus} errorMessage="Couldn't load penalties." emptyState={<EmptyState title="No penalty data yet" />}>
-                <DonutStat value={78} primaryLabel="Penalty-free" secondaryLabel="Penalty" caption="1.2/round" />
+                <DonutStat
+                  centerLabel="78%"
+                  caption="1.2/round"
+                  segments={[
+                    { label: "Penalty-free", value: 78, colorClass: "bg-success" },
+                    { label: "Penalty", value: 22, colorClass: "bg-warning" },
+                  ]}
+                />
               </Widget>
             </div>
           </Example>
