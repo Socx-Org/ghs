@@ -154,6 +154,43 @@ describe("TeeConfigurationForm", () => {
       expect(screen.getByLabelText("Hole 9 distance in yards")).toHaveValue(380);
     });
 
+    it("review fix, PR #230: the file input's own value is cleared after every parse attempt, so a browser never suppresses a later re-selection of the SAME file as a no-op change", async () => {
+      // jsdom's userEvent.upload doesn't itself replicate a real
+      // browser's "re-selecting an unchanged file fires no change
+      // event" behaviour (confirmed directly: re-uploading the same
+      // File object still dispatches change in jsdom regardless of
+      // whether the input's own .value was reset first) -- so the real
+      // regression this guards against can only be reproduced in an
+      // actual browser (verified via real E2E). What IS directly,
+      // meaningfully testable here is the application code the fix
+      // actually touches: the input's own .value must be back to ""
+      // once a parse attempt (success or failure) finishes, matching
+      // CourseCsvImportForm/RoundHoleCsvImportForm's own convention.
+      renderForm();
+      await userEvent.selectOptions(screen.getByLabelText("Holes"), "9");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+      const fileInput = screen.getByLabelText("CSV file") as HTMLInputElement;
+      await userEvent.upload(fileInput, csvFile(NINE_HOLE_CSV));
+      await screen.findByLabelText("Hole 1 distance in yards");
+
+      expect(fileInput.value).toBe("");
+    });
+
+    it("review fix, PR #230: a stale structural parse error doesn't survive a round trip through 'Enter manually' and back", async () => {
+      renderForm();
+      await userEvent.selectOptions(screen.getByLabelText("Holes"), "9");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+      const duplicateCsv =
+        "hole_number,distance_yards,par,stroke_index\n1,300,5,1\n1,310,4,2\n3,320,4,3\n4,330,5,4\n5,340,4,5\n6,350,4,6\n7,360,5,7\n8,370,4,8\n9,380,4,9";
+      await userEvent.upload(screen.getByLabelText("CSV file"), csvFile(duplicateCsv));
+      expect(await screen.findByText(/duplicate hole number 1/)).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("radio", { name: "Enter manually" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+
+      expect(screen.queryByText(/duplicate hole number 1/)).not.toBeInTheDocument();
+    });
+
     it("submits the correctly-shaped payload after a CSV-populated holes table, exactly like a manual entry would", async () => {
       const { onSubmit } = renderForm();
       await userEvent.type(screen.getByLabelText("Name"), "White");

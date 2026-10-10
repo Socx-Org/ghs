@@ -134,6 +134,16 @@ export function TeeConfigurationForm({ initialValues, onSubmit, onCancel, submit
       // a bad upload must never clobber whatever was already there
       // (matching CourseCsvImportForm/RoundHoleCsvImportForm's own
       // "leave existing state untouched on a failed parse" convention).
+    } finally {
+      // Review finding, PR #230: unlike CourseCsvImportForm/
+      // RoundHoleCsvImportForm (which only clear the input via their own
+      // explicit "Choose a different file" button), this form has no
+      // separate reset button -- the file input is always sitting there,
+      // directly re-choosable. Without clearing it here, re-selecting
+      // the IDENTICAL file (e.g. to revert after manually editing a row)
+      // is a no-op: a file input's own onChange only fires on a change,
+      // and an unchanged selection isn't one.
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -167,7 +177,16 @@ export function TeeConfigurationForm({ initialValues, onSubmit, onCancel, submit
             name="holes-entry-mode"
             value={holesEntryMode}
             onChange={(next) => {
-              if (next === "manual" || next === "csv") setHolesEntryMode(next);
+              if (next !== "manual" && next !== "csv") return;
+              setHolesEntryMode(next);
+              // Review finding, PR #230: without this, a structural
+              // parse error survives a round trip through "Enter
+              // manually" and back -- the Alert unmounts (its whole
+              // block is CSV-mode-only) but reappears on return even
+              // though the file input is empty again and no new upload
+              // has happened, misleadingly implying the CURRENT
+              // (empty) selection is the problem.
+              setCsvError(null);
             }}
             options={[
               { value: "manual", label: "Enter manually" },
