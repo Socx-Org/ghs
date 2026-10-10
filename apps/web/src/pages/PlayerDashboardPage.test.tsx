@@ -329,7 +329,11 @@ describe("PlayerDashboardPage", () => {
 
       renderDashboard();
 
-      expect(await screen.findByText("2.1 putts/round")).toBeInTheDocument();
+      // ghs#227: "2.1" (the centre label) and "putts/round" (the
+      // caption) are now two separate text nodes, not one combined
+      // headline string.
+      expect(await screen.findByText("2.1")).toBeInTheDocument();
+      expect(screen.getByText("putts/round")).toBeInTheDocument();
       expect(screen.getByText("Putting")).toBeInTheDocument();
       // 2-putt = puttsHolesCount(10) - 3 - 2 = 5 holes -> 50%.
       expect(screen.getByText("50%")).toBeInTheDocument();
@@ -373,7 +377,8 @@ describe("PlayerDashboardPage", () => {
 
       renderDashboard();
 
-      expect(await screen.findByText("2 putts/round")).toBeInTheDocument();
+      expect(await screen.findByText("2")).toBeInTheDocument();
+      expect(screen.getByText("putts/round")).toBeInTheDocument();
       // 1-putt: 3/10 -> 30%. 2-putt (remainder): (10-3-2)/10 -> 50%.
       expect(screen.getByText("30%")).toBeInTheDocument();
       expect(screen.getByText("50%")).toBeInTheDocument();

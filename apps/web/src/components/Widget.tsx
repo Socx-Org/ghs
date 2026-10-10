@@ -37,9 +37,12 @@ export type WidgetStatus = "loading" | "error" | "empty" | "idle" | "ready";
 // silently produce an unstyled grid (real risk, not hypothetical -- see
 // the acceptance criteria on ghs#175). Same technique as Avatar's
 // SIZE_CLASSES and Badge's VARIANT_CLASSES. 2 was missing from #175's
-// own list despite the Player Dashboard's Row 3 (design doc section B)
-// needing it for GIR/Sand/Penalties (6+2+2+2=12) -- found while building
-// that row (ghs#178), not a hypothetical gap.
+// own list despite the Player Dashboard's then-Row 3 (design doc
+// section B) needing it for GIR/Sand/Penalties (6+2+2+2=12) -- found
+// while building that row (ghs#178), not a hypothetical gap. That exact
+// row no longer exists (ghs#227 moved Putting/GIR/Sand/Penalties onto 4
+// equal lg:3 columns instead), but 2 stays -- still a generally useful
+// span, not specific to the row that originally required it.
 type ColSpanValue = 2 | 3 | 4 | 6 | 8 | 12;
 
 export interface WidgetColSpan {
