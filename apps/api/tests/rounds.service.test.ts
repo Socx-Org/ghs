@@ -363,7 +363,7 @@ function fakeRepository(): RoundsRepository & { getCallCount: number; getPlayerS
         roundsCount: 0, coursesCount: 0, statsWindowRoundsCount: 0, holesCount: 0, girPercentage: null,
         fairwayHitPercentage: null, fairwayMissedLeftPercentage: null, fairwayMissedRightPercentage: null,
         puttsPerRound: null, puttsHolesCount: 0, onePuttHoles: 0, threePlusPuttHoles: 0,
-        penaltiesPerRound: null, sandInteractionPercentage: null,
+        penaltiesPerRound: null, sandInteractionPercentage: null, penaltyFreeHolesPercentage: null,
       };
     },
     async getTopCourses() { throw new Error("not used by these tests"); },

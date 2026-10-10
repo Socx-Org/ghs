@@ -23,6 +23,7 @@ export * from "./Widget";
 export * from "./DashboardGrid";
 export * from "./KpiStat";
 export * from "./SegmentedBar";
+export * from "./DonutStat";
 export * from "./RankingList";
 export * from "./Modal";
 export * from "./AppHeader";

@@ -33,6 +33,7 @@ import {
   CardHeader,
   Checkbox,
   DashboardGrid,
+  DonutStat,
   EmptyState,
   FormField,
   HandicapTrendWidget,
@@ -1017,6 +1018,20 @@ export default function ComponentsCatalogue() {
                     { label: "Missed right", value: 25, colorClass: "bg-warning" },
                   ]}
                 />
+              </Widget>
+            </div>
+          </Example>
+
+          <Example label="DonutStat (ghs#225) -- plain hit/miss, present/absent splits (GIR/Sand/Penalties), unlike SegmentedBar's spatially-ordered segments above">
+            <div className="grid max-w-md grid-cols-3 gap-4">
+              <Widget title="GIR" status={widgetStatus} errorMessage="Couldn't load GIR." emptyState={<EmptyState title="No GIR data yet" />}>
+                <DonutStat value={62} primaryLabel="Hit" secondaryLabel="Missed" />
+              </Widget>
+              <Widget title="Sand" status={widgetStatus} errorMessage="Couldn't load sand." emptyState={<EmptyState title="No sand data yet" />}>
+                <DonutStat value={85} primaryLabel="No interaction" secondaryLabel="Sand interaction" />
+              </Widget>
+              <Widget title="Penalties" status={widgetStatus} errorMessage="Couldn't load penalties." emptyState={<EmptyState title="No penalty data yet" />}>
+                <DonutStat value={78} primaryLabel="Penalty-free" secondaryLabel="Penalty" caption="1.2/round" />
               </Widget>
             </div>
           </Example>

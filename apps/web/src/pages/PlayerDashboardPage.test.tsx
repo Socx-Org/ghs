@@ -105,6 +105,7 @@ function statsFixture(overrides: Partial<PlayerStats> = {}): PlayerStats {
     threePlusPuttHoles: 2,
     penaltiesPerRound: 1.5,
     sandInteractionPercentage: 20,
+    penaltyFreeHolesPercentage: 70,
     ...overrides,
   };
 }
@@ -273,8 +274,9 @@ describe("PlayerDashboardPage", () => {
       // Waits for the real, data-dependent GIR value -- the info button
       // itself renders in every status (including before stats has
       // loaded), so finding it alone wouldn't prove `stats` is populated
-      // yet.
-      await screen.findByText("40%");
+      // yet. findAllByText, not findByText: ghs#225's DonutStat renders
+      // "40%" twice (its own centre label and the real <dl> legend).
+      await screen.findAllByText("40%");
       const infoButton = screen.getByRole("button", { name: "About GIR" });
 
       // Fake timers only AFTER the async fetch above has resolved --
@@ -361,7 +363,12 @@ describe("PlayerDashboardPage", () => {
         // 18 real holes, but only 10 have putts recorded. If the
         // denominator were holesCount (18), 1-putt would read ~17%
         // instead of the real 30% (3 of 10 putts-holes).
-        stats: { data: statsFixture({ holesCount: 18, puttsHolesCount: 10, onePuttHoles: 3, threePlusPuttHoles: 2, puttsPerRound: 2.0, fairwayHitPercentage: 88 }) },
+        // ghs#225: penaltyFreeHolesPercentage explicitly moved off its
+        // statsFixture default (70, whose 30% secondary segment would
+        // otherwise collide with this test's own real 30% assertion
+        // below) -- same collision-avoidance reasoning as
+        // fairwayHitPercentage's own override on this line.
+        stats: { data: statsFixture({ holesCount: 18, puttsHolesCount: 10, onePuttHoles: 3, threePlusPuttHoles: 2, puttsPerRound: 2.0, fairwayHitPercentage: 88, penaltyFreeHolesPercentage: 10 }) },
       }));
 
       renderDashboard();
@@ -372,25 +379,48 @@ describe("PlayerDashboardPage", () => {
       expect(screen.getByText("50%")).toBeInTheDocument();
     });
 
-    it("GIR/Sand/Penalties render their own real percentages/averages, Sand labelled 'Sand interaction' not a shot count (ghs#101)", async () => {
+    it("ghs#225: GIR/Sand/Penalties render 2-segment donuts from their own real percentages, Sand's favourable segment inverted to 'No interaction' (not a shot count, ghs#101)", async () => {
       mock.onGet("/dashboard/player").reply(200, dashboardResponse({
-        stats: { data: statsFixture({ girPercentage: 45, sandInteractionPercentage: 15, penaltiesPerRound: 0.5 }) },
+        stats: { data: statsFixture({ girPercentage: 45, sandInteractionPercentage: 15, penaltiesPerRound: 0.5, penaltyFreeHolesPercentage: 72 }) },
       }));
 
       renderDashboard();
 
-      expect(await screen.findByText("45%")).toBeInTheDocument();
-      // Selector-scoped: KpiStat's own <dt> label duplicates "GIR" as the
-      // widget's title, both literally "GIR".
-      expect(screen.getByText("GIR", { selector: "h3" })).toBeInTheDocument();
-      // "Sand interaction" is the widget title AND the KpiStat label --
-      // no collision here since it's a different string from the
-      // widget's own h3 (unlike GIR/Penalties, whose title and label are
-      // identical).
-      expect(screen.getByText("Sand interaction")).toBeInTheDocument();
-      expect(screen.getByText("15%")).toBeInTheDocument();
-      expect(screen.getByText("Penalties", { selector: "h3" })).toBeInTheDocument();
-      expect(screen.getByText("0.5/round")).toBeInTheDocument();
+      // Widget titles render in every status (including before stats
+      // has loaded, same reasoning as the ghs#209 tooltip test above),
+      // so awaiting the title alone wouldn't prove `stats` is populated
+      // yet -- the real percentage text only renders once DonutStat
+      // itself mounts.
+      await screen.findByText("45%", { selector: "dd" });
+
+      // Every widget's root container shares Widget's own "rounded-lg"
+      // class -- scoped `within` it, not a bare screen.getByText, since
+      // FIR's existing SegmentedBar (ghs#182) ALSO has a "Hit" segment:
+      // without scoping, GIR's "Hit" and FIR's "Hit" collide as two
+      // matches for the exact same text, on the same page.
+      const girWidget = within(screen.getByText("GIR", { selector: "h3" }).closest(".rounded-lg")!);
+      // DonutStat renders each percentage twice (its own aria-hidden
+      // centre label AND the real accessible <dl> legend) -- see
+      // DonutStat.test.tsx's own reasoning for asserting >= 1 rather
+      // than exactly 1.
+      expect(girWidget.getAllByText("45%").length).toBeGreaterThanOrEqual(1);
+      expect(girWidget.getByText("Hit")).toBeInTheDocument();
+      expect(girWidget.getByText("Missed")).toBeInTheDocument();
+
+      // Sand: DonutStat's `value` is the FAVOURABLE share, so the
+      // widget passes 100 - sandInteractionPercentage (15) = 85 as the
+      // "No interaction" segment -- the raw 15% never appears as the
+      // donut's primary value, only as the (100 - 85) secondary one.
+      const sandWidget = within(screen.getByText("Sand", { selector: "h3" }).closest(".rounded-lg")!);
+      expect(sandWidget.getAllByText("85%").length).toBeGreaterThanOrEqual(1);
+      expect(sandWidget.getByText("No interaction")).toBeInTheDocument();
+      expect(sandWidget.getByText("Sand interaction")).toBeInTheDocument();
+
+      const penaltiesWidget = within(screen.getByText("Penalties", { selector: "h3" }).closest(".rounded-lg")!);
+      expect(penaltiesWidget.getAllByText("72%").length).toBeGreaterThanOrEqual(1);
+      expect(penaltiesWidget.getByText("Penalty-free")).toBeInTheDocument();
+      expect(penaltiesWidget.getByText("Penalty", { selector: "dt" })).toBeInTheDocument();
+      expect(penaltiesWidget.getByText("0.5/round")).toBeInTheDocument();
     });
 
     it("every stats widget shows a real, specific empty state when the player has no approved rounds yet -- not a bare 'No data'", async () => {
@@ -408,11 +438,15 @@ describe("PlayerDashboardPage", () => {
       expect(await screen.findByText("Play and get a round approved to see your activity here.")).toBeInTheDocument();
       expect(screen.getByText("No fairway data yet")).toBeInTheDocument();
       expect(screen.getByText("No putting data yet")).toBeInTheDocument();
-      // GIR/Sand/Penalties each use EmptyState's compact default (title
-      // only); Activity uses the same title text alongside its own
-      // longer description above -- 4 occurrences of the shared title,
-      // not 3.
-      expect(screen.getAllByText("No rounds yet")).toHaveLength(4);
+      // ghs#225: GIR/Sand/Penalties each now have their OWN specific
+      // empty title (mirroring FIR/Putting's existing convention),
+      // replacing the generic shared "No rounds yet" they used while
+      // still a bare KpiStat -- Activity is the only widget left using
+      // that title now.
+      expect(screen.getAllByText("No rounds yet")).toHaveLength(1);
+      expect(screen.getByText("No GIR data yet")).toBeInTheDocument();
+      expect(screen.getByText("No sand data yet")).toBeInTheDocument();
+      expect(screen.getByText("No penalty data yet")).toBeInTheDocument();
     });
 
     it("per-section failure isolation, end to end: a failed stats section shows error only on the stats-derived widgets, leaving Handicap Trend and Recent Rounds completely unaffected (ghs#176)", async () => {

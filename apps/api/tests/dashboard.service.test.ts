@@ -31,7 +31,7 @@ const SAMPLE_ROUNDS: PlayerRoundListItem[] = [
 const SAMPLE_STATS: PlayerStats = {
   roundsCount: 1, coursesCount: 1, statsWindowRoundsCount: 1, holesCount: 18, girPercentage: 50, fairwayHitPercentage: 60,
   fairwayMissedLeftPercentage: 20, fairwayMissedRightPercentage: 20, puttsPerRound: 32, puttsHolesCount: 18,
-  onePuttHoles: 3, threePlusPuttHoles: 1, penaltiesPerRound: 1, sandInteractionPercentage: 10,
+  onePuttHoles: 3, threePlusPuttHoles: 1, penaltiesPerRound: 1, sandInteractionPercentage: 10, penaltyFreeHolesPercentage: 90,
 };
 
 const SAMPLE_ROLE_BREAKDOWN: UserRoleBreakdown = { total: 10, player: 7, admin: 2, superAdmin: 1 };

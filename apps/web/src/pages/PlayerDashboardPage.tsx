@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Activity as ActivityIcon, CircleDot, Plus, Target } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { Button, DashboardGrid, EmptyState, HandicapTrendWidget, KpiStat, RecentRoundsWidget, SegmentedBar, Widget } from "../components";
+import { Button, DashboardGrid, DonutStat, EmptyState, HandicapTrendWidget, KpiStat, RecentRoundsWidget, SegmentedBar, Widget } from "../components";
 import { ApiError, getPlayerDashboard } from "../lib/api";
 import type { PlayerStats } from "../types/domain";
 
@@ -100,6 +100,20 @@ export default function PlayerDashboardPage() {
   // specific empty state these widgets already have.
   const firStatus: SectionStatus = statsStatus === "ready" && stats?.fairwayHitPercentage === null ? "empty" : statsStatus;
   const puttingStatus: SectionStatus = statsStatus === "ready" && stats?.puttsHolesCount === 0 ? "empty" : statsStatus;
+  // ghs#225: same reasoning as firStatus/puttingStatus above -- GIR/
+  // Sand/Penalties became real 2-segment donuts this issue, and a donut
+  // has no sensible way to render a null percentage (unlike KpiStat's
+  // old plain-text "--"), so each needs its own empty check on top of
+  // statsStatus, not just the generic "any approved rounds at all"
+  // check. In practice girPercentage/sandInteractionPercentage/
+  // penaltyFreeHolesPercentage are only null when holesCount is 0,
+  // which (every approved round has real hole_scores by the time it's
+  // approved) is only every actually possible for a brand-new player
+  // statsStatus's own "empty" branch already catches -- these exist for
+  // defensive correctness, not a reachable-today gap.
+  const girStatus: SectionStatus = statsStatus === "ready" && stats?.girPercentage === null ? "empty" : statsStatus;
+  const sandStatus: SectionStatus = statsStatus === "ready" && stats?.sandInteractionPercentage === null ? "empty" : statsStatus;
+  const penaltiesStatus: SectionStatus = statsStatus === "ready" && stats?.penaltyFreeHolesPercentage === null ? "empty" : statsStatus;
 
   return (
     <DashboardGrid className="mx-auto w-full max-w-[1680px] p-4 sm:p-6">
@@ -203,39 +217,49 @@ export default function PlayerDashboardPage() {
       <div className="col-span-12 flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1 md:contents">
         <Widget
           title="GIR"
-          colSpan={{ md: 4, lg: 2 }}
+          colSpan={{ md: 4, lg: 3 }}
           className="min-w-[70%] shrink-0 snap-start md:min-w-0"
-          status={statsStatus}
+          status={girStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
-          emptyState={<EmptyState title="No rounds yet" />}
+          emptyState={<EmptyState title="No GIR data yet" description="Approved rounds will show up here." />}
           infoTooltip={`The share of holes hit in regulation, across ${statsWindowPhrase(stats)}.`}
         >
-          {stats && <KpiStat label="GIR" value={percentLabel(stats.girPercentage)} />}
+          {stats && <DonutStat value={stats.girPercentage ?? 0} primaryLabel="Hit" secondaryLabel="Missed" />}
         </Widget>
         <Widget
           title="Sand"
-          colSpan={{ md: 4, lg: 2 }}
+          colSpan={{ md: 4, lg: 3 }}
           className="min-w-[70%] shrink-0 snap-start md:min-w-0"
-          status={statsStatus}
+          status={sandStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
-          emptyState={<EmptyState title="No rounds yet" />}
+          emptyState={<EmptyState title="No sand data yet" description="Approved rounds will show up here." />}
           infoTooltip={`The share of holes with a sand interaction (e.g. a bunker shot), across ${statsWindowPhrase(stats)}.`}
         >
           {/* "Sand interaction", not "sand shots" -- in_sand is a
               per-hole boolean, not a shot count (PlayerStats's own doc
-              comment, ghs#101). */}
-          {stats && <KpiStat label="Sand interaction" value={percentLabel(stats.sandInteractionPercentage)} />}
+              comment, ghs#101). The donut's favourable (green) segment
+              is "No interaction", not "Interaction" -- DonutStat's
+              `value` is the FAVOURABLE share, so this is deliberately
+              100 - sandInteractionPercentage, not the raw field itself. */}
+          {stats && <DonutStat value={100 - (stats.sandInteractionPercentage ?? 0)} primaryLabel="No interaction" secondaryLabel="Sand interaction" />}
         </Widget>
         <Widget
           title="Penalties"
-          colSpan={{ md: 4, lg: 2 }}
+          colSpan={{ md: 4, lg: 3 }}
           className="min-w-[70%] shrink-0 snap-start md:min-w-0"
-          status={statsStatus}
+          status={penaltiesStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
-          emptyState={<EmptyState title="No rounds yet" />}
-          infoTooltip={`Your average number of penalty strokes per round, across ${statsWindowPhrase(stats)}.`}
+          emptyState={<EmptyState title="No penalty data yet" description="Approved rounds will show up here." />}
+          infoTooltip={`The share of holes with zero penalty strokes, and your average penalty strokes per round, across ${statsWindowPhrase(stats)}.`}
         >
-          {stats && <KpiStat label="Penalties" value={stats.penaltiesPerRound === null ? "--" : `${stats.penaltiesPerRound}/round`} />}
+          {stats && (
+            <DonutStat
+              value={stats.penaltyFreeHolesPercentage ?? 0}
+              primaryLabel="Penalty-free"
+              secondaryLabel="Penalty"
+              caption={stats.penaltiesPerRound === null ? undefined : `${stats.penaltiesPerRound}/round`}
+            />
+          )}
         </Widget>
       </div>
     </DashboardGrid>

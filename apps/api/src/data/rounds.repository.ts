@@ -282,6 +282,14 @@ export interface PlayerStats {
   threePlusPuttHoles: number;
   penaltiesPerRound: number | null;
   sandInteractionPercentage: number | null;
+  // ghs#225: "% of holes with ZERO penalty strokes" -- the holes-based
+  // hit/miss split a donut needs, same shape as girPercentage/
+  // sandInteractionPercentage, computed from the same hole_scores.
+  // penalties column penaltiesPerRound already sums. Named for the
+  // favourable outcome ("penalty-free"), not "holes with a penalty" --
+  // same framing choice girPercentage already makes (the favourable
+  // "hit" side, not "missed").
+  penaltyFreeHolesPercentage: number | null;
 }
 
 // ghs#180 (design doc sections C/E): the Admin Dashboard's Top Courses
@@ -938,6 +946,13 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         three_plus_putt_holes: number;
         total_putts: number;
         total_penalties: number;
+        // ghs#225: holes with at least one penalty stroke -- the
+        // denominator-pair for penaltyFreeHolesPercentage, same
+        // holes_count-based shape as gir_holes/sand_holes. penalties
+        // itself is NOT nullable per hole (unlike putts/fairway_result,
+        // defaults to 0 at the schema level), so unlike putts_holes_count
+        // this needs no separate "how many holes have real data" count.
+        holes_with_penalty: number;
       }>(
         `WITH windowed_rounds AS (
            SELECT r.id
@@ -964,7 +979,8 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
            count(*) FILTER (WHERE hs.putts = 1)::int AS one_putt_holes,
            count(*) FILTER (WHERE hs.putts >= 3)::int AS three_plus_putt_holes,
            coalesce(sum(hs.putts) FILTER (WHERE hs.putts IS NOT NULL), 0)::int AS total_putts,
-           coalesce(sum(hs.penalties), 0)::int AS total_penalties
+           coalesce(sum(hs.penalties), 0)::int AS total_penalties,
+           count(*) FILTER (WHERE hs.penalties > 0)::int AS holes_with_penalty
          FROM windowed_rounds wr
          JOIN hole_scores hs ON hs.round_id = wr.id`,
         [playerId, windowSize],
@@ -974,6 +990,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         rounds_count: 0, courses_count: 0, stats_window_rounds_count: 0, holes_count: 0, gir_holes: 0, fairway_relevant_holes: 0,
         fairway_hit_holes: 0, fairway_missed_left_holes: 0, fairway_missed_right_holes: 0,
         sand_holes: 0, putts_holes_count: 0, one_putt_holes: 0, three_plus_putt_holes: 0, total_putts: 0, total_penalties: 0,
+        holes_with_penalty: 0,
       };
 
       // Null rather than NaN/a misleading 0 whenever there's nothing to
@@ -1019,6 +1036,7 @@ export function createRoundsRepository(pool: Pool): RoundsRepository {
         threePlusPuttHoles: row.three_plus_putt_holes,
         penaltiesPerRound: averagePerRound(row.total_penalties),
         sandInteractionPercentage: percentage(row.sand_holes, row.holes_count),
+        penaltyFreeHolesPercentage: percentage(row.holes_count - row.holes_with_penalty, row.holes_count),
       };
     },
 
