@@ -214,10 +214,17 @@ export default function PlayerDashboardPage() {
           display:contents, vanishing from layout entirely so its three
           Widget children become direct DashboardGrid items in their own
           right (each carrying its own md/lg colSpan below). */}
+      {/* Review finding, PR #226: lg stays 2 (not widened for the new
+          donut), same as before this issue -- Putting (lg:6) + GIR +
+          Sand + Penalties share this grid row at the lg breakpoint
+          (Widget.tsx's own documented Row 3 invariant, 6+2+2+2=12); lg:3
+          would sum to 15, overflowing DashboardGrid's fixed 12 columns
+          and wrapping Penalties onto its own row. The donut fits fine
+          at this width (h-20 w-20, verified via real E2E). */}
       <div className="col-span-12 flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1 md:contents">
         <Widget
           title="GIR"
-          colSpan={{ md: 4, lg: 3 }}
+          colSpan={{ md: 4, lg: 2 }}
           className="min-w-[70%] shrink-0 snap-start md:min-w-0"
           status={girStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
@@ -228,7 +235,7 @@ export default function PlayerDashboardPage() {
         </Widget>
         <Widget
           title="Sand"
-          colSpan={{ md: 4, lg: 3 }}
+          colSpan={{ md: 4, lg: 2 }}
           className="min-w-[70%] shrink-0 snap-start md:min-w-0"
           status={sandStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
@@ -245,7 +252,7 @@ export default function PlayerDashboardPage() {
         </Widget>
         <Widget
           title="Penalties"
-          colSpan={{ md: 4, lg: 3 }}
+          colSpan={{ md: 4, lg: 2 }}
           className="min-w-[70%] shrink-0 snap-start md:min-w-0"
           status={penaltiesStatus}
           errorMessage={isNetworkError ? networkErrorMessage : undefined}
