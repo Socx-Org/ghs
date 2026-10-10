@@ -207,12 +207,21 @@ export default function PlayerDashboardPage() {
             single percentage that represents a 3-way split the way
             GIR/Sand/Penalties' 2-way splits each have one. The existing
             puttsPerRound average fills that role instead, same as it
-            did as SegmentedBar's own headline; "putts/round" moves to
-            the caption slot (Penalties' own existing convention). */}
+            did as SegmentedBar's own headline.
+            Review finding, PR #228: centerLabel sits inside DonutStat's
+            own aria-hidden chart container (decorative, like GIR/Sand/
+            Penalties' own centerLabel) -- for those three that's fine,
+            since the same percentage is ALSO in the real accessible
+            <dl> legend, but puttsPerRound appears nowhere else here, so
+            a bare "putts/round" caption (no number) would silently drop
+            it for screen-reader users, a real regression from
+            SegmentedBar's own accessible "2.1 putts/round" headline.
+            The caption carries the full phrase instead, same
+            convention Penalties' own caption below already uses. */}
         {stats && (
           <DonutStat
             centerLabel={stats.puttsPerRound === null ? "--" : stats.puttsPerRound}
-            caption="putts/round"
+            caption={stats.puttsPerRound === null ? undefined : `${stats.puttsPerRound} putts/round`}
             segments={[
               { label: "1-putt", value: (stats.onePuttHoles / stats.puttsHolesCount) * 100, colorClass: "bg-success" },
               { label: "2-putt", value: (twoPuttHoles(stats) / stats.puttsHolesCount) * 100, colorClass: "bg-primary" },
