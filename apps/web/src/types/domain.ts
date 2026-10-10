@@ -180,6 +180,10 @@ export interface PlayerStats {
   threePlusPuttHoles: number;
   penaltiesPerRound: number | null;
   sandInteractionPercentage: number | null;
+  // ghs#225: "% of holes with ZERO penalty strokes" -- named for the
+  // favourable outcome, same framing choice girPercentage already makes
+  // (the "hit" side, not "missed"). Powers the Penalties donut.
+  penaltyFreeHolesPercentage: number | null;
 }
 
 // Mirrors apps/api/src/application/dashboard.service.ts's

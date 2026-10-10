@@ -786,6 +786,7 @@ test("getPlayerStats (ghs#101/#176): real aggregation math over approved rounds'
   assert.equal(stats.threePlusPuttHoles, 2, "the putts=3 hole and the putts=4 hole both count");
   assert.equal(stats.puttsPerRound, 4.3, "(1+2+3+1+4+2)=13 putts over 3 rounds -> 4.333... -> 4.3");
   assert.equal(stats.penaltiesPerRound, 1.0, "(0+1+0+0+2+0)=3 penalties over 3 rounds -> 1.0");
+  assert.equal(stats.penaltyFreeHolesPercentage, 66.7, "2 of 6 holes have a penalty (round1's hole 2, round2's hole 2) -> 4 penalty-free -> 66.7%");
 });
 
 test("getPlayerStats (ghs#178 review fix, PR #184): puttsHolesCount excludes holes with strokes but no putts recorded, and puttsPerRound is null (not a misleading 0) when NO hole has putts data", async () => {
@@ -844,6 +845,7 @@ test("getPlayerStats (ghs#101): a player with no approved rounds gets real zeros
   assert.equal(stats.puttsPerRound, null);
   assert.equal(stats.penaltiesPerRound, null);
   assert.equal(stats.sandInteractionPercentage, null);
+  assert.equal(stats.penaltyFreeHolesPercentage, null);
   assert.equal(stats.onePuttHoles, 0);
   assert.equal(stats.threePlusPuttHoles, 0);
 });
@@ -882,11 +884,13 @@ test("getPlayerStats (ghs#209): windowSize caps the hole-level aggregation to th
   assert.equal(windowed.girPercentage, 100.0, "both windowed holes hit GIR; the two older, missed-GIR holes are excluded");
   assert.equal(windowed.puttsPerRound, 1.0, "(1+1)=2 putts over the 2 windowed rounds -> 1.0, not diluted by the older rounds' 3-putt holes");
   assert.equal(windowed.penaltiesPerRound, 0, "both windowed rounds have 0 penalties; the older rounds' penalties are excluded");
+  assert.equal(windowed.penaltyFreeHolesPercentage, 100.0, "both windowed holes have 0 penalties; the two older, penalised holes are excluded");
 
   const lifetime = await roundsRepo.getPlayerStats(player.id, 100);
   assert.equal(lifetime.statsWindowRoundsCount, 4, "a window larger than the player's real history includes all of it");
   assert.equal(lifetime.holesCount, 4);
   assert.equal(lifetime.girPercentage, 50.0, "2 of 4 holes -> 50%, once the older rounds are back in scope");
+  assert.equal(lifetime.penaltyFreeHolesPercentage, 50.0, "2 of 4 holes (oldest/second) have a penalty, once back in scope -> 50% penalty-free");
 });
 
 test("getTopCourses (ghs#180): real GROUP BY ranking over approved rounds, ordered by count, excluding pending rounds and soft-deleted courses", async () => {
