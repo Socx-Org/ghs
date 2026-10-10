@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
 import { Save } from "lucide-react";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -8,8 +9,10 @@ import { FormField } from "../FormField";
 import { Input } from "../Input";
 import { Select } from "../Select";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "../Table";
+import { ToggleGroup } from "../ToggleGroup";
 import { emptyHole, teeConfigurationSchema, toTeeConfigurationInput } from "../../lib/tee-configuration-schema";
 import type { TeeConfigurationFormInput, TeeConfigurationFormOutput } from "../../lib/tee-configuration-schema";
+import { TeeConfigurationHolesCsvParseError, parseTeeConfigurationHolesCsv } from "../../lib/tee-configuration-holes-csv";
 import type { TeeConfiguration, TeeConfigurationInput } from "../../types/domain";
 
 // ghs#112: the one real tee-configuration create/edit form this app
@@ -28,6 +31,17 @@ import type { TeeConfiguration, TeeConfigurationInput } from "../../types/domain
 // manual entry goes through, without a component file needing to export a
 // plain schema/function alongside its component (which breaks Fast
 // Refresh).
+//
+// ghs#229: a second HOLES entry mode, "Load from CSV" -- name/holeCount/
+// courseRating/slopeRating stay as real form fields either way (resolved
+// with the user: NOT repeated per CSV row, unlike ghs#155's course-level
+// importer). A successful parse just calls the same `replace()` the
+// holeCount-resize effect below already uses, so this table doubles as
+// both the CSV preview AND the final, directly-correctable holes data --
+// no second, parallel read-only preview list needed, unlike
+// CourseCsvImportForm/RoundHoleCsvImportForm (those each juggle several
+// tee configurations/holes with independent per-row outcomes; this form
+// only ever has the one set of holes already on screen).
 
 function toDefaultValues(initialValues: TeeConfiguration | undefined): TeeConfigurationFormInput {
   if (!initialValues) {
@@ -97,6 +111,32 @@ export function TeeConfigurationForm({ initialValues, onSubmit, onCancel, submit
 
   const holesHaveErrors = Boolean(errors.holes);
 
+  // ghs#229: component-local, independent of react-hook-form -- which
+  // mode is selected has no effect on the schema/submit path at all,
+  // only on how the SAME `holes` field array gets populated.
+  const [holesEntryMode, setHolesEntryMode] = useState<"manual" | "csv">("manual");
+  const [csvError, setCsvError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleCsvFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    setCsvError(null);
+    if (!file) return;
+    try {
+      const text = await file.text();
+      // holeCount is already a real, validated 9|18 by this point --
+      // it's a <Select> with only those two <option>s, never free text.
+      const parsedHoles = parseTeeConfigurationHolesCsv(text, Number(holeCount) as 9 | 18);
+      replace(parsedHoles);
+    } catch (error) {
+      setCsvError(error instanceof TeeConfigurationHolesCsvParseError ? error.message : "Couldn't read this file. Try again.");
+      // Deliberately does NOT replace() the holes array on failure --
+      // a bad upload must never clobber whatever was already there
+      // (matching CourseCsvImportForm/RoundHoleCsvImportForm's own
+      // "leave existing state untouched on a failed parse" convention).
+    }
+  }
+
   return (
     <form className="flex flex-col gap-6" onSubmit={handleSubmit(submit)} noValidate>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -121,7 +161,34 @@ export function TeeConfigurationForm({ initialValues, onSubmit, onCancel, submit
       </div>
 
       <div>
-        <h3 className="mb-2 text-sm font-medium text-text">Holes</h3>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-sm font-medium text-text">Holes</h3>
+          <ToggleGroup
+            name="holes-entry-mode"
+            value={holesEntryMode}
+            onChange={(next) => {
+              if (next === "manual" || next === "csv") setHolesEntryMode(next);
+            }}
+            options={[
+              { value: "manual", label: "Enter manually" },
+              { value: "csv", label: "Load from CSV" },
+            ]}
+          />
+        </div>
+
+        {holesEntryMode === "csv" && (
+          <div className="mb-4">
+            <FormField label="CSV file" helpText="One row per hole -- hole_number, distance_yards, par, stroke_index.">
+              <Input ref={fileInputRef} type="file" accept=".csv,text/csv" onChange={handleCsvFileChange} />
+            </FormField>
+            {csvError && (
+              <Alert variant="error" className="mt-2">
+                {csvError}
+              </Alert>
+            )}
+          </div>
+        )}
+
         {holesHaveErrors && <Alert variant="error">Check the highlighted hole fields below -- distance, par, and stroke index are all required.</Alert>}
         <Table className="mt-2">
           <TableHead>
