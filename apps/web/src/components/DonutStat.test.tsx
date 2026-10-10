@@ -32,7 +32,7 @@ describe("DonutStat", () => {
 
   it("omits the caption paragraph entirely when none is given", () => {
     const { container } = render(<DonutStat value={78} primaryLabel="Penalty-free" secondaryLabel="Penalty" />);
-    expect(container.querySelector("dl p")).not.toBeInTheDocument();
+    expect(container.querySelector("p")).not.toBeInTheDocument();
   });
 
   it("clamps an out-of-range value to [0, 100] rather than producing a negative secondary segment (same reasoning as SegmentedBar's own clampPercent, PR #182)", () => {

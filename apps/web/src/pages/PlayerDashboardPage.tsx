@@ -106,11 +106,11 @@ export default function PlayerDashboardPage() {
   // old plain-text "--"), so each needs its own empty check on top of
   // statsStatus, not just the generic "any approved rounds at all"
   // check. In practice girPercentage/sandInteractionPercentage/
-  // penaltyFreeHolesPercentage are only null when holesCount is 0,
-  // which (every approved round has real hole_scores by the time it's
-  // approved) is only every actually possible for a brand-new player
-  // statsStatus's own "empty" branch already catches -- these exist for
-  // defensive correctness, not a reachable-today gap.
+  // penaltyFreeHolesPercentage are only null when holesCount is 0 --
+  // since every approved round has real hole_scores by the time it's
+  // approved, that's only ever possible for a brand-new player, a case
+  // statsStatus's own "empty" branch already catches. These three exist
+  // for defensive correctness, not a reachable-today gap.
   const girStatus: SectionStatus = statsStatus === "ready" && stats?.girPercentage === null ? "empty" : statsStatus;
   const sandStatus: SectionStatus = statsStatus === "ready" && stats?.sandInteractionPercentage === null ? "empty" : statsStatus;
   const penaltiesStatus: SectionStatus = statsStatus === "ready" && stats?.penaltyFreeHolesPercentage === null ? "empty" : statsStatus;

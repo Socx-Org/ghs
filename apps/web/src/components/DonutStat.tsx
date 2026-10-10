@@ -68,23 +68,33 @@ export function DonutStat({ value, primaryLabel, secondaryLabel, caption, classN
         <div className="absolute inset-0 flex items-center justify-center text-sm font-semibold tabular-nums text-text">{Math.round(primary)}%</div>
       </div>
 
-      <dl className="flex flex-col gap-1 text-xs">
-        <div className="flex items-center gap-1.5">
-          <dt className="flex items-center gap-1.5 text-text-muted">
-            <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-success" />
-            {primaryLabel}
-          </dt>
-          <dd className="font-medium tabular-nums text-text">{Math.round(primary)}%</dd>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <dt className="flex items-center gap-1.5 text-text-muted">
-            <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-warning" />
-            {secondaryLabel}
-          </dt>
-          <dd className="font-medium tabular-nums text-text">{Math.round(secondary)}%</dd>
-        </div>
+      <div className="flex flex-col gap-1 text-xs">
+        <dl>
+          <div className="flex items-center gap-1.5">
+            <dt className="flex items-center gap-1.5 text-text-muted">
+              <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-success" />
+              {primaryLabel}
+            </dt>
+            <dd className="font-medium tabular-nums text-text">{Math.round(primary)}%</dd>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <dt className="flex items-center gap-1.5 text-text-muted">
+              <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-warning" />
+              {secondaryLabel}
+            </dt>
+            <dd className="font-medium tabular-nums text-text">{Math.round(secondary)}%</dd>
+          </div>
+        </dl>
+        {/* Review finding: a <dl> in "div mode" (each group wrapped in
+            its own <div>, as above) may ONLY contain <div>s -- a <dl>
+            can't mix that form with a bare trailing <dd>/<p> outside
+            any group's own <div>, even though a flat (no-<div>) <dl>
+            can trail extra <dd>s onto its last group (KpiStat's own
+            secondary-line precedent). Simplest fix that stays valid
+            either way: caption sits here, as the <dl>'s own sibling,
+            not inside it at all. */}
         {caption && <p className="text-text-muted">{caption}</p>}
-      </dl>
+      </div>
     </div>
   );
 }
