@@ -12,10 +12,13 @@ describe("DonutStat", () => {
     expect(screen.getByText("Hit")).toBeInTheDocument();
     expect(screen.getByText("Missed")).toBeInTheDocument();
     // "62%" appears twice -- once as the chart's own (aria-hidden)
-    // centre label, once in the real accessible <dl> legend -- so this
-    // asserts there are at least two, rather than picking one by a
-    // selector that would make the centre label's presence untested.
-    expect(screen.getAllByText("62%").length).toBeGreaterThanOrEqual(1);
+    // centre label, once in the real accessible <dl> legend -- asserted
+    // as exactly 2, not a selector-scoped single match, so the centre
+    // label's presence is actually verified rather than merely
+    // tolerated (review finding: getAllByText already throws on zero
+    // matches, so a ">= 1" assertion here never actually distinguished
+    // "both render" from "only one does").
+    expect(screen.getAllByText("62%")).toHaveLength(2);
     expect(screen.getByText("38%")).toBeInTheDocument();
   });
 
