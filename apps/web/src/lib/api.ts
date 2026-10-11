@@ -2,7 +2,7 @@ import axios from "axios";
 import type { AxiosError, InternalAxiosRequestConfig } from "axios";
 import { getGeneration, getTokens, setTokens } from "./auth-store";
 import type { AuthTokens } from "./auth-store";
-import type { AccountProfile, ActiveUsersChartPeriod, AdminDashboard, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, DailyPcc, FairwayResult, HandicapHistoryRecord, HoleScore, PccCorrectionOutcome, PendingRoundQueueItem, PlayerDashboard, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
+import type { AccountProfile, ActiveUsersChartPeriod, AdminDashboard, AdminRoundListItem, AdminUserListItem, Course, CourseSummary, DailyPcc, FairwayResult, HandicapHistoryRecord, HoleScore, LoginAttemptListItem, PccCorrectionOutcome, PendingRoundQueueItem, PlayerDashboard, PlayerProfile, PlayerRoundListItem, Round, TeeConfiguration, TeeConfigurationInput, UserRole, UserStatus } from "../types/domain";
 
 // Relative baseURL, not an absolute VITE_API_URL env var -- the Vite dev
 // proxy (vite.config.ts) and the real deployed nginx config (ADR'd in
@@ -584,6 +584,21 @@ export interface ListAdminRoundsResult {
 // optional so every existing no-filter call is unaffected.
 export async function listAdminRounds(filter?: { teeConfigurationId?: string; playedOn?: string }): Promise<ListAdminRoundsResult> {
   const { data } = await api.get<ListAdminRoundsResult>("/admin/rounds", { params: filter });
+  return data;
+}
+
+export interface ListLoginAttemptsResult {
+  items: LoginAttemptListItem[];
+  total: number;
+}
+
+// ghs#233. No limit/offset params sent -- same "rely on the backend's
+// own default page, narrow client-side via ListView" convention as
+// listUsers/listAdminRounds above (GET /admin/login-attempts shares
+// GET /admin/users' exact default/cap-50/200 shape, see
+// admin-login-attempts.ts's own doc comment).
+export async function listLoginAttempts(): Promise<ListLoginAttemptsResult> {
+  const { data } = await api.get<ListLoginAttemptsResult>("/admin/login-attempts");
   return data;
 }
 

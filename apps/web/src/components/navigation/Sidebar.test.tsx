@@ -94,6 +94,17 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /Settings/ })).toBeInTheDocument();
   });
 
+  it("shows Login Audit only for admin/super_admin (ghs#233)", () => {
+    setTokens(tokensFor("player"));
+    renderSidebar();
+    expect(screen.queryByRole("link", { name: /Login Audit/ })).not.toBeInTheDocument();
+
+    cleanup();
+    setTokens(tokensFor("admin"));
+    renderSidebar();
+    expect(screen.getByRole("link", { name: /Login Audit/ })).toBeInTheDocument();
+  });
+
   it("shows Courses for every role, ghs#109 -- no role restriction on viewing", () => {
     setTokens(tokensFor("player"));
     renderSidebar();

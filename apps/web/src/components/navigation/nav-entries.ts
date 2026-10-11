@@ -1,4 +1,4 @@
-import { ClipboardCheck, CloudSun, History, LandPlot, LayoutDashboard, ListOrdered, Settings, Users } from "lucide-react";
+import { ClipboardCheck, CloudSun, History, LandPlot, LayoutDashboard, ListOrdered, Settings, ShieldCheck, Users } from "lucide-react";
 import type { ComponentType } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { cn } from "../../lib/cn";
@@ -52,6 +52,8 @@ export function useNavEntries(): NavEntry[] {
     // ghs#157: system settings -- maintenance mode, self-registration,
     // notification toggles.
     entries.push({ to: "/admin/settings", label: "Settings", icon: Settings });
+    // ghs#233: the login/session audit log -- backend done in ghs#231.
+    entries.push({ to: "/admin/login-attempts", label: "Login Audit", icon: ShieldCheck });
   }
   return entries;
 }

@@ -328,6 +328,36 @@ export interface AdminRoundListItem {
   pcc: number | null;
 }
 
+// ghs#231's own real failure modes, mirrored exactly (not invented) --
+// see apps/api/src/data/login-attempts.repository.ts's own doc comment.
+export type LoginAttemptOutcome = "success" | "invalid_credentials" | "account_not_active" | "mfa_required" | "invalid_mfa_code";
+
+// A session's current status, derived live server-side off
+// refresh_tokens -- never stored, and only ever present for a 'success'
+// row (see sessionStatus below).
+export type LoginSessionStatus = "active" | "expired" | "logged_out";
+
+// Mirrors apps/api/src/data/login-attempts.repository.ts's
+// LoginAttemptRecord exactly (ghs#231/#233). country/region/city stay
+// null until ghs#234 (geo-IP enrichment) lands -- the page renders "--"
+// for them today, not a special-cased loading/error state.
+export interface LoginAttemptListItem {
+  id: string;
+  email: string;
+  userId: string | null;
+  outcome: LoginAttemptOutcome;
+  ipAddress: string;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  sessionId: string | null;
+  createdAt: string;
+  // Only ever populated for a 'success' row -- null for every
+  // failure/mfa_required row, which never had a session to begin with.
+  sessionStatus: LoginSessionStatus | null;
+  sessionEndedAt: string | null;
+}
+
 // Mirrors apps/api/src/data/pcc.repository.ts's DailyPcc exactly.
 export type PccSource = "calculated" | "override";
 
