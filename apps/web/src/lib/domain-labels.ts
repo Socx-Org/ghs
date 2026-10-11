@@ -73,4 +73,9 @@ export const SESSION_STATUS_CONFIG: Record<LoginSessionStatus, { label: string; 
   logged_out: { label: "Logged out", variant: "neutral" },
 };
 
-export const SESSION_STATUS_OPTIONS = optionsFrom(SESSION_STATUS_CONFIG);
+// ghs#233 review fix: no SESSION_STATUS_OPTIONS export -- unlike
+// LOGIN_OUTCOME_OPTIONS (a real ListView filter), session status has no
+// filter of its own (it's only ever meaningful for a 'success' row, see
+// SessionStatusBadge's own doc comment) and nothing else consumes a
+// status->label option list. Add it back if a real consumer appears,
+// rather than speculatively ahead of one.

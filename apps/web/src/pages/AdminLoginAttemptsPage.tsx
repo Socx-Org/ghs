@@ -29,6 +29,17 @@ function locationLine(item: LoginAttemptListItem): string {
   return parts.length > 0 ? parts.join(", ") : "—";
 }
 
+// ghs#233 review fix: the Location column's own sort accessor -- the raw
+// nullable fields, not locationLine()'s own "—" placeholder (same
+// reasoning as AdminAccountsPage's accountSortName). String-comparing
+// against the display placeholder was brittle (a label change or real
+// data that happened to read "—" would silently break sorting) and
+// recomputed locationLine() a second time for no reason.
+function locationSortValue(item: LoginAttemptListItem): string | null {
+  const parts = [item.city, item.region, item.country].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
 function describeQueryError(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
@@ -43,7 +54,7 @@ export default function AdminLoginAttemptsPage() {
     createdAt: (item) => item.createdAt,
     outcome: (item) => item.outcome,
     ipAddress: (item) => item.ipAddress,
-    location: (item) => locationLine(item) === "—" ? null : locationLine(item),
+    location: (item) => locationSortValue(item),
     sessionEndedAt: (item) => item.sessionEndedAt,
   });
 
