@@ -41,6 +41,8 @@ export * from "./navigation/nav-entries";
 export * from "./domain/RoundStatusBadge";
 export * from "./domain/RoleBadge";
 export * from "./domain/AccountStatusBadge";
+export * from "./domain/LoginOutcomeBadge";
+export * from "./domain/SessionStatusBadge";
 export * from "./domain/RequireRole";
 export * from "./domain/HoleEntryCard";
 export * from "./domain/HolesTable";

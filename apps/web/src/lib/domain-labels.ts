@@ -1,5 +1,5 @@
 import type { BadgeVariant } from "../components/Badge";
-import type { RoundStatus, UserRole, UserStatus } from "../types/domain";
+import type { LoginAttemptOutcome, LoginSessionStatus, RoundStatus, UserRole, UserStatus } from "../types/domain";
 
 // ghs#137 review fix: the single source of GHS-specific label (+ badge
 // variant) mappings for RoundStatus/UserRole/UserStatus -- previously
@@ -50,3 +50,32 @@ export const ACCOUNT_STATUS_CONFIG: Record<UserStatus, { label: string; variant:
 };
 
 export const ACCOUNT_STATUS_OPTIONS = optionsFrom(ACCOUNT_STATUS_CONFIG);
+
+// ghs#233. success is the only non-alarming outcome; mfa_required is a
+// real, in-progress step rather than a failure, kept neutral rather than
+// warning/danger for the same reason draft/disabled above aren't either.
+export const LOGIN_OUTCOME_CONFIG: Record<LoginAttemptOutcome, { label: string; variant: BadgeVariant }> = {
+  success: { label: "Success", variant: "success" },
+  invalid_credentials: { label: "Invalid credentials", variant: "danger" },
+  account_not_active: { label: "Account not active", variant: "warning" },
+  mfa_required: { label: "MFA required", variant: "neutral" },
+  invalid_mfa_code: { label: "Invalid MFA code", variant: "danger" },
+};
+
+export const LOGIN_OUTCOME_OPTIONS = optionsFrom(LOGIN_OUTCOME_CONFIG);
+
+// ghs#233. Only ever rendered for a 'success' row (see
+// LoginAttemptListItem's own doc comment) -- every other outcome shows
+// "--" in the Status column, not one of these badges.
+export const SESSION_STATUS_CONFIG: Record<LoginSessionStatus, { label: string; variant: BadgeVariant }> = {
+  active: { label: "Active", variant: "success" },
+  expired: { label: "Expired", variant: "neutral" },
+  logged_out: { label: "Logged out", variant: "neutral" },
+};
+
+// ghs#233 review fix: no SESSION_STATUS_OPTIONS export -- unlike
+// LOGIN_OUTCOME_OPTIONS (a real ListView filter), session status has no
+// filter of its own (it's only ever meaningful for a 'success' row, see
+// SessionStatusBadge's own doc comment) and nothing else consumes a
+// status->label option list. Add it back if a real consumer appears,
+// rather than speculatively ahead of one.

@@ -6,6 +6,7 @@ import ActivationPage from "./pages/ActivationPage";
 import AdminAccountsPage from "./pages/AdminAccountsPage";
 import AdminCreateUserPage from "./pages/AdminCreateUserPage";
 import AdminDashboardPage from "./pages/AdminDashboardPage";
+import AdminLoginAttemptsPage from "./pages/AdminLoginAttemptsPage";
 import AdminPendingQueuePage from "./pages/AdminPendingQueuePage";
 import AdminRoundReviewPage from "./pages/AdminRoundReviewPage";
 import AdminRoundsListPage from "./pages/AdminRoundsListPage";
@@ -137,6 +138,10 @@ export default function AppRoutes() {
                 PUT/GET under admin-settings.ts being requireRole("admin",
                 "super_admin")-gated server-side too. */}
             <Route path="/admin/settings" element={<AdminSettingsPage />} />
+            {/* ghs#233: the login/session audit log -- backend-only
+                ghs#231/PR #232 already shipped GET /admin/login-attempts;
+                this is its first and only consumer. */}
+            <Route path="/admin/login-attempts" element={<AdminLoginAttemptsPage />} />
           </Route>
         </Route>
       </Route>
