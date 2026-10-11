@@ -120,4 +120,138 @@ describe("TeeConfigurationForm", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onSubmit).not.toHaveBeenCalled();
   });
+
+  // ghs#229: "Load from CSV" -- holes only; name/holeCount/courseRating/
+  // slopeRating stay as the same real fields above, unaffected by mode.
+  describe("Load from CSV (holes only)", () => {
+    function csvFile(text: string, name = "holes.csv") {
+      return new File([text], name, { type: "text/csv" });
+    }
+
+    const NINE_HOLE_CSV =
+      "hole_number,distance_yards,par,stroke_index\n" +
+      "1,300,5,1\n2,310,4,2\n3,320,4,3\n4,330,5,4\n5,340,4,5\n6,350,4,6\n7,360,5,7\n8,370,4,8\n9,380,4,9";
+
+    it("shows a CSV file input alongside the (still-present) manual holes table once 'Load from CSV' is selected", async () => {
+      renderForm();
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+
+      expect(screen.getByLabelText("CSV file")).toBeInTheDocument();
+      // Unlike CreateCoursePage's own CSV mode (which replaces the whole
+      // form), the holes table stays -- it doubles as the preview.
+      expect(screen.getByLabelText("Hole 1 distance in yards")).toBeInTheDocument();
+    });
+
+    it("populates the existing holes table from a valid file, matching the hole count already selected", async () => {
+      renderForm();
+      await userEvent.selectOptions(screen.getByLabelText("Holes"), "9");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+      await userEvent.upload(screen.getByLabelText("CSV file"), csvFile(NINE_HOLE_CSV));
+
+      expect(await screen.findByLabelText("Hole 1 distance in yards")).toHaveValue(300);
+      expect(screen.getByLabelText("Hole 1 par")).toHaveValue(5);
+      expect(screen.getByLabelText("Hole 1 stroke index")).toHaveValue(1);
+      expect(screen.getByLabelText("Hole 9 distance in yards")).toHaveValue(380);
+    });
+
+    it("review fix, PR #230: the file input's own value is cleared after every parse attempt, so a browser never suppresses a later re-selection of the SAME file as a no-op change", async () => {
+      // jsdom's userEvent.upload doesn't itself replicate a real
+      // browser's "re-selecting an unchanged file fires no change
+      // event" behaviour (confirmed directly: re-uploading the same
+      // File object still dispatches change in jsdom regardless of
+      // whether the input's own .value was reset first) -- so the real
+      // regression this guards against can only be reproduced in an
+      // actual browser (verified via real E2E). What IS directly,
+      // meaningfully testable here is the application code the fix
+      // actually touches: the input's own .value must be back to ""
+      // once a parse attempt (success or failure) finishes, matching
+      // CourseCsvImportForm/RoundHoleCsvImportForm's own convention.
+      renderForm();
+      await userEvent.selectOptions(screen.getByLabelText("Holes"), "9");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+      const fileInput = screen.getByLabelText("CSV file") as HTMLInputElement;
+      await userEvent.upload(fileInput, csvFile(NINE_HOLE_CSV));
+      await screen.findByLabelText("Hole 1 distance in yards");
+
+      expect(fileInput.value).toBe("");
+    });
+
+    it("review fix, PR #230: a stale structural parse error doesn't survive a round trip through 'Enter manually' and back", async () => {
+      renderForm();
+      await userEvent.selectOptions(screen.getByLabelText("Holes"), "9");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+      const duplicateCsv =
+        "hole_number,distance_yards,par,stroke_index\n1,300,5,1\n1,310,4,2\n3,320,4,3\n4,330,5,4\n5,340,4,5\n6,350,4,6\n7,360,5,7\n8,370,4,8\n9,380,4,9";
+      await userEvent.upload(screen.getByLabelText("CSV file"), csvFile(duplicateCsv));
+      expect(await screen.findByText(/duplicate hole number 1/)).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("radio", { name: "Enter manually" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+
+      expect(screen.queryByText(/duplicate hole number 1/)).not.toBeInTheDocument();
+    });
+
+    it("submits the correctly-shaped payload after a CSV-populated holes table, exactly like a manual entry would", async () => {
+      const { onSubmit } = renderForm();
+      await userEvent.type(screen.getByLabelText("Name"), "White");
+      await userEvent.selectOptions(screen.getByLabelText("Holes"), "9");
+      await userEvent.type(screen.getByLabelText("Course rating"), "71.2");
+      await userEvent.type(screen.getByLabelText("Slope rating"), "128");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+      await userEvent.upload(screen.getByLabelText("CSV file"), csvFile(NINE_HOLE_CSV));
+      await screen.findByLabelText("Hole 9 distance in yards");
+
+      await userEvent.click(screen.getByRole("button", { name: "Add tee configuration" }));
+
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+      const input = onSubmit.mock.calls[0]![0];
+      expect(input).toMatchObject({ name: "White", holeCount: 9, courseRating: 71.2, slopeRating: 128 });
+      expect(input.holes).toHaveLength(9);
+      expect(input.holes[0]).toEqual({ holeNumber: 1, distanceYards: 300, par: 5, strokeIndex: 1 });
+      expect(input.holes[8]).toEqual({ holeNumber: 9, distanceYards: 380, par: 4, strokeIndex: 9 });
+    });
+
+    it("shows a clear parse error for a structurally invalid file (duplicate hole number), without touching the existing holes table", async () => {
+      renderForm();
+      await userEvent.selectOptions(screen.getByLabelText("Holes"), "9");
+      await userEvent.type(screen.getByLabelText("Hole 1 distance in yards"), "999");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+      const duplicateCsv =
+        "hole_number,distance_yards,par,stroke_index\n1,300,5,1\n1,310,4,2\n3,320,4,3\n4,330,5,4\n5,340,4,5\n6,350,4,6\n7,360,5,7\n8,370,4,8\n9,380,4,9";
+      await userEvent.upload(screen.getByLabelText("CSV file"), csvFile(duplicateCsv));
+
+      expect(await screen.findByText(/duplicate hole number 1/)).toBeInTheDocument();
+      // The pre-existing manual value is still there -- a bad upload
+      // never clobbers it.
+      expect(screen.getByLabelText("Hole 1 distance in yards")).toHaveValue(999);
+    });
+
+    it("an individual bad value (non-numeric par) populates normally and surfaces via the SAME per-field validation a manual entry's own blank value gets, rather than blocking the whole import", async () => {
+      const { onSubmit } = renderForm();
+      await userEvent.type(screen.getByLabelText("Name"), "White");
+      await userEvent.selectOptions(screen.getByLabelText("Holes"), "9");
+      await userEvent.type(screen.getByLabelText("Course rating"), "71.2");
+      await userEvent.type(screen.getByLabelText("Slope rating"), "128");
+      await userEvent.click(screen.getByRole("radio", { name: "Load from CSV" }));
+      const badParCsv =
+        "hole_number,distance_yards,par,stroke_index\n1,300,not-a-par,1\n2,310,4,2\n3,320,4,3\n4,330,5,4\n5,340,4,5\n6,350,4,6\n7,360,5,7\n8,370,4,8\n9,380,4,9";
+      await userEvent.upload(screen.getByLabelText("CSV file"), csvFile(badParCsv));
+      await screen.findByLabelText("Hole 9 distance in yards");
+
+      // No blocking parse error -- the file parsed fine overall.
+      expect(screen.queryByText(/Couldn't parse|Missing required|Invalid hole numbers/)).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Add tee configuration" }));
+
+      // Hole-table cells are bare Inputs (invalid={...} styling only,
+      // no FormField/visible per-field message) -- the generic banner
+      // plus this cell's own aria-invalid is the real, existing
+      // "something's wrong with a hole field" signal, same as a manual
+      // entry's own blank field would get. There is no separate
+      // "Enter a par" text anywhere in this UI to assert on.
+      expect(await screen.findByText(/distance, par, and stroke index are all required/)).toBeInTheDocument();
+      expect(screen.getByLabelText("Hole 1 par")).toHaveAttribute("aria-invalid", "true");
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+  });
 });

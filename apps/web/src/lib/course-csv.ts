@@ -1,4 +1,5 @@
 import Papa from "papaparse";
+import { checkHoleNumberCompleteness } from "./csv-hole-completeness";
 import { csvNumberOrUndefined } from "./csv-number";
 import { teeConfigurationSchema, toTeeConfigurationInput } from "./tee-configuration-schema";
 import type { TeeConfigurationFormInput } from "./tee-configuration-schema";
@@ -106,34 +107,17 @@ function parseTeeConfigurationGroup(configurationId: string, rows: RawRow[]): Pa
   // can never produce a gap, duplicate, or out-of-range hole via its own
   // UI) has no length/completeness check of its own, so a malformed CSV
   // needs its own, clearer message here instead of a confusing per-index
-  // zod error, or worse, silently passing through (review finding, PR
-  // #158: hole_count=9 with holes 1-18 present had no duplicates and no
-  // gap in 1-9, so it previously passed straight through with 18 holes
-  // in a supposedly-9-hole configuration). Every hole_number is now
-  // checked against the valid 1..expectedCount range, not just checked
-  // for internal duplicates/gaps -- out-of-range values (too many holes,
-  // or a stray non-numeric value) are caught here, in range-check order,
-  // before duplicates/gaps are even considered.
+  // zod error, or worse, silently passing through. checkHoleNumberCompleteness
+  // (ghs#229: extracted into its own shared module, now also used by
+  // tee-configuration-holes-csv.ts) carries the real reasoning/history.
   const expectedCount = holeCountRaw === "9" ? 9 : holeCountRaw === "18" ? 18 : undefined;
   if (expectedCount !== undefined) {
-    const seen = new Set<number>();
-    for (const hole of holeRows) {
-      if (!Number.isInteger(hole.holeNumber) || hole.holeNumber < 1 || hole.holeNumber > expectedCount) {
-        return {
-          configurationId,
-          name,
-          valid: false,
-          reason: `invalid hole number '${hole.holeNumberRaw}' (must be an integer from 1 to ${expectedCount})`,
-        };
-      }
-      if (seen.has(hole.holeNumber)) {
-        return { configurationId, name, valid: false, reason: `duplicate hole number ${hole.holeNumber}` };
-      }
-      seen.add(hole.holeNumber);
-    }
-    const missing = Array.from({ length: expectedCount }, (_, index) => index + 1).filter((n) => !seen.has(n));
-    if (missing.length > 0) {
-      return { configurationId, name, valid: false, reason: `missing hole(s): ${missing.join(", ")}` };
+    const reason = checkHoleNumberCompleteness(
+      holeRows.map((hole) => ({ raw: hole.holeNumberRaw, value: hole.holeNumber })),
+      expectedCount,
+    );
+    if (reason) {
+      return { configurationId, name, valid: false, reason };
     }
   }
 
