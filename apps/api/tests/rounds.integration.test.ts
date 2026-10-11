@@ -33,6 +33,8 @@ import { createPccService } from "../src/application/pcc.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
+import { createLoginAttemptsRepository } from "../src/data/login-attempts.repository.ts";
+import { createLoginAttemptsService } from "../src/application/login-attempts.service.ts";
 import { createApp } from "../src/interface/http/app.ts";
 import type { AuthConfig } from "../src/config.ts";
 import type { FairwayResult } from "../src/data/rounds.repository.ts";
@@ -219,14 +221,16 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
   const settingsRepo = createSystemSettingsRepository(pool);
   const roundsRepo = createRoundsRepository(pool);
   const notificationsRepository = createNotificationsRepository(pool);
+  const loginAttemptsRepository = createLoginAttemptsRepository(pool);
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -240,7 +244,7 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, loginAttemptsService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -366,14 +370,16 @@ test("HTTP: PATCH /rounds/:id/remarks -- ghs#215", async () => {
   const settingsRepo = createSystemSettingsRepository(pool);
   const roundsRepo = createRoundsRepository(pool);
   const notificationsRepository = createNotificationsRepository(pool);
+  const loginAttemptsRepository = createLoginAttemptsRepository(pool);
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -387,7 +393,7 @@ test("HTTP: PATCH /rounds/:id/remarks -- ghs#215", async () => {
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, loginAttemptsService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -502,14 +508,16 @@ test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole u
   const settingsRepo = createSystemSettingsRepository(pool);
   const roundsRepo = createRoundsRepository(pool);
   const notificationsRepository = createNotificationsRepository(pool);
+  const loginAttemptsRepository = createLoginAttemptsRepository(pool);
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -523,7 +531,7 @@ test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole u
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, loginAttemptsService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -621,14 +629,16 @@ test("HTTP: submitting a round computes its real score immediately, before any a
   const settingsRepo = createSystemSettingsRepository(pool);
   const roundsRepo = createRoundsRepository(pool);
   const notificationsRepository = createNotificationsRepository(pool);
+  const loginAttemptsRepository = createLoginAttemptsRepository(pool);
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -642,7 +652,7 @@ test("HTTP: submitting a round computes its real score immediately, before any a
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, loginAttemptsService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);

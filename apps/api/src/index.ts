@@ -31,6 +31,8 @@ import { createPccService } from "./application/pcc.service.ts";
 import { createScoringService } from "./application/scoring.service.ts";
 import { createRecalculationOrchestrator } from "./application/recalculation.service.ts";
 import { createNotificationsRepository } from "./data/notifications.repository.ts";
+import { createLoginAttemptsRepository } from "./data/login-attempts.repository.ts";
+import { createLoginAttemptsService } from "./application/login-attempts.service.ts";
 import { createApp } from "./interface/http/app.ts";
 
 // Composition root: config and secrets are read exactly once, here, and
@@ -56,6 +58,7 @@ const handicapOverridesRepository = createHandicapOverridesRepository(pool);
 const handicapHistoryRepository = createHandicapHistoryRepository(pool);
 const pccRepository = createPccRepository(pool);
 const notificationsRepository = createNotificationsRepository(pool);
+const loginAttemptsRepository = createLoginAttemptsRepository(pool);
 
 const clubsService = createClubsService(clubsRepository, logger);
 const pccService = createPccService(pccRepository);
@@ -79,7 +82,9 @@ const authService = createAuthService({
   mfa: mfaRepository,
   mfaVerifier: mfaService,
   notifications: notificationsRepository,
+  loginAttempts: loginAttemptsRepository,
 });
+const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
 const adminUsersService = createAdminUsersService(pool, logger, usersRepository, playersRepository, activationTokenRepository, notificationsRepository);
 const dashboardService = createDashboardService(handicapHistoryService, roundsService, usersRepository, coursesRepository, presenceSnapshotsRepository, systemSettingsService, logger);
 
@@ -97,6 +102,7 @@ const app = createApp({
   recalculationOrchestrator,
   handicapHistoryService,
   dashboardService,
+  loginAttemptsService,
   playersRepository,
   authProvider,
 });

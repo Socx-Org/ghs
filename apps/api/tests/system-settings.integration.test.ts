@@ -33,6 +33,8 @@ import { createPccService } from "../src/application/pcc.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
+import { createLoginAttemptsRepository } from "../src/data/login-attempts.repository.ts";
+import { createLoginAttemptsService } from "../src/application/login-attempts.service.ts";
 import { createApp } from "../src/interface/http/app.ts";
 import type { AuthConfig } from "../src/config.ts";
 
@@ -96,6 +98,7 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on; 
   const coursesRepo = createCoursesRepository(pool);
   const settingsRepo = createSystemSettingsRepository(pool);
   const notificationsRepository = createNotificationsRepository(pool);
+  const loginAttemptsRepository = createLoginAttemptsRepository(pool);
 
   const authConfig: AuthConfig = {
     jwtSecret: "system-settings-test-secret",
@@ -110,8 +113,9 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on; 
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -126,7 +130,7 @@ test("self-registration gate: POST /auth/register is 403 when off, 201 when on; 
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, loginAttemptsService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);

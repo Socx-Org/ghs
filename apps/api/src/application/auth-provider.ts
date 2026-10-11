@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { AuthConfig } from "../config.ts";
 import type { RefreshTokensRepository } from "../data/refresh-tokens.repository.ts";
 import type { User } from "../data/users.repository.ts";
@@ -27,16 +27,30 @@ export interface TokenPair {
   expiresIn: number;
 }
 
+export interface IssuedTokens extends TokenPair {
+  // ghs#231: the session this token pair belongs to -- never itself
+  // sent to a client (routes only ever forward the plain TokenPair
+  // fields), used internally by auth.service.ts to record a
+  // login_attempts row and, on refresh, to thread the SAME session_id
+  // into the next rotation.
+  sessionId: string;
+}
+
 export interface AuthProvider {
-  issueTokens(user: User, amr: string[]): Promise<TokenPair>;
+  // sessionId: omitted on a fresh login (a new session_id is
+  // generated); passed through on refresh, so rotation never starts a
+  // new session -- see migration 020's own doc comment.
+  issueTokens(user: User, amr: string[], sessionId?: string): Promise<IssuedTokens>;
   verifyAccessToken(token: string): Identity;
-  // Validates and single-uses a refresh token, returning the userId it
-  // belonged to. Does not itself issue a new token pair -- the caller
-  // (auth.service) re-fetches the current user record (role/status may
-  // have changed since the refresh token was issued) and calls
-  // issueTokens with it. Splitting it this way avoids the alternative of
-  // this function needing a "fetch user by id" dependency of its own.
-  validateAndRotateRefreshToken(refreshToken: string): Promise<string>;
+  // Validates and single-uses a refresh token, returning the userId/
+  // session_id it belonged to. Does not itself issue a new token pair --
+  // the caller (auth.service) re-fetches the current user record (role/
+  // status may have changed since the refresh token was issued) and
+  // calls issueTokens with it (passing sessionId through, so the
+  // rotated session keeps its own identity). Splitting it this way
+  // avoids the alternative of this function needing a "fetch user by
+  // id" dependency of its own.
+  validateAndRotateRefreshToken(refreshToken: string): Promise<{ userId: string; sessionId: string }>;
   // ghs#59: real logout -- revokes exactly the presented refresh token,
   // never other sessions (distinct from validateAndRotateRefreshToken's
   // own revokeAllForUser reuse-detection path, which is a theft
@@ -71,7 +85,7 @@ function hashRefreshToken(token: string): string {
 const JWT_ALGORITHM = "HS256";
 
 export function createLocalAuthProvider(config: AuthConfig, refreshTokens: RefreshTokensRepository): AuthProvider {
-  async function issueTokens(user: User, amr: string[]): Promise<TokenPair> {
+  async function issueTokens(user: User, amr: string[], sessionId?: string): Promise<IssuedTokens> {
     const claims: AccessTokenClaims = {
       sub: user.id,
       email: user.email,
@@ -85,9 +99,10 @@ export function createLocalAuthProvider(config: AuthConfig, refreshTokens: Refre
     const rawRefreshToken = randomBytes(32).toString("hex");
     const refreshTokenHash = hashRefreshToken(rawRefreshToken);
     const expiresAt = new Date(Date.now() + config.jwtRefreshExpiresInSeconds * 1000);
-    await refreshTokens.create(user.id, refreshTokenHash, expiresAt);
+    const resolvedSessionId = sessionId ?? randomUUID();
+    await refreshTokens.create(user.id, refreshTokenHash, expiresAt, resolvedSessionId);
 
-    return { accessToken, refreshToken: rawRefreshToken, expiresIn: config.jwtAccessExpiresInSeconds };
+    return { accessToken, refreshToken: rawRefreshToken, expiresIn: config.jwtAccessExpiresInSeconds, sessionId: resolvedSessionId };
   }
 
   return {
@@ -122,7 +137,7 @@ export function createLocalAuthProvider(config: AuthConfig, refreshTokens: Refre
       if (record.expiresAt.getTime() < Date.now()) throw new Error("refresh token expired");
 
       await refreshTokens.markRotated(record.id);
-      return record.userId;
+      return { userId: record.userId, sessionId: record.sessionId };
     },
 
     async revokeRefreshToken(refreshToken) {

@@ -23,6 +23,8 @@ import { createHandicapHistoryService } from "../src/application/handicap-histor
 import { createDashboardService } from "../src/application/dashboard.service.ts";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
+import { createLoginAttemptsRepository } from "../src/data/login-attempts.repository.ts";
+import { createLoginAttemptsService } from "../src/application/login-attempts.service.ts";
 import { createRoundsService } from "../src/application/rounds.service.ts";
 import { createHandicapOverridesRepository } from "../src/data/handicap-overrides.repository.ts";
 import { createHandicapOverridesService } from "../src/application/handicap-overrides.service.ts";
@@ -93,11 +95,12 @@ function buildServices() {
   const scoringService = createScoringService(roundsRepo, coursesRepo, pccService);
   const handicapHistoryService = createHandicapHistoryService(createHandicapHistoryRepository(pool));
   const notificationsRepository = createNotificationsRepository(pool);
+  const loginAttemptsRepository = createLoginAttemptsRepository(pool);
   const players = createPlayersRepository(pool);
   const systemSettingsService = createSystemSettingsService(createSystemSettingsRepository(pool));
   const recalculationOrchestrator = createRecalculationOrchestrator(pool, roundsRepo, handicapHistoryService, pccService, notificationsRepository, players, logger);
   const roundsService = createRoundsService(pool, roundsRepo, coursesRepo, scoringService, recalculationOrchestrator, notificationsRepository, players, systemSettingsService, logger);
-  return { roundsRepo, coursesRepo, handicapHistoryService, notificationsRepository, players, systemSettingsService, recalculationOrchestrator, roundsService };
+  return { roundsRepo, coursesRepo, handicapHistoryService, notificationsRepository, loginAttemptsRepository, players, systemSettingsService, recalculationOrchestrator, roundsService };
 }
 
 test("rejectRound recalculates a previously-approved-then-reopened round -- the confirmed legacy bug ghs#23 fixes: legacy only logged 'recalculation requested' here, it never actually recalculated", async () => {
@@ -435,15 +438,16 @@ test("HTTP DELETE /rounds/:id (ghs#147): a player deletes their own draft round 
   const clubsRepo = createClubsRepository(pool);
   const coursesRepo = createCoursesRepository(pool);
   const settingsRepo = createSystemSettingsRepository(pool);
-  const { roundsRepo, roundsService, notificationsRepository, recalculationOrchestrator } = buildServices();
+  const { roundsRepo, roundsService, notificationsRepository, loginAttemptsRepository, recalculationOrchestrator } = buildServices();
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -454,7 +458,7 @@ test("HTTP DELETE /rounds/:id (ghs#147): a player deletes their own draft round 
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, loginAttemptsService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -588,15 +592,16 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
   const clubsRepo = createClubsRepository(pool);
   const coursesRepo = createCoursesRepository(pool);
   const settingsRepo = createSystemSettingsRepository(pool);
-  const { roundsRepo, roundsService, notificationsRepository, recalculationOrchestrator } = buildServices();
+  const { roundsRepo, roundsService, notificationsRepository, loginAttemptsRepository, recalculationOrchestrator } = buildServices();
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -607,7 +612,7 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, loginAttemptsService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
@@ -810,15 +815,16 @@ function buildWorkflowApp() {
   const clubsRepo = createClubsRepository(pool);
   const coursesRepo = createCoursesRepository(pool);
   const settingsRepo = createSystemSettingsRepository(pool);
-  const { roundsRepo, roundsService, notificationsRepository, recalculationOrchestrator } = buildServices();
+  const { roundsRepo, roundsService, notificationsRepository, loginAttemptsRepository, recalculationOrchestrator } = buildServices();
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -829,7 +835,7 @@ function buildWorkflowApp() {
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, loginAttemptsService, playersRepository: players, authProvider,
   });
 
   return { app, roundsRepo, roundsService, players, adminUsersService, authService };

@@ -13,6 +13,7 @@ import type { PccService } from "../../application/pcc.service.ts";
 import type { RecalculationOrchestrator } from "../../application/recalculation.service.ts";
 import type { HandicapHistoryService } from "../../application/handicap-history.service.ts";
 import type { DashboardService } from "../../application/dashboard.service.ts";
+import type { LoginAttemptsService } from "../../application/login-attempts.service.ts";
 import type { PlayersRepository } from "../../data/players.repository.ts";
 import type { AuthProvider } from "../../application/auth-provider.ts";
 import {
@@ -29,6 +30,7 @@ import { teeConfigurationsRouter } from "./routes/tee-configurations.ts";
 import { authRouter } from "./routes/auth.ts";
 import { mfaRouter } from "./routes/mfa.ts";
 import { adminUsersRouter } from "./routes/admin-users.ts";
+import { adminLoginAttemptsRouter } from "./routes/admin-login-attempts.ts";
 import { adminSettingsRouter } from "./routes/admin-settings.ts";
 import { adminPccRouter } from "./routes/admin-pcc.ts";
 import { roundsRouter } from "./routes/rounds.ts";
@@ -57,6 +59,8 @@ export interface AppDeps {
   handicapHistoryService: HandicapHistoryService;
   // ghs#176: the Player Dashboard's one aggregate endpoint.
   dashboardService: DashboardService;
+  // ghs#231: the admin-only login/session audit page's one endpoint.
+  loginAttemptsService: LoginAttemptsService;
   playersRepository: PlayersRepository;
   authProvider: AuthProvider;
   // ghs#49: real production wiring never sets this (undefined -- every
@@ -135,6 +139,7 @@ export function createApp(deps: AppDeps): Express {
   v1Router.use(authRouter(deps.authService, deps.systemSettingsService, deps.authProvider));
   v1Router.use(mfaRouter(deps.mfaService, deps.authProvider));
   v1Router.use(adminUsersRouter(deps.adminUsersService, deps.mfaService, deps.authProvider));
+  v1Router.use(adminLoginAttemptsRouter(deps.loginAttemptsService, deps.authProvider));
   v1Router.use(adminSettingsRouter(deps.systemSettingsService, deps.authProvider));
   v1Router.use(adminPccRouter(deps.pccService, deps.recalculationOrchestrator, deps.authProvider));
   v1Router.use(clubsRouter(deps.clubsService, deps.authProvider));

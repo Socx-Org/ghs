@@ -24,6 +24,7 @@ import {
 import { createMfaService } from "../src/application/mfa.service.ts";
 import { createAdminUsersService } from "../src/application/admin-users.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
+import { createLoginAttemptsRepository } from "../src/data/login-attempts.repository.ts";
 import { generate as generateTotp } from "otplib";
 import type { AuthConfig } from "../src/config.ts";
 
@@ -46,6 +47,7 @@ function buildServices() {
   const refreshTokens = createRefreshTokensRepository(pool);
   const mfaRepo = createMfaRepository(pool);
   const notificationsRepository = createNotificationsRepository(pool);
+  const loginAttemptsRepository = createLoginAttemptsRepository(pool);
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
@@ -60,10 +62,11 @@ function buildServices() {
     mfa: mfaRepo,
     mfaVerifier: mfaService,
     notifications: notificationsRepository,
+    loginAttempts: loginAttemptsRepository,
   });
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
 
-  return { users, players, activationTokens, passwordResetTokens, refreshTokens, authProvider, authService, mfaService, adminUsersService };
+  return { users, players, activationTokens, passwordResetTokens, refreshTokens, authProvider, authService, mfaService, adminUsersService, loginAttemptsRepository };
 }
 
 // The raw activation/reset token can't be recovered from its stored hash
@@ -146,6 +149,130 @@ test("full lifecycle: register -> activate -> login -> refresh", async () => {
   // reuse detection, ghs#8's DB-backed reimplementation of legacy's
   // Redis-backed one).
   await assert.rejects(() => authService.refresh(loginResult.tokens.refreshToken));
+});
+
+// ---------------------------------------------------------------------
+// ghs#231: every login-establishing event writes a real login_attempts
+// row -- verified against real Postgres data, not just that the right
+// Error is thrown (identical to this file's own established discipline
+// for every other flow). refresh() is deliberately NOT covered here --
+// explicit non-scope, a session's continued liveness is read live off
+// refresh_tokens instead (see login-attempts.repository.ts's own list()).
+// ---------------------------------------------------------------------
+
+async function loginAttemptRows(loginAttemptsRepository: ReturnType<typeof buildServices>["loginAttemptsRepository"], email: string) {
+  const page = await loginAttemptsRepository.list(100, 0);
+  return page.items.filter((item) => item.email.toLowerCase() === email.toLowerCase());
+}
+
+test("ghs#231: a successful login writes a 'success' row carrying the real session_id", async () => {
+  const s = buildServices();
+  await s.authService.register({ email: "audit-success@example.com", password: "correct-horse-battery", firstName: "Audit", lastName: "Success" });
+  const user = await s.users.findByEmail("audit-success@example.com");
+  const [activationPayload] = await outboxPayloads(user!.id, "account_activation");
+  await s.authService.activateAccount(activationPayload!.token as string);
+
+  const loginResult = await s.authService.login("audit-success@example.com", "correct-horse-battery", "203.0.113.5");
+  if (loginResult.status !== "authenticated") throw new Error("unreachable");
+
+  const rows = await loginAttemptRows(s.loginAttemptsRepository, "audit-success@example.com");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.outcome, "success");
+  assert.equal(rows[0]!.userId, user!.id);
+  assert.equal(rows[0]!.ipAddress, "203.0.113.5");
+  assert.ok(rows[0]!.sessionId, "a successful login must carry a real session_id");
+  assert.equal(rows[0]!.sessionStatus, "active");
+});
+
+test("ghs#231: a wrong password AND a nonexistent email both write 'invalid_credentials' -- the enumeration-safe outcome stays indistinguishable in the audit log too", async () => {
+  const s = buildServices();
+  await s.authService.register({ email: "audit-badpw@example.com", password: "correct-horse-battery", firstName: "Audit", lastName: "BadPw" });
+  const user = await s.users.findByEmail("audit-badpw@example.com");
+  const [activationPayload] = await outboxPayloads(user!.id, "account_activation");
+  await s.authService.activateAccount(activationPayload!.token as string);
+
+  await assert.rejects(() => s.authService.login("audit-badpw@example.com", "wrong-password"));
+  await assert.rejects(() => s.authService.login("never-registered@example.com", "whatever"));
+
+  const badPwRows = await loginAttemptRows(s.loginAttemptsRepository, "audit-badpw@example.com");
+  assert.equal(badPwRows.length, 1);
+  assert.equal(badPwRows[0]!.outcome, "invalid_credentials");
+  assert.equal(badPwRows[0]!.userId, user!.id);
+  assert.equal(badPwRows[0]!.sessionId, null);
+
+  // A nonexistent email still gets a real, attributable row (userId
+  // null, the raw submitted email kept) -- this issue's own explicit
+  // "a failed attempt against a nonexistent email is still a real
+  // attempt worth auditing" decision.
+  const unknownRows = await loginAttemptRows(s.loginAttemptsRepository, "never-registered@example.com");
+  assert.equal(unknownRows.length, 1);
+  assert.equal(unknownRows[0]!.outcome, "invalid_credentials");
+  assert.equal(unknownRows[0]!.userId, null);
+});
+
+test("ghs#231: login before activation writes 'account_not_active'", async () => {
+  const s = buildServices();
+  await s.authService.register({ email: "audit-inactive@example.com", password: "correct-horse-battery", firstName: "Audit", lastName: "Inactive" });
+
+  await assert.rejects(() => s.authService.login("audit-inactive@example.com", "correct-horse-battery"));
+
+  const rows = await loginAttemptRows(s.loginAttemptsRepository, "audit-inactive@example.com");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]!.outcome, "account_not_active");
+});
+
+test("ghs#231: an MFA-enabled login writes 'mfa_required' then, on completion, a 'success' row -- a wrong code in between writes 'invalid_mfa_code'", async () => {
+  const s = buildServices();
+  const created = await s.adminUsersService.adminCreateUser({
+    email: "audit-mfa@example.com", password: "mfa-password-1", role: "player",
+    firstName: "Audit", lastName: "Mfa", autoActivate: true,
+  });
+  const enrollment = await s.mfaService.enrollTotp(created.userId, "audit-mfa@example.com");
+  const secret = /secret=([A-Z0-9]+)/.exec(enrollment.otpauthUri)![1]!;
+  await s.mfaService.confirmTotpEnrollment(created.userId, await generateTotp({ secret }));
+
+  const loginResult = await s.authService.login("audit-mfa@example.com", "mfa-password-1");
+  if (loginResult.status !== "mfa_required") throw new Error("unreachable");
+
+  await assert.rejects(() => s.authService.completeMfaLogin(loginResult.mfaPendingToken, "000000"));
+
+  const tokens = await s.authService.completeMfaLogin(loginResult.mfaPendingToken, await generateTotp({ secret }));
+  assert.ok(tokens.accessToken);
+
+  const rows = (await loginAttemptRows(s.loginAttemptsRepository, "audit-mfa@example.com")).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0]!.outcome, "mfa_required");
+  assert.equal(rows[1]!.outcome, "invalid_mfa_code");
+  assert.equal(rows[2]!.outcome, "success");
+  assert.ok(rows[2]!.sessionId);
+});
+
+test("ghs#231 review fix: a failing login_attempts write never turns a genuinely successful login into a 401 (best-effort audit, PR #232)", async () => {
+  const s = buildServices();
+  await s.authService.register({ email: "audit-write-fails@example.com", password: "correct-horse-battery", firstName: "Audit", lastName: "WriteFails" });
+  const user = await s.users.findByEmail("audit-write-fails@example.com");
+  const [activationPayload] = await outboxPayloads(user!.id, "account_activation");
+  await s.authService.activateAccount(activationPayload!.token as string);
+
+  const brokenLoginAttempts = { ...s.loginAttemptsRepository, record: async () => { throw new Error("simulated audit write failure"); } };
+  const authServiceWithBrokenAudit = createAuthService({
+    pool,
+    logger,
+    authProvider: s.authProvider,
+    users: s.users,
+    players: s.players,
+    activationTokens: s.activationTokens,
+    passwordResetTokens: s.passwordResetTokens,
+    mfa: createMfaRepository(pool),
+    mfaVerifier: s.mfaService,
+    notifications: createNotificationsRepository(pool),
+    loginAttempts: brokenLoginAttempts,
+  });
+
+  const loginResult = await authServiceWithBrokenAudit.login("audit-write-fails@example.com", "correct-horse-battery");
+  assert.equal(loginResult.status, "authenticated", "a broken audit write must not fail an otherwise-successful login");
+  if (loginResult.status !== "authenticated") throw new Error("unreachable");
+  assert.ok(loginResult.tokens.accessToken, "a real session must still be issued");
 });
 
 // ---------------------------------------------------------------------

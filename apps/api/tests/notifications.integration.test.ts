@@ -20,6 +20,7 @@ import { createHandicapOverridesRepository } from "../src/data/handicap-override
 import { createHandicapOverridesService } from "../src/application/handicap-overrides.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
 import type { NotificationsRepository } from "../src/data/notifications.repository.ts";
+import { createLoginAttemptsRepository } from "../src/data/login-attempts.repository.ts";
 import { createSystemSettingsRepository } from "../src/data/system-settings.repository.ts";
 import { createSystemSettingsService } from "../src/application/system-settings.service.ts";
 import type { RecalculationOrchestrator } from "../src/application/recalculation.service.ts";
@@ -455,7 +456,7 @@ function buildAuthServices(notifications: NotificationsRepository) {
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService, notifications,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications, loginAttempts: createLoginAttemptsRepository(pool),
   });
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notifications);
   return { users, players, activationTokens, passwordResetTokens, authService, adminUsersService };

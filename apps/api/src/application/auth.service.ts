@@ -7,6 +7,7 @@ import type { ActivationTokenRepository } from "../data/activation-tokens.reposi
 import type { PasswordResetTokenRepository } from "../data/password-reset-tokens.repository.ts";
 import type { MfaRepository } from "../data/mfa.repository.ts";
 import type { NotificationsRepository } from "../data/notifications.repository.ts";
+import type { LoginAttemptsRepository } from "../data/login-attempts.repository.ts";
 import { hashPassword, verifyPassword } from "../lib/password.ts";
 import { generateToken, hashToken } from "../lib/tokens.ts";
 
@@ -90,12 +91,19 @@ export interface AuthServiceDeps {
   mfa: MfaRepository;
   mfaVerifier: MfaCodeVerifier;
   notifications: NotificationsRepository;
+  loginAttempts: LoginAttemptsRepository;
 }
 
 export interface AuthService {
   register(input: RegisterInput): Promise<{ userId: string }>;
-  login(email: string, password: string): Promise<LoginResult>;
-  completeMfaLogin(mfaPendingToken: string, code: string): Promise<TokenPair>;
+  // ghs#231: ipAddress defaults to "unknown" (not a required param every
+  // existing caller/test needs to pass) -- the real route always passes
+  // req.ip explicitly; most of this file's own existing tests are about
+  // password/activation/account-status flows entirely unrelated to
+  // login auditing, and forcing a fake IP onto all of them would be
+  // pure noise.
+  login(email: string, password: string, ipAddress?: string): Promise<LoginResult>;
+  completeMfaLogin(mfaPendingToken: string, code: string, ipAddress?: string): Promise<TokenPair>;
   refresh(refreshToken: string): Promise<TokenPair>;
   // ghs#59: real logout -- revokes exactly the presented refresh token,
   // never other active sessions belonging to the same user.
@@ -119,7 +127,28 @@ export interface AuthService {
 }
 
 export function createAuthService(deps: AuthServiceDeps): AuthService {
-  const { pool, logger, authProvider, users, players, activationTokens, passwordResetTokens, mfa, mfaVerifier, notifications } = deps;
+  const { pool, logger, authProvider, users, players, activationTokens, passwordResetTokens, mfa, mfaVerifier, notifications, loginAttempts } = deps;
+
+  // ghs#231 review fix: best-effort, never propagated. The success path
+  // calls this AFTER authProvider.issueTokens has already created (and
+  // committed) the real refresh_tokens row -- a transient failure
+  // writing the audit row here must not turn an otherwise-successful
+  // login into a 401 for the caller, which a bare `await
+  // loginAttempts.record(...)` would do (the route's own catch-all
+  // converts ANY thrown error, including one from this call, into
+  // "invalid credentials"). Matches the documented worst case in
+  // login-attempts.repository.ts's own doc comment ("a session exists
+  // with no audit row, a minor historical-record gap, not a security or
+  // data-integrity issue") -- that was already the INTENDED behaviour,
+  // this makes it actually true at every call site, not just the ones
+  // that happen to run before any real side effect exists yet.
+  async function recordAttempt(input: Parameters<typeof loginAttempts.record>[0]) {
+    try {
+      await loginAttempts.record(input);
+    } catch (err) {
+      logger.error("failed to record login attempt", { outcome: input.outcome, userId: input.userId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   return {
     async register(input) {
@@ -173,39 +202,73 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       }
     },
 
-    async login(email, password) {
+    async login(email, password, ipAddress = "unknown") {
       const user = await users.findByEmail(email);
-      if (!user) throw new Error("invalid credentials");
-      if (user.status !== "active") throw new Error("account not active");
+      if (!user) {
+        await recordAttempt({ email, userId: null, outcome: "invalid_credentials", ipAddress, sessionId: null });
+        throw new Error("invalid credentials");
+      }
+      if (user.status !== "active") {
+        await recordAttempt({ email, userId: user.id, outcome: "account_not_active", ipAddress, sessionId: null });
+        throw new Error("account not active");
+      }
 
       const passwordOk = await verifyPassword(user.passwordHash, password);
-      if (!passwordOk) throw new Error("invalid credentials");
+      if (!passwordOk) {
+        await recordAttempt({ email, userId: user.id, outcome: "invalid_credentials", ipAddress, sessionId: null });
+        throw new Error("invalid credentials");
+      }
 
       const mfaMethod = await mfa.getTotpMethod(user.id);
       if (mfaMethod && mfaMethod.enabledAt) {
+        await recordAttempt({ email, userId: user.id, outcome: "mfa_required", ipAddress, sessionId: null });
         return { status: "mfa_required", mfaPendingToken: authProvider.issueMfaPendingToken(user.id) };
       }
 
-      const tokens = await authProvider.issueTokens(user, ["pwd"]);
-      return { status: "authenticated", tokens };
+      const issued = await authProvider.issueTokens(user, ["pwd"]);
+      await recordAttempt({ email, userId: user.id, outcome: "success", ipAddress, sessionId: issued.sessionId });
+      return { status: "authenticated", tokens: { accessToken: issued.accessToken, refreshToken: issued.refreshToken, expiresIn: issued.expiresIn } };
     },
 
-    async completeMfaLogin(mfaPendingToken, code) {
+    async completeMfaLogin(mfaPendingToken, code, ipAddress = "unknown") {
+      // Throws on a bad/expired pending token before any identity is
+      // resolved -- no email/user to attribute an audit row to, so none
+      // is written (ghs#231's own explicit non-scope).
       const userId = authProvider.verifyMfaPendingToken(mfaPendingToken);
       const user = await users.findById(userId);
-      if (!user || user.status !== "active") throw new Error("account not active");
+      if (!user || user.status !== "active") {
+        // Same reasoning as above -- if even the user lookup itself
+        // comes back empty (the account was hard-deleted between the
+        // pending token being issued and completion), there is still no
+        // identity to record against.
+        if (user) {
+          await recordAttempt({ email: user.email, userId: user.id, outcome: "account_not_active", ipAddress, sessionId: null });
+        }
+        throw new Error("account not active");
+      }
 
       const codeOk = await mfaVerifier.verifyLoginCode(userId, code);
-      if (!codeOk) throw new Error("invalid MFA code");
+      if (!codeOk) {
+        await recordAttempt({ email: user.email, userId: user.id, outcome: "invalid_mfa_code", ipAddress, sessionId: null });
+        throw new Error("invalid MFA code");
+      }
 
-      return authProvider.issueTokens(user, ["pwd", "otp"]);
+      const issued = await authProvider.issueTokens(user, ["pwd", "otp"]);
+      await recordAttempt({ email: user.email, userId: user.id, outcome: "success", ipAddress, sessionId: issued.sessionId });
+      return { accessToken: issued.accessToken, refreshToken: issued.refreshToken, expiresIn: issued.expiresIn };
     },
 
     async refresh(refreshToken) {
-      const userId = await authProvider.validateAndRotateRefreshToken(refreshToken);
+      const { userId, sessionId } = await authProvider.validateAndRotateRefreshToken(refreshToken);
       const user = await users.findById(userId);
       if (!user || user.status !== "active") throw new Error("account not active");
-      return authProvider.issueTokens(user, ["pwd"]);
+      // sessionId threaded through, not omitted -- a refresh continues
+      // the SAME session (see migration 020's own doc comment), it
+      // never starts a new one. No login_attempts row here either: this
+      // isn't a login-establishing event, and the session's continued
+      // liveness is already fully captured by refresh_tokens itself.
+      const issued = await authProvider.issueTokens(user, ["pwd"], sessionId);
+      return { accessToken: issued.accessToken, refreshToken: issued.refreshToken, expiresIn: issued.expiresIn };
     },
 
     async logout(refreshToken) {

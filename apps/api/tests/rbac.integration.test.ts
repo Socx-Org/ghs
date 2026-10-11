@@ -35,6 +35,8 @@ import { createPccService } from "../src/application/pcc.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
+import { createLoginAttemptsRepository } from "../src/data/login-attempts.repository.ts";
+import { createLoginAttemptsService } from "../src/application/login-attempts.service.ts";
 import { createApp } from "../src/interface/http/app.ts";
 import type { AuthConfig } from "../src/config.ts";
 
@@ -74,6 +76,7 @@ function buildApp() {
   const coursesRepo = createCoursesRepository(pool);
   const settingsRepo = createSystemSettingsRepository(pool);
   const notificationsRepository = createNotificationsRepository(pool);
+  const loginAttemptsRepository = createLoginAttemptsRepository(pool);
 
   const authConfig: AuthConfig = {
     jwtSecret,
@@ -88,8 +91,9 @@ function buildApp() {
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -104,7 +108,7 @@ function buildApp() {
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, loginAttemptsService,
     playersRepository: players, authProvider,
     rateLimitOverrides: { general: GENEROUS_OVERRIDE, auth: GENEROUS_OVERRIDE, sensitiveIp: GENEROUS_OVERRIDE, sensitiveEmail: GENEROUS_OVERRIDE },
   });
@@ -211,6 +215,8 @@ const ADMIN_GATED_ROUTES: RouteCase[] = [
   { name: "GET /admin/rounds/pending", method: "GET", path: "/admin/rounds/pending" },
   // ghs#100 -- same rationale as GET /admin/rounds/pending above.
   { name: "GET /admin/rounds", method: "GET", path: "/admin/rounds" },
+  // ghs#231 -- same rationale as GET /admin/rounds above.
+  { name: "GET /admin/login-attempts", method: "GET", path: "/admin/login-attempts" },
 ];
 
 for (const route of ADMIN_GATED_ROUTES) {
