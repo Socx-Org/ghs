@@ -84,7 +84,7 @@ const authService = createAuthService({
   notifications: notificationsRepository,
   loginAttempts: loginAttemptsRepository,
 });
-const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository, logger);
+const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
 const adminUsersService = createAdminUsersService(pool, logger, usersRepository, playersRepository, activationTokenRepository, notificationsRepository);
 const dashboardService = createDashboardService(handicapHistoryService, roundsService, usersRepository, coursesRepository, presenceSnapshotsRepository, systemSettingsService, logger);
 

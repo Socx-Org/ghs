@@ -247,6 +247,34 @@ test("ghs#231: an MFA-enabled login writes 'mfa_required' then, on completion, a
   assert.ok(rows[2]!.sessionId);
 });
 
+test("ghs#231 review fix: a failing login_attempts write never turns a genuinely successful login into a 401 (best-effort audit, PR #232)", async () => {
+  const s = buildServices();
+  await s.authService.register({ email: "audit-write-fails@example.com", password: "correct-horse-battery", firstName: "Audit", lastName: "WriteFails" });
+  const user = await s.users.findByEmail("audit-write-fails@example.com");
+  const [activationPayload] = await outboxPayloads(user!.id, "account_activation");
+  await s.authService.activateAccount(activationPayload!.token as string);
+
+  const brokenLoginAttempts = { ...s.loginAttemptsRepository, record: async () => { throw new Error("simulated audit write failure"); } };
+  const authServiceWithBrokenAudit = createAuthService({
+    pool,
+    logger,
+    authProvider: s.authProvider,
+    users: s.users,
+    players: s.players,
+    activationTokens: s.activationTokens,
+    passwordResetTokens: s.passwordResetTokens,
+    mfa: createMfaRepository(pool),
+    mfaVerifier: s.mfaService,
+    notifications: createNotificationsRepository(pool),
+    loginAttempts: brokenLoginAttempts,
+  });
+
+  const loginResult = await authServiceWithBrokenAudit.login("audit-write-fails@example.com", "correct-horse-battery");
+  assert.equal(loginResult.status, "authenticated", "a broken audit write must not fail an otherwise-successful login");
+  if (loginResult.status !== "authenticated") throw new Error("unreachable");
+  assert.ok(loginResult.tokens.accessToken, "a real session must still be issued");
+});
+
 // ---------------------------------------------------------------------
 // ghs#106: activateAccount distinguishes expired/already-used/invalid --
 // found while scoping the frontend activation-landing issue, which

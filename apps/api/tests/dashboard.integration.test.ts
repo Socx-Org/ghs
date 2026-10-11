@@ -90,7 +90,7 @@ function buildApp() {
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
     mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
-  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository, logger);
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);

@@ -447,7 +447,7 @@ test("HTTP DELETE /rounds/:id (ghs#147): a player deletes their own draft round 
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
     mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
-  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository, logger);
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -601,7 +601,7 @@ test("HTTP: reject/reopen/delete are admin-only; invalid transitions are 409; a 
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
     mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
-  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository, logger);
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -824,7 +824,7 @@ function buildWorkflowApp() {
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
     mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
-  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository, logger);
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);

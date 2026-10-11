@@ -129,6 +129,27 @@ export interface AuthService {
 export function createAuthService(deps: AuthServiceDeps): AuthService {
   const { pool, logger, authProvider, users, players, activationTokens, passwordResetTokens, mfa, mfaVerifier, notifications, loginAttempts } = deps;
 
+  // ghs#231 review fix: best-effort, never propagated. The success path
+  // calls this AFTER authProvider.issueTokens has already created (and
+  // committed) the real refresh_tokens row -- a transient failure
+  // writing the audit row here must not turn an otherwise-successful
+  // login into a 401 for the caller, which a bare `await
+  // loginAttempts.record(...)` would do (the route's own catch-all
+  // converts ANY thrown error, including one from this call, into
+  // "invalid credentials"). Matches the documented worst case in
+  // login-attempts.repository.ts's own doc comment ("a session exists
+  // with no audit row, a minor historical-record gap, not a security or
+  // data-integrity issue") -- that was already the INTENDED behaviour,
+  // this makes it actually true at every call site, not just the ones
+  // that happen to run before any real side effect exists yet.
+  async function recordAttempt(input: Parameters<typeof loginAttempts.record>[0]) {
+    try {
+      await loginAttempts.record(input);
+    } catch (err) {
+      logger.error("failed to record login attempt", { outcome: input.outcome, userId: input.userId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   return {
     async register(input) {
       const client = await pool.connect();
@@ -184,28 +205,28 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
     async login(email, password, ipAddress = "unknown") {
       const user = await users.findByEmail(email);
       if (!user) {
-        await loginAttempts.record({ email, userId: null, outcome: "invalid_credentials", ipAddress, sessionId: null });
+        await recordAttempt({ email, userId: null, outcome: "invalid_credentials", ipAddress, sessionId: null });
         throw new Error("invalid credentials");
       }
       if (user.status !== "active") {
-        await loginAttempts.record({ email, userId: user.id, outcome: "account_not_active", ipAddress, sessionId: null });
+        await recordAttempt({ email, userId: user.id, outcome: "account_not_active", ipAddress, sessionId: null });
         throw new Error("account not active");
       }
 
       const passwordOk = await verifyPassword(user.passwordHash, password);
       if (!passwordOk) {
-        await loginAttempts.record({ email, userId: user.id, outcome: "invalid_credentials", ipAddress, sessionId: null });
+        await recordAttempt({ email, userId: user.id, outcome: "invalid_credentials", ipAddress, sessionId: null });
         throw new Error("invalid credentials");
       }
 
       const mfaMethod = await mfa.getTotpMethod(user.id);
       if (mfaMethod && mfaMethod.enabledAt) {
-        await loginAttempts.record({ email, userId: user.id, outcome: "mfa_required", ipAddress, sessionId: null });
+        await recordAttempt({ email, userId: user.id, outcome: "mfa_required", ipAddress, sessionId: null });
         return { status: "mfa_required", mfaPendingToken: authProvider.issueMfaPendingToken(user.id) };
       }
 
       const issued = await authProvider.issueTokens(user, ["pwd"]);
-      await loginAttempts.record({ email, userId: user.id, outcome: "success", ipAddress, sessionId: issued.sessionId });
+      await recordAttempt({ email, userId: user.id, outcome: "success", ipAddress, sessionId: issued.sessionId });
       return { status: "authenticated", tokens: { accessToken: issued.accessToken, refreshToken: issued.refreshToken, expiresIn: issued.expiresIn } };
     },
 
@@ -221,19 +242,19 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
         // pending token being issued and completion), there is still no
         // identity to record against.
         if (user) {
-          await loginAttempts.record({ email: user.email, userId: user.id, outcome: "account_not_active", ipAddress, sessionId: null });
+          await recordAttempt({ email: user.email, userId: user.id, outcome: "account_not_active", ipAddress, sessionId: null });
         }
         throw new Error("account not active");
       }
 
       const codeOk = await mfaVerifier.verifyLoginCode(userId, code);
       if (!codeOk) {
-        await loginAttempts.record({ email: user.email, userId: user.id, outcome: "invalid_mfa_code", ipAddress, sessionId: null });
+        await recordAttempt({ email: user.email, userId: user.id, outcome: "invalid_mfa_code", ipAddress, sessionId: null });
         throw new Error("invalid MFA code");
       }
 
       const issued = await authProvider.issueTokens(user, ["pwd", "otp"]);
-      await loginAttempts.record({ email: user.email, userId: user.id, outcome: "success", ipAddress, sessionId: issued.sessionId });
+      await recordAttempt({ email: user.email, userId: user.id, outcome: "success", ipAddress, sessionId: issued.sessionId });
       return { accessToken: issued.accessToken, refreshToken: issued.refreshToken, expiresIn: issued.expiresIn };
     },
 

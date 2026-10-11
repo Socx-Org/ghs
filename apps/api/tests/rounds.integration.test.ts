@@ -230,7 +230,7 @@ test("HTTP: a player can submit their own round and add hole scores, but not ano
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
     mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
-  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository, logger);
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -379,7 +379,7 @@ test("HTTP: PATCH /rounds/:id/remarks -- ghs#215", async () => {
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
     mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
-  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository, logger);
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -517,7 +517,7 @@ test("HTTP: submit rejects an incomplete round with 409, and re-POSTing a hole u
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
     mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
-  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository, logger);
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -638,7 +638,7 @@ test("HTTP: submitting a round computes its real score immediately, before any a
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
     mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
-  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository, logger);
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
