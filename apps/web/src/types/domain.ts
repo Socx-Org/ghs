@@ -356,6 +356,10 @@ export interface LoginAttemptListItem {
   // failure/mfa_required row, which never had a session to begin with.
   sessionStatus: LoginSessionStatus | null;
   sessionEndedAt: string | null;
+  // ghs#236: the raw User-Agent request header -- a forensic breadcrumb,
+  // not a trust/security control (trivially spoofable, same as
+  // ipAddress already is). Null when the request had no such header.
+  userAgent: string | null;
 }
 
 // Mirrors apps/api/src/data/pcc.repository.ts's DailyPcc exactly.

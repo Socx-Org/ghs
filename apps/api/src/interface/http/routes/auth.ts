@@ -97,7 +97,13 @@ export function authRouter(service: AuthService, settings: SystemSettingsService
       // proxy" setting + nginx's X-Forwarded-For/X-Real-IP) -- the
       // "unknown" fallback only ever matters for a genuinely malformed
       // request Express itself couldn't resolve an address for.
-      const result = await service.login(email.trim().toLowerCase(), password, req.ip ?? "unknown");
+      //
+      // ghs#236: req.get("user-agent") returns undefined when the header
+      // is absent -- normalised to null, not "unknown" (unlike ip above),
+      // since a missing User-Agent is a real, legitimate absence to
+      // render as such, not a fallback placeholder for something that
+      // should always be resolvable.
+      const result = await service.login(email.trim().toLowerCase(), password, req.ip ?? "unknown", req.get("user-agent") ?? null);
       if (result.status === "mfa_required") {
         res.status(200).json({ mfaRequired: true, mfaPendingToken: result.mfaPendingToken });
         return;
@@ -115,7 +121,7 @@ export function authRouter(service: AuthService, settings: SystemSettingsService
         res.status(400).json({ error: "mfaPendingToken and code are required" });
         return;
       }
-      const tokens = await service.completeMfaLogin(mfaPendingToken, code, req.ip ?? "unknown");
+      const tokens = await service.completeMfaLogin(mfaPendingToken, code, req.ip ?? "unknown", req.get("user-agent") ?? null);
       res.status(200).json(tokens);
     } catch {
       res.status(401).json({ error: "invalid MFA code or pending token" });

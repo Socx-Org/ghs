@@ -184,6 +184,24 @@ test("ghs#231: a successful login writes a 'success' row carrying the real sessi
   assert.equal(rows[0]!.sessionStatus, "active");
 });
 
+test("ghs#236: a login carries the real User-Agent header through to the audit row; a login with none stores null, not an error", async () => {
+  const s = buildServices();
+  await s.authService.register({ email: "audit-ua@example.com", password: "correct-horse-battery", firstName: "Audit", lastName: "UserAgent" });
+  const user = await s.users.findByEmail("audit-ua@example.com");
+  const [activationPayload] = await outboxPayloads(user!.id, "account_activation");
+  await s.authService.activateAccount(activationPayload!.token as string);
+
+  await s.authService.login("audit-ua@example.com", "correct-horse-battery", "203.0.113.5", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+  // No 4th arg at all -- exercises the real default (null), the same
+  // shape a request missing the header entirely produces at the route.
+  await s.authService.login("audit-ua@example.com", "correct-horse-battery", "203.0.113.5");
+
+  const rows = (await loginAttemptRows(s.loginAttemptsRepository, "audit-ua@example.com")).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]!.userAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+  assert.equal(rows[1]!.userAgent, null);
+});
+
 test("ghs#231: a wrong password AND a nonexistent email both write 'invalid_credentials' -- the enumeration-safe outcome stays indistinguishable in the audit log too", async () => {
   const s = buildServices();
   await s.authService.register({ email: "audit-badpw@example.com", password: "correct-horse-battery", firstName: "Audit", lastName: "BadPw" });

@@ -20,6 +20,10 @@ export interface RecordLoginAttemptInput {
   // Set only for a 'success' outcome -- every other outcome never
   // established a session at all.
   sessionId: string | null;
+  // ghs#236: the raw User-Agent request header -- a forensic breadcrumb,
+  // not a trust/security control (trivially spoofable, same as
+  // ipAddress already is). Null when the request had no such header.
+  userAgent: string | null;
 }
 
 export interface LoginAttemptRecord {
@@ -38,6 +42,7 @@ export interface LoginAttemptRecord {
   // failure/mfa_required row, which never had a session to begin with.
   sessionStatus: LoginSessionStatus | null;
   sessionEndedAt: string | null;
+  userAgent: string | null;
 }
 
 export interface ListLoginAttemptsPage {
@@ -68,6 +73,7 @@ interface LoginAttemptRow {
   city: string | null;
   session_id: string | null;
   created_at: Date;
+  user_agent: string | null;
   // From the LEFT JOIN against refresh_tokens -- both null when
   // session_id is null (every non-'success' row) or, defensively, when
   // the joined row genuinely doesn't exist any more (e.g. a hard-deleted
@@ -104,6 +110,7 @@ function toRecord(row: LoginAttemptRow): LoginAttemptRecord {
     createdAt: row.created_at.toISOString(),
     sessionStatus,
     sessionEndedAt,
+    userAgent: row.user_agent,
   };
 }
 
@@ -111,9 +118,9 @@ export function createLoginAttemptsRepository(pool: Pool): LoginAttemptsReposito
   return {
     async record(input, client) {
       await (client ?? pool).query(
-        `INSERT INTO login_attempts (email, user_id, outcome, ip_address, session_id)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [input.email, input.userId, input.outcome, input.ipAddress, input.sessionId],
+        `INSERT INTO login_attempts (email, user_id, outcome, ip_address, session_id, user_agent)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [input.email, input.userId, input.outcome, input.ipAddress, input.sessionId, input.userAgent],
       );
     },
 
@@ -142,7 +149,7 @@ export function createLoginAttemptsRepository(pool: Pool): LoginAttemptsReposito
       // makes ties deterministic, not "more correct" among genuinely-
       // simultaneous attempts, which have no real distinguishable order.
       const result = await pool.query<LoginAttemptRow>(
-        `SELECT la.id, la.email, la.user_id, la.outcome, la.ip_address, la.country, la.region, la.city, la.session_id, la.created_at,
+        `SELECT la.id, la.email, la.user_id, la.outcome, la.ip_address, la.country, la.region, la.city, la.session_id, la.created_at, la.user_agent,
                 rt.revoked_at AS session_revoked_at, rt.expires_at AS session_expires_at
          FROM login_attempts la
          LEFT JOIN refresh_tokens rt ON rt.session_id = la.session_id AND rt.rotated_at IS NULL
