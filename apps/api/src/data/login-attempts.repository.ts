@@ -128,12 +128,25 @@ export function createLoginAttemptsRepository(pool: Pool): LoginAttemptsReposito
       // 020's own doc comment), so this always finds the session's real,
       // up-to-date revoked_at/expires_at, regardless of how many times
       // it's rotated since the login this row records.
+      //
+      // la.id ASC is a real tiebreaker, not decoration (review finding) --
+      // Postgres's now() is constant for the whole transaction, not
+      // per-statement, so a burst of attempts in the same transaction
+      // (or just within the same timestamp's real resolution, e.g.
+      // credential-stuffing) can genuinely share created_at. Without a
+      // tiebreaker, those rows sort in a non-deterministic order on
+      // every call, and an admin paging with LIMIT/OFFSET can silently
+      // skip or duplicate rows across pages -- same reasoning as
+      // rounds.repository.ts's own ORDER BY ..., r.id ASC. id itself
+      // carries no ordering meaning (UUIDs aren't sequential); this only
+      // makes ties deterministic, not "more correct" among genuinely-
+      // simultaneous attempts, which have no real distinguishable order.
       const result = await pool.query<LoginAttemptRow>(
         `SELECT la.id, la.email, la.user_id, la.outcome, la.ip_address, la.country, la.region, la.city, la.session_id, la.created_at,
                 rt.revoked_at AS session_revoked_at, rt.expires_at AS session_expires_at
          FROM login_attempts la
          LEFT JOIN refresh_tokens rt ON rt.session_id = la.session_id AND rt.rotated_at IS NULL
-         ORDER BY la.created_at DESC
+         ORDER BY la.created_at DESC, la.id ASC
          LIMIT $1 OFFSET $2`,
         [limit, offset],
       );
