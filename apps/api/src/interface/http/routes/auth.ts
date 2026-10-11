@@ -93,7 +93,11 @@ export function authRouter(service: AuthService, settings: SystemSettingsService
         res.status(400).json({ error: "email and password are required" });
         return;
       }
-      const result = await service.login(email.trim().toLowerCase(), password);
+      // ghs#231: req.ip is already accurate here (app.ts's own "trust
+      // proxy" setting + nginx's X-Forwarded-For/X-Real-IP) -- the
+      // "unknown" fallback only ever matters for a genuinely malformed
+      // request Express itself couldn't resolve an address for.
+      const result = await service.login(email.trim().toLowerCase(), password, req.ip ?? "unknown");
       if (result.status === "mfa_required") {
         res.status(200).json({ mfaRequired: true, mfaPendingToken: result.mfaPendingToken });
         return;
@@ -111,7 +115,7 @@ export function authRouter(service: AuthService, settings: SystemSettingsService
         res.status(400).json({ error: "mfaPendingToken and code are required" });
         return;
       }
-      const tokens = await service.completeMfaLogin(mfaPendingToken, code);
+      const tokens = await service.completeMfaLogin(mfaPendingToken, code, req.ip ?? "unknown");
       res.status(200).json(tokens);
     } catch {
       res.status(401).json({ error: "invalid MFA code or pending token" });

@@ -3,13 +3,18 @@ import type { Pool } from "pg";
 export interface RefreshTokenRecord {
   id: string;
   userId: string;
+  // ghs#231: generated once at login, copied forward unchanged on every
+  // rotation (see auth-provider.ts's own issueTokens) -- lets a login
+  // session be tracked end-to-end without this table's own rotation/
+  // revocation logic changing at all.
+  sessionId: string;
   expiresAt: Date;
   rotatedAt: Date | null;
   revokedAt: Date | null;
 }
 
 export interface RefreshTokensRepository {
-  create(userId: string, tokenHash: string, expiresAt: Date): Promise<void>;
+  create(userId: string, tokenHash: string, expiresAt: Date, sessionId: string): Promise<void>;
   findByHash(tokenHash: string): Promise<RefreshTokenRecord | null>;
   // Single-use: marks a refresh token rotated the moment it's exchanged.
   // A second attempt to use the same token is then rejected -- real
@@ -39,27 +44,35 @@ export interface RefreshTokensRepository {
 interface RefreshTokenRow {
   id: string;
   user_id: string;
+  session_id: string;
   expires_at: Date;
   rotated_at: Date | null;
   revoked_at: Date | null;
 }
 
 function toRecord(row: RefreshTokenRow): RefreshTokenRecord {
-  return { id: row.id, userId: row.user_id, expiresAt: row.expires_at, rotatedAt: row.rotated_at, revokedAt: row.revoked_at };
+  return {
+    id: row.id,
+    userId: row.user_id,
+    sessionId: row.session_id,
+    expiresAt: row.expires_at,
+    rotatedAt: row.rotated_at,
+    revokedAt: row.revoked_at,
+  };
 }
 
 export function createRefreshTokensRepository(pool: Pool): RefreshTokensRepository {
   return {
-    async create(userId, tokenHash, expiresAt) {
+    async create(userId, tokenHash, expiresAt, sessionId) {
       await pool.query(
-        "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
-        [userId, tokenHash, expiresAt],
+        "INSERT INTO refresh_tokens (user_id, token_hash, expires_at, session_id) VALUES ($1, $2, $3, $4)",
+        [userId, tokenHash, expiresAt, sessionId],
       );
     },
 
     async findByHash(tokenHash) {
       const result = await pool.query<RefreshTokenRow>(
-        "SELECT id, user_id, expires_at, rotated_at, revoked_at FROM refresh_tokens WHERE token_hash = $1",
+        "SELECT id, user_id, session_id, expires_at, rotated_at, revoked_at FROM refresh_tokens WHERE token_hash = $1",
         [tokenHash],
       );
       return result.rows[0] ? toRecord(result.rows[0]) : null;

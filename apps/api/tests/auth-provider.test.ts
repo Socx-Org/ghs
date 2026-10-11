@@ -15,8 +15,8 @@ function fakeRefreshTokens(): RefreshTokensRepository & { records: Map<string, R
   let nextId = 1;
   return {
     records,
-    async create(userId, tokenHash, expiresAt) {
-      records.set(tokenHash, { id: String(nextId++), userId, expiresAt, rotatedAt: null, revokedAt: null });
+    async create(userId, tokenHash, expiresAt, sessionId) {
+      records.set(tokenHash, { id: String(nextId++), userId, sessionId, expiresAt, rotatedAt: null, revokedAt: null });
     },
     async findByHash(tokenHash) {
       return records.get(tokenHash) ?? null;
@@ -75,11 +75,32 @@ test("validateAndRotateRefreshToken accepts a fresh token once, then rejects reu
   const provider = createLocalAuthProvider(config, refreshTokens);
   const tokens = await provider.issueTokens(fakeUser, ["pwd"]);
 
-  const userId = await provider.validateAndRotateRefreshToken(tokens.refreshToken);
+  const { userId } = await provider.validateAndRotateRefreshToken(tokens.refreshToken);
   assert.equal(userId, fakeUser.id);
 
   // Reuse of the same (now-rotated) token must fail.
   await assert.rejects(() => provider.validateAndRotateRefreshToken(tokens.refreshToken));
+});
+
+test("ghs#231: a session's own id survives rotation unchanged, without a caller-supplied sessionId generating a new one", async () => {
+  const refreshTokens = fakeRefreshTokens();
+  const provider = createLocalAuthProvider(config, refreshTokens);
+  const original = await provider.issueTokens(fakeUser, ["pwd"]);
+
+  const { sessionId: rotatedSessionId } = await provider.validateAndRotateRefreshToken(original.refreshToken);
+  assert.equal(rotatedSessionId, original.sessionId);
+
+  // issueTokens, given that sessionId back (the real refresh() flow),
+  // must carry it forward onto the new token pair too -- not generate a
+  // fresh one just because a new row is being created.
+  const reissued = await provider.issueTokens(fakeUser, ["pwd"], rotatedSessionId);
+  assert.equal(reissued.sessionId, original.sessionId);
+
+  // Omitting sessionId entirely (a fresh login, not a refresh) must
+  // still generate a new, different one -- the default isn't "reuse
+  // whatever the last call happened to produce".
+  const unrelatedLogin = await provider.issueTokens(fakeUser, ["pwd"]);
+  assert.notEqual(unrelatedLogin.sessionId, original.sessionId);
 });
 
 test("reuse of a rotated token revokes every session outstanding at that moment (not sessions issued afterward)", async () => {
@@ -102,7 +123,7 @@ test("reuse of a rotated token revokes every session outstanding at that moment 
   // A session issued fresh AFTER the revocation event is a legitimate new
   // login, not something reuse-detection should also block.
   const sessionC = await provider.issueTokens(fakeUser, ["pwd"]);
-  const userId = await provider.validateAndRotateRefreshToken(sessionC.refreshToken);
+  const { userId } = await provider.validateAndRotateRefreshToken(sessionC.refreshToken);
   assert.equal(userId, fakeUser.id);
 });
 

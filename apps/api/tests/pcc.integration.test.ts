@@ -12,6 +12,8 @@ import { createPccService } from "../src/application/pcc.service.ts";
 import { createScoringService } from "../src/application/scoring.service.ts";
 import { createRecalculationOrchestrator } from "../src/application/recalculation.service.ts";
 import { createNotificationsRepository } from "../src/data/notifications.repository.ts";
+import { createLoginAttemptsRepository } from "../src/data/login-attempts.repository.ts";
+import { createLoginAttemptsService } from "../src/application/login-attempts.service.ts";
 import { createUsersRepository } from "../src/data/users.repository.ts";
 import { createActivationTokenRepository } from "../src/data/activation-tokens.repository.ts";
 import { createPasswordResetTokenRepository } from "../src/data/password-reset-tokens.repository.ts";
@@ -187,14 +189,16 @@ test("HTTP: admin can calculate/override PCC for a tee-configuration/day; a play
   const settingsRepo = createSystemSettingsRepository(pool);
   const roundsRepo = createRoundsRepository(pool);
   const notificationsRepository = createNotificationsRepository(pool);
+  const loginAttemptsRepository = createLoginAttemptsRepository(pool);
 
   const authProvider = createLocalAuthProvider(authConfig, refreshTokens);
   const mfaService = createMfaService(mfaRepo, authConfig.mfaEncryptionKey);
   const systemSettingsService = createSystemSettingsService(settingsRepo);
   const authService = createAuthService({
     pool, logger, authProvider, users, players, activationTokens, passwordResetTokens,
-    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository,
+    mfa: mfaRepo, mfaVerifier: mfaService, notifications: notificationsRepository, loginAttempts: loginAttemptsRepository,
   });
+  const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository, logger);
   const clubsService = createClubsService(clubsRepo, logger);
   const coursesService = createCoursesService(coursesRepo, logger);
   const adminUsersService = createAdminUsersService(pool, logger, users, players, activationTokens, notificationsRepository);
@@ -208,7 +212,7 @@ test("HTTP: admin can calculate/override PCC for a tee-configuration/day; a play
 
   const app = createApp({
     logger, clubsService, coursesService, authService, mfaService,
-    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, playersRepository: players, authProvider,
+    adminUsersService, systemSettingsService, roundsService, handicapOverridesService, pccService, recalculationOrchestrator, handicapHistoryService, dashboardService, loginAttemptsService, playersRepository: players, authProvider,
   });
 
   const server = app.listen(0);
