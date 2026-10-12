@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createLogger } from "../src/logger.ts";
-import { createGeoIpService } from "../src/lib/geoip.ts";
+import { createGeoIpService, mostSpecificSubdivisionName } from "../src/lib/geoip.ts";
 
 // ghs#234. No real database shipped in the repo (apps/api/data/geoip/ is
 // gitignored, ~50MB of MaxMind-licensed binary data, refreshed
@@ -16,6 +16,25 @@ test("createGeoIpService: a missing database file degrades to every lookup retur
 
   assert.deepEqual(service.lookup("8.8.8.8"), { country: null, region: null, city: null });
   assert.deepEqual(service.lookup("not-an-ip-at-all"), { country: null, region: null, city: null });
+});
+
+// Review fix: MaxMind orders subdivisions general -> specific (verified
+// against real data: 81.2.69.142 -> ["England", "Suffolk"]), so the
+// most specific one is always the LAST element, not subdivisions[0] (an
+// earlier, incorrect version of this code read [0], which happened to
+// go unnoticed against ad-hoc single-subdivision test IPs, where [0]
+// and the last element are the same element). Pure synthetic data, no
+// database needed -- this is the one guarantee a real download can't
+// prove on its own, since GeoLite2's free tier usually has only one
+// subdivision level populated anyway.
+test("mostSpecificSubdivisionName: picks the LAST subdivision (most specific), not the first (most general)", () => {
+  assert.equal(
+    mostSpecificSubdivisionName([{ names: { en: "England" } }, { names: { en: "Suffolk" } }] as never),
+    "Suffolk",
+  );
+  assert.equal(mostSpecificSubdivisionName([{ names: { en: "California" } }] as never), "California");
+  assert.equal(mostSpecificSubdivisionName([]), null);
+  assert.equal(mostSpecificSubdivisionName(undefined), null);
 });
 
 const REAL_DB_PATH = join(import.meta.dirname, "..", "data", "geoip", "GeoLite2-City.mmdb");
@@ -39,6 +58,12 @@ test("createGeoIpService: against the real GeoLite2-City database -- a real publ
 
   const googleDns = service.lookup("8.8.8.8");
   assert.equal(googleDns.country, "United States");
+
+  // A real two-subdivision IP (England -> Suffolk) -- confirms region
+  // resolves to the specific county, not the country-level "England".
+  const ukLookup = service.lookup("81.2.69.142");
+  assert.equal(ukLookup.country, "United Kingdom");
+  assert.equal(ukLookup.region, "Suffolk");
 
   for (const privateIp of ["127.0.0.1", "::ffff:127.0.0.1", "::1", "192.168.1.1", "10.0.0.1"]) {
     assert.deepEqual(service.lookup(privateIp), { country: null, region: null, city: null }, `expected ${privateIp} to resolve to all-null`);

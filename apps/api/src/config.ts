@@ -64,7 +64,8 @@ export interface AppConfig {
   // always sets GEOIP_DB_PATH explicitly (/opt/ghs/shared/geoip/...,
   // the persistent, non-versioned directory every release shares); the
   // default here only ever matters for local dev, where the file lives
-  // at apps/api/data/geoip/ relative to cwd (see apps/api/README.md).
+  // at apps/api/data/geoip/ relative to cwd (see the repo root's own
+  // .env.example for the one-time download command).
   geoIpDbPath: string;
 }
 

@@ -9,6 +9,6 @@ dist/
 
 # ghs#234: the real GeoLite2-City.mmdb (~50MB, MaxMind-licensed binary
 # data, refreshed periodically) -- never committed, downloaded locally
-# per GEOIP_DB_PATH/apps/api/README.md, and on the server per the CI
-# deploy job's own geo-IP refresh step.
+# per .env.example's own documented one-time download command, and on
+# the server per the CI deploy job's own geo-IP refresh step.
 apps/api/data/geoip/

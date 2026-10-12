@@ -18,6 +18,22 @@ export interface GeoIpService {
 
 const NULL_RESULT: GeoIpResult = { country: null, region: null, city: null };
 
+// Review fix: MaxMind's own documented ordering is general -> specific,
+// not the reverse -- subdivisions[0] is the LARGEST subdivision (e.g.
+// "England"), and the most specific one available (e.g. "Suffolk") is
+// always the LAST element, confirmed against real data (81.2.69.142 ->
+// ["England", "Suffolk"]). GeoLite2's free tier usually has only one
+// subdivision level populated at all (where [0] and the last element
+// are the same element, masking this for most IPs -- exactly why this
+// went unnoticed against ad-hoc single-subdivision testing), but a
+// two-level example is real, not hypothetical. Extracted so this one
+// piece of ordering logic is unit-testable on its own, independent of
+// what any real downloaded database happens to contain.
+export function mostSpecificSubdivisionName(subdivisions: CityResponse["subdivisions"]): string | null {
+  if (!subdivisions || subdivisions.length === 0) return null;
+  return subdivisions[subdivisions.length - 1]!.names?.en ?? null;
+}
+
 // Always resolves, never rejects -- an unavailable/unreadable database
 // file degrades to every lookup returning NULL_RESULT (identical to this
 // column's behaviour before this issue, ghs#231), not a startup crash.
@@ -48,10 +64,10 @@ export async function createGeoIpService(dbPath: string, logger: Logger): Promis
         if (!result) return NULL_RESULT;
         return {
           country: result.country?.names?.en ?? null,
-          // GeoLite2's first subdivision is the most specific one
-          // available (e.g. a US state) -- there is no separate
-          // "region" field in the schema itself.
-          region: result.subdivisions?.[0]?.names?.en ?? null,
+          // There is no separate "region" field in the schema itself --
+          // the most specific subdivision available is the closest
+          // analogue (e.g. a US state, or an English county).
+          region: mostSpecificSubdivisionName(result.subdivisions),
           city: result.city?.names?.en ?? null,
         };
       } catch (err) {
