@@ -33,6 +33,7 @@ import { createRecalculationOrchestrator } from "./application/recalculation.ser
 import { createNotificationsRepository } from "./data/notifications.repository.ts";
 import { createLoginAttemptsRepository } from "./data/login-attempts.repository.ts";
 import { createLoginAttemptsService } from "./application/login-attempts.service.ts";
+import { createGeoIpService } from "./lib/geoip.ts";
 import { createApp } from "./interface/http/app.ts";
 
 // Composition root: config and secrets are read exactly once, here, and
@@ -71,6 +72,13 @@ const roundsService = createRoundsService(pool, roundsRepository, coursesReposit
 const coursesService = createCoursesService(coursesRepository, logger);
 const authProvider = createLocalAuthProvider(config.auth, refreshTokensRepository);
 const mfaService = createMfaService(mfaRepository, config.auth.mfaEncryptionKey);
+// ghs#234: awaited (unlike checkMigrationDrift's own deliberately
+// fire-and-forget pattern below) -- this resolves fast (a local file
+// open, not a network call) and authService needs a real GeoIpService
+// instance synchronously, not a Promise of one. Never rejects itself
+// (see geoip.ts's own doc comment), so this can never block/crash
+// startup even when the database file is missing or unreadable.
+const geoIpService = await createGeoIpService(config.geoIpDbPath, logger);
 const authService = createAuthService({
   pool,
   logger,
@@ -83,6 +91,7 @@ const authService = createAuthService({
   mfaVerifier: mfaService,
   notifications: notificationsRepository,
   loginAttempts: loginAttemptsRepository,
+  geoIp: geoIpService,
 });
 const loginAttemptsService = createLoginAttemptsService(loginAttemptsRepository);
 const adminUsersService = createAdminUsersService(pool, logger, usersRepository, playersRepository, activationTokenRepository, notificationsRepository);

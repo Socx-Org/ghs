@@ -30,6 +30,7 @@
     "express": "^5.1.0",
     "express-rate-limit": "^8.6.2",
     "jsonwebtoken": "^9.0.2",
+    "maxmind": "^5.0.7",
     "nodemailer": "^9.0.5",
     "otplib": "^13.4.1",
     "pg": "^8.13.0"

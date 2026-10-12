@@ -8,6 +8,7 @@ import type { PasswordResetTokenRepository } from "../data/password-reset-tokens
 import type { MfaRepository } from "../data/mfa.repository.ts";
 import type { NotificationsRepository } from "../data/notifications.repository.ts";
 import type { LoginAttemptsRepository } from "../data/login-attempts.repository.ts";
+import type { GeoIpService } from "../lib/geoip.ts";
 import { hashPassword, verifyPassword } from "../lib/password.ts";
 import { generateToken, hashToken } from "../lib/tokens.ts";
 
@@ -92,6 +93,13 @@ export interface AuthServiceDeps {
   mfaVerifier: MfaCodeVerifier;
   notifications: NotificationsRepository;
   loginAttempts: LoginAttemptsRepository;
+  // ghs#234: optional -- most existing tests of this file predate geo-IP
+  // enrichment entirely and have no reason to provide one. A missing
+  // geoIp degrades to every lookup resolving null (recordAttempt below),
+  // the exact same behaviour as GeoIpService's own "database file
+  // unavailable" fallback -- the real index.ts composition root always
+  // provides a real one in every environment this app actually runs in.
+  geoIp?: GeoIpService;
 }
 
 export interface AuthService {
@@ -130,7 +138,7 @@ export interface AuthService {
 }
 
 export function createAuthService(deps: AuthServiceDeps): AuthService {
-  const { pool, logger, authProvider, users, players, activationTokens, passwordResetTokens, mfa, mfaVerifier, notifications, loginAttempts } = deps;
+  const { pool, logger, authProvider, users, players, activationTokens, passwordResetTokens, mfa, mfaVerifier, notifications, loginAttempts, geoIp } = deps;
 
   // ghs#231 review fix: best-effort, never propagated. The success path
   // calls this AFTER authProvider.issueTokens has already created (and
@@ -145,9 +153,18 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
   // data-integrity issue") -- that was already the INTENDED behaviour,
   // this makes it actually true at every call site, not just the ones
   // that happen to run before any real side effect exists yet.
-  async function recordAttempt(input: Parameters<typeof loginAttempts.record>[0]) {
+  // ghs#234: every one of the 8 call sites below stays unchanged -- the
+  // geo lookup happens once, here, keyed off the input's own ipAddress,
+  // rather than each call site resolving and passing it individually.
+  // geoIp?.lookup(...) ?? the all-null fallback is identical to what
+  // GeoIpService.lookup itself already returns when its own database is
+  // unavailable -- "no geoIp configured" and "geoIp configured but can't
+  // answer" are the same real absence, not two different cases to
+  // distinguish here.
+  async function recordAttempt(input: Omit<Parameters<typeof loginAttempts.record>[0], "country" | "region" | "city">) {
+    const geo = geoIp?.lookup(input.ipAddress) ?? { country: null, region: null, city: null };
     try {
-      await loginAttempts.record(input);
+      await loginAttempts.record({ ...input, ...geo });
     } catch (err) {
       logger.error("failed to record login attempt", { outcome: input.outcome, userId: input.userId, error: err instanceof Error ? err.message : String(err) });
     }

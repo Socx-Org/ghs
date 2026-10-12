@@ -202,6 +202,61 @@ test("ghs#236: a login carries the real User-Agent header through to the audit r
   assert.equal(rows[1]!.userAgent, null);
 });
 
+// ghs#234: proves the WIRING (auth.service.ts -> repository -> DB), not
+// the real MaxMind lookup itself -- that's geoip.test.ts's own job,
+// against the real database where one has been downloaded locally. A
+// fake GeoIpService here keeps this test fast, portable, and CI-safe
+// (no real .mmdb file needed), same "fake the dependency" technique as
+// the broken-audit-write test above.
+test("ghs#234: a resolved geo-IP lookup is threaded through to the audit row's country/region/city", async () => {
+  const s = buildServices();
+  await s.authService.register({ email: "audit-geoip@example.com", password: "correct-horse-battery", firstName: "Audit", lastName: "GeoIp" });
+  const user = await s.users.findByEmail("audit-geoip@example.com");
+  const [activationPayload] = await outboxPayloads(user!.id, "account_activation");
+  await s.authService.activateAccount(activationPayload!.token as string);
+
+  const fakeGeoIp = { lookup: (ipAddress: string) => (ipAddress === "203.0.113.5" ? { country: "United States", region: "California", city: "Mountain View" } : { country: null, region: null, city: null }) };
+  const authServiceWithGeoIp = createAuthService({
+    pool,
+    logger,
+    authProvider: s.authProvider,
+    users: s.users,
+    players: s.players,
+    activationTokens: s.activationTokens,
+    passwordResetTokens: s.passwordResetTokens,
+    mfa: createMfaRepository(pool),
+    mfaVerifier: s.mfaService,
+    notifications: createNotificationsRepository(pool),
+    loginAttempts: s.loginAttemptsRepository,
+    geoIp: fakeGeoIp,
+  });
+
+  await authServiceWithGeoIp.login("audit-geoip@example.com", "correct-horse-battery", "203.0.113.5");
+
+  const [row] = await loginAttemptRows(s.loginAttemptsRepository, "audit-geoip@example.com");
+  assert.equal(row!.country, "United States");
+  assert.equal(row!.region, "California");
+  assert.equal(row!.city, "Mountain View");
+});
+
+test("ghs#234: no geoIp provided at all degrades to null country/region/city, same as before this feature existed", async () => {
+  const s = buildServices();
+  await s.authService.register({ email: "audit-no-geoip@example.com", password: "correct-horse-battery", firstName: "Audit", lastName: "NoGeoIp" });
+  const user = await s.users.findByEmail("audit-no-geoip@example.com");
+  const [activationPayload] = await outboxPayloads(user!.id, "account_activation");
+  await s.authService.activateAccount(activationPayload!.token as string);
+
+  // s.authService itself (buildServices()'s own default construction)
+  // never passes a geoIp dependency at all -- the real no-op case, not
+  // simulated via a fake that happens to always return null.
+  await s.authService.login("audit-no-geoip@example.com", "correct-horse-battery", "203.0.113.5");
+
+  const [row] = await loginAttemptRows(s.loginAttemptsRepository, "audit-no-geoip@example.com");
+  assert.equal(row!.country, null);
+  assert.equal(row!.region, null);
+  assert.equal(row!.city, null);
+});
+
 test("ghs#231: a wrong password AND a nonexistent email both write 'invalid_credentials' -- the enumeration-safe outcome stays indistinguishable in the audit log too", async () => {
   const s = buildServices();
   await s.authService.register({ email: "audit-badpw@example.com", password: "correct-horse-battery", firstName: "Audit", lastName: "BadPw" });
