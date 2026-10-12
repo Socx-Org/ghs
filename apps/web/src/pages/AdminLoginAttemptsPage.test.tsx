@@ -143,9 +143,7 @@ describe("AdminLoginAttemptsPage", () => {
     expect(userAgentCell.textContent).not.toEqual(ATTEMPTS.items[0]!.userAgent);
     expect(userAgentCell.textContent!.length).toBeLessThan(ATTEMPTS.items[0]!.userAgent!.length);
 
-    // Same fake-timer hover pattern as Tooltip's own test suite -- the
-    // trigger here is a plain, non-focusable <span>, so userEvent.tab()
-    // (focus, no delay) isn't a real option the way it is for a Button.
+    // Same fake-timer hover pattern as Tooltip's own test suite.
     vi.useFakeTimers();
     fireEvent.mouseEnter(within(userAgentCell).getByText(/Mozilla/));
     act(() => vi.advanceTimersByTime(400));
@@ -154,6 +152,31 @@ describe("AdminLoginAttemptsPage", () => {
     const failedRow = within(table).getByText("failed@example.com").closest("tr")!;
     const failedUserAgentCell = within(failedRow).getAllByRole("cell")[4]!;
     expect(failedUserAgentCell).toHaveTextContent("—");
+  });
+
+  // Review finding, PR #239: the trigger is a plain <span>, unlike every
+  // other Tooltip usage in this app (which wraps an already-focusable
+  // Button) -- without its own tabIndex, Tooltip's onFocus handler could
+  // never fire for it, leaving the full User-Agent reachable on
+  // hover/touch but genuinely unreachable by keyboard/screen-reader
+  // navigation. Same "shows on focus (no delay)" assertion as Tooltip's
+  // own test suite.
+  it("ghs#236 review fix: the truncated User-Agent's full value is reachable by keyboard focus, not hover/touch only", async () => {
+    mock.onGet("/admin/login-attempts").reply(200, ATTEMPTS);
+    renderAsRole("admin");
+    await screen.findByText("success@example.com");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    const table = screen.getByRole("table");
+    const successRow = within(table).getByText("success@example.com").closest("tr")!;
+    const trigger = within(successRow).getByText(/Mozilla/);
+    // The real proof this element is in the keyboard Tab order at all:
+    // a genuinely non-focusable element (no tabIndex) can't receive
+    // focus this way either in jsdom or a real browser.
+    expect(trigger).toHaveAttribute("tabindex", "0");
+
+    trigger.focus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(ATTEMPTS.items[0]!.userAgent!);
   });
 
   it("filters by outcome", async () => {

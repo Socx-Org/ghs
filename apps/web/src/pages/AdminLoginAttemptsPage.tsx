@@ -50,6 +50,14 @@ function describeQueryError(error: unknown, fallback: string): string {
 // Tooltip, same "truncate + Tooltip for the full value" treatment this
 // app already has no other precedent for, but is the obvious fit here
 // (same component AdminAccountsPage's own icon-only row actions use).
+//
+// Review fix: the trigger (a plain <span>/<p>, unlike every other
+// Tooltip usage in this app, which wraps an already-focusable Button)
+// needs its own `tabIndex={0}` -- Tooltip.tsx's own onFocus handler
+// only ever fires via a real focus event, which a non-interactive
+// element can never receive without one. Without this, the full value
+// was reachable on hover/touch but genuinely unreachable by keyboard or
+// screen-reader navigation.
 const USER_AGENT_TRUNCATE_LENGTH = 40;
 
 function truncateUserAgent(userAgent: string): string {
@@ -130,7 +138,9 @@ export default function AdminLoginAttemptsPage() {
                   <TableCell>
                     {item.userAgent ? (
                       <Tooltip content={item.userAgent}>
-                        <span>{truncateUserAgent(item.userAgent)}</span>
+                        <span tabIndex={0} className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                          {truncateUserAgent(item.userAgent)}
+                        </span>
                       </Tooltip>
                     ) : (
                       "—"
@@ -154,7 +164,9 @@ export default function AdminLoginAttemptsPage() {
                     </p>
                     {item.userAgent && (
                       <Tooltip content={item.userAgent}>
-                        <p className="text-xs text-text-muted">{truncateUserAgent(item.userAgent)}</p>
+                        <p tabIndex={0} className="rounded text-xs text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                          {truncateUserAgent(item.userAgent)}
+                        </p>
                       </Tooltip>
                     )}
                     {item.sessionStatus && (
