@@ -102,8 +102,11 @@ export interface AuthService {
   // password/activation/account-status flows entirely unrelated to
   // login auditing, and forcing a fake IP onto all of them would be
   // pure noise.
-  login(email: string, password: string, ipAddress?: string): Promise<LoginResult>;
-  completeMfaLogin(mfaPendingToken: string, code: string, ipAddress?: string): Promise<TokenPair>;
+  // ghs#236: userAgent defaults to null the same way ipAddress defaults
+  // to "unknown" above -- most existing tests of this method predate
+  // user-agent capture entirely and have no reason to pass one.
+  login(email: string, password: string, ipAddress?: string, userAgent?: string | null): Promise<LoginResult>;
+  completeMfaLogin(mfaPendingToken: string, code: string, ipAddress?: string, userAgent?: string | null): Promise<TokenPair>;
   refresh(refreshToken: string): Promise<TokenPair>;
   // ghs#59: real logout -- revokes exactly the presented refresh token,
   // never other active sessions belonging to the same user.
@@ -202,35 +205,35 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
       }
     },
 
-    async login(email, password, ipAddress = "unknown") {
+    async login(email, password, ipAddress = "unknown", userAgent = null) {
       const user = await users.findByEmail(email);
       if (!user) {
-        await recordAttempt({ email, userId: null, outcome: "invalid_credentials", ipAddress, sessionId: null });
+        await recordAttempt({ email, userId: null, outcome: "invalid_credentials", ipAddress, sessionId: null, userAgent });
         throw new Error("invalid credentials");
       }
       if (user.status !== "active") {
-        await recordAttempt({ email, userId: user.id, outcome: "account_not_active", ipAddress, sessionId: null });
+        await recordAttempt({ email, userId: user.id, outcome: "account_not_active", ipAddress, sessionId: null, userAgent });
         throw new Error("account not active");
       }
 
       const passwordOk = await verifyPassword(user.passwordHash, password);
       if (!passwordOk) {
-        await recordAttempt({ email, userId: user.id, outcome: "invalid_credentials", ipAddress, sessionId: null });
+        await recordAttempt({ email, userId: user.id, outcome: "invalid_credentials", ipAddress, sessionId: null, userAgent });
         throw new Error("invalid credentials");
       }
 
       const mfaMethod = await mfa.getTotpMethod(user.id);
       if (mfaMethod && mfaMethod.enabledAt) {
-        await recordAttempt({ email, userId: user.id, outcome: "mfa_required", ipAddress, sessionId: null });
+        await recordAttempt({ email, userId: user.id, outcome: "mfa_required", ipAddress, sessionId: null, userAgent });
         return { status: "mfa_required", mfaPendingToken: authProvider.issueMfaPendingToken(user.id) };
       }
 
       const issued = await authProvider.issueTokens(user, ["pwd"]);
-      await recordAttempt({ email, userId: user.id, outcome: "success", ipAddress, sessionId: issued.sessionId });
+      await recordAttempt({ email, userId: user.id, outcome: "success", ipAddress, sessionId: issued.sessionId, userAgent });
       return { status: "authenticated", tokens: { accessToken: issued.accessToken, refreshToken: issued.refreshToken, expiresIn: issued.expiresIn } };
     },
 
-    async completeMfaLogin(mfaPendingToken, code, ipAddress = "unknown") {
+    async completeMfaLogin(mfaPendingToken, code, ipAddress = "unknown", userAgent = null) {
       // Throws on a bad/expired pending token before any identity is
       // resolved -- no email/user to attribute an audit row to, so none
       // is written (ghs#231's own explicit non-scope).
@@ -242,19 +245,19 @@ export function createAuthService(deps: AuthServiceDeps): AuthService {
         // pending token being issued and completion), there is still no
         // identity to record against.
         if (user) {
-          await recordAttempt({ email: user.email, userId: user.id, outcome: "account_not_active", ipAddress, sessionId: null });
+          await recordAttempt({ email: user.email, userId: user.id, outcome: "account_not_active", ipAddress, sessionId: null, userAgent });
         }
         throw new Error("account not active");
       }
 
       const codeOk = await mfaVerifier.verifyLoginCode(userId, code);
       if (!codeOk) {
-        await recordAttempt({ email: user.email, userId: user.id, outcome: "invalid_mfa_code", ipAddress, sessionId: null });
+        await recordAttempt({ email: user.email, userId: user.id, outcome: "invalid_mfa_code", ipAddress, sessionId: null, userAgent });
         throw new Error("invalid MFA code");
       }
 
       const issued = await authProvider.issueTokens(user, ["pwd", "otp"]);
-      await recordAttempt({ email: user.email, userId: user.id, outcome: "success", ipAddress, sessionId: issued.sessionId });
+      await recordAttempt({ email: user.email, userId: user.id, outcome: "success", ipAddress, sessionId: issued.sessionId, userAgent });
       return { accessToken: issued.accessToken, refreshToken: issued.refreshToken, expiresIn: issued.expiresIn };
     },
 

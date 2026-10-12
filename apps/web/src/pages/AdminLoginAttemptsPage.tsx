@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Card, CardBody, EmptyState, ListView, LoginOutcomeBadge, SessionStatusBadge, Skeleton, SortableTableHeaderCell, TableCell, TableHeaderCell } from "../components";
+import { Alert, Card, CardBody, EmptyState, ListView, LoginOutcomeBadge, SessionStatusBadge, Skeleton, SortableTableHeaderCell, TableCell, TableHeaderCell, Tooltip } from "../components";
 import { ApiError, listLoginAttempts } from "../lib/api";
 import { LOGIN_OUTCOME_OPTIONS } from "../lib/domain-labels";
 import { useTableSort } from "../lib/useTableSort";
@@ -42,6 +42,26 @@ function locationSortValue(item: LoginAttemptListItem): string | null {
 
 function describeQueryError(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
+}
+
+// ghs#236. A raw UA string ("Mozilla/5.0 (Windows NT 10.0; Win64; x64)
+// AppleWebKit/537.36...") is long and not meaningfully something an
+// admin sorts by -- rendered truncated with the full value in a
+// Tooltip, same "truncate + Tooltip for the full value" treatment this
+// app already has no other precedent for, but is the obvious fit here
+// (same component AdminAccountsPage's own icon-only row actions use).
+//
+// Review fix: the trigger (a plain <span>/<p>, unlike every other
+// Tooltip usage in this app, which wraps an already-focusable Button)
+// needs its own `tabIndex={0}` -- Tooltip.tsx's own onFocus handler
+// only ever fires via a real focus event, which a non-interactive
+// element can never receive without one. Without this, the full value
+// was reachable on hover/touch but genuinely unreachable by keyboard or
+// screen-reader navigation.
+const USER_AGENT_TRUNCATE_LENGTH = 40;
+
+function truncateUserAgent(userAgent: string): string {
+  return userAgent.length > USER_AGENT_TRUNCATE_LENGTH ? `${userAgent.slice(0, USER_AGENT_TRUNCATE_LENGTH)}…` : userAgent;
 }
 
 export default function AdminLoginAttemptsPage() {
@@ -97,6 +117,7 @@ export default function AdminLoginAttemptsPage() {
                   <SortableTableHeaderCell columnId="ipAddress" sort={attemptsSort.sort} onSort={attemptsSort.toggleSort}>
                     IP address
                   </SortableTableHeaderCell>
+                  <TableHeaderCell>User agent</TableHeaderCell>
                   <SortableTableHeaderCell columnId="location" sort={attemptsSort.sort} onSort={attemptsSort.toggleSort}>
                     Location
                   </SortableTableHeaderCell>
@@ -114,6 +135,17 @@ export default function AdminLoginAttemptsPage() {
                     <LoginOutcomeBadge outcome={item.outcome} />
                   </TableCell>
                   <TableCell>{item.ipAddress}</TableCell>
+                  <TableCell>
+                    {item.userAgent ? (
+                      <Tooltip content={item.userAgent}>
+                        <span tabIndex={0} className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                          {truncateUserAgent(item.userAgent)}
+                        </span>
+                      </Tooltip>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
                   <TableCell>{locationLine(item)}</TableCell>
                   <TableCell>{item.sessionEndedAt ? formatTimestamp(item.sessionEndedAt) : "—"}</TableCell>
                   <TableCell>{item.sessionStatus ? <SessionStatusBadge status={item.sessionStatus} /> : "—"}</TableCell>
@@ -130,6 +162,13 @@ export default function AdminLoginAttemptsPage() {
                     <p className="text-xs text-text-muted">
                       {item.ipAddress} · {locationLine(item)}
                     </p>
+                    {item.userAgent && (
+                      <Tooltip content={item.userAgent}>
+                        <p tabIndex={0} className="rounded text-xs text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                          {truncateUserAgent(item.userAgent)}
+                        </p>
+                      </Tooltip>
+                    )}
                     {item.sessionStatus && (
                       <div className="flex items-center gap-2">
                         <SessionStatusBadge status={item.sessionStatus} />

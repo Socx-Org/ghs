@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -35,6 +35,7 @@ afterEach(() => {
   mock.restore();
   setTokens(null);
   localStorage.clear();
+  vi.useRealTimers();
 });
 
 function renderAsRole(role: "player" | "admin" = "admin") {
@@ -66,6 +67,7 @@ const ATTEMPTS = {
       createdAt: "2026-05-01T10:00:00.000Z",
       sessionStatus: "active",
       sessionEndedAt: null,
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     },
     {
       id: "attempt-2",
@@ -80,6 +82,7 @@ const ATTEMPTS = {
       createdAt: "2026-05-01T09:00:00.000Z",
       sessionStatus: null,
       sessionEndedAt: null,
+      userAgent: null,
     },
   ],
   total: 2,
@@ -123,8 +126,57 @@ describe("AdminLoginAttemptsPage", () => {
 
     const table = screen.getByRole("table");
     const successRow = within(table).getByText("success@example.com").closest("tr")!;
-    const locationCell = within(successRow).getAllByRole("cell")[4]!;
+    const locationCell = within(successRow).getAllByRole("cell")[5]!;
     expect(locationCell).toHaveTextContent("—");
+  });
+
+  it("ghs#236: shows a truncated User-Agent with the full value in a tooltip, and '--' when none was captured", async () => {
+    mock.onGet("/admin/login-attempts").reply(200, ATTEMPTS);
+    renderAsRole("admin");
+    await screen.findByText("success@example.com");
+
+    const table = screen.getByRole("table");
+    const successRow = within(table).getByText("success@example.com").closest("tr")!;
+    const userAgentCell = within(successRow).getAllByRole("cell")[4]!;
+    // Truncated in the cell itself -- the full string is long enough that
+    // it would never appear verbatim here.
+    expect(userAgentCell.textContent).not.toEqual(ATTEMPTS.items[0]!.userAgent);
+    expect(userAgentCell.textContent!.length).toBeLessThan(ATTEMPTS.items[0]!.userAgent!.length);
+
+    // Same fake-timer hover pattern as Tooltip's own test suite.
+    vi.useFakeTimers();
+    fireEvent.mouseEnter(within(userAgentCell).getByText(/Mozilla/));
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.getByRole("tooltip")).toHaveTextContent(ATTEMPTS.items[0]!.userAgent!);
+
+    const failedRow = within(table).getByText("failed@example.com").closest("tr")!;
+    const failedUserAgentCell = within(failedRow).getAllByRole("cell")[4]!;
+    expect(failedUserAgentCell).toHaveTextContent("—");
+  });
+
+  // Review finding, PR #239: the trigger is a plain <span>, unlike every
+  // other Tooltip usage in this app (which wraps an already-focusable
+  // Button) -- without its own tabIndex, Tooltip's onFocus handler could
+  // never fire for it, leaving the full User-Agent reachable on
+  // hover/touch but genuinely unreachable by keyboard/screen-reader
+  // navigation. Same "shows on focus (no delay)" assertion as Tooltip's
+  // own test suite.
+  it("ghs#236 review fix: the truncated User-Agent's full value is reachable by keyboard focus, not hover/touch only", async () => {
+    mock.onGet("/admin/login-attempts").reply(200, ATTEMPTS);
+    renderAsRole("admin");
+    await screen.findByText("success@example.com");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+    const table = screen.getByRole("table");
+    const successRow = within(table).getByText("success@example.com").closest("tr")!;
+    const trigger = within(successRow).getByText(/Mozilla/);
+    // The real proof this element is in the keyboard Tab order at all:
+    // a genuinely non-focusable element (no tabIndex) can't receive
+    // focus this way either in jsdom or a real browser.
+    expect(trigger).toHaveAttribute("tabindex", "0");
+
+    trigger.focus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(ATTEMPTS.items[0]!.userAgent!);
   });
 
   it("filters by outcome", async () => {
