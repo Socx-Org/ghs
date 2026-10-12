@@ -189,6 +189,21 @@ jobs:
 
           ssh "${SSH_OPTS[@]}" "$REMOTE" "
             set -uo pipefail
+            # Fix, found via a real failed deploy: sudo -u ghs does not
+            # change the working directory -- every command below
+            # inherits whatever directory this SSH session itself
+            # started in (\$DEPLOY_USER's own home), which the ghs user
+            # has no permission to read. GNU find needs to open its own
+            # invocation directory at startup for its safe (openat-
+            # based) tree-walk, even though the path it actually
+            # searches is absolute -- so it failed before ever reaching
+            # that path, with 'Failed to change directory: /home/...:
+            # Permission denied'. curl/tar/mv never hit this (none of
+            # them need to open the cwd itself), which is why only
+            # find's step of the chain broke. /tmp is world-executable,
+            # so cd'ing the OUTER (non-sudo) shell here fixes it for
+            # every sudo -u ghs command that follows.
+            cd /tmp
             sudo -u ghs mkdir -p /opt/ghs/shared/geoip
             TMP_DIR=\$(sudo -u ghs mktemp -d)
             if sudo -u ghs curl -sL --fail 'https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=${MAXMIND_LICENSE_KEY}&suffix=tar.gz' -o \"\$TMP_DIR/geolite2.tar.gz\" \
