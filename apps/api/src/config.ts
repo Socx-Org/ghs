@@ -58,6 +58,15 @@ export interface AppConfig {
   database: DatabaseConfig;
   auth: AuthConfig;
   email: EmailConfig;
+  // ghs#234: a non-secret filesystem path, not a systemd LoadCredential=
+  // (reference/systemd's own distinction -- see its README) -- the file
+  // it points at is a public MaxMind database, not a credential. Deploy
+  // always sets GEOIP_DB_PATH explicitly (/opt/ghs/shared/geoip/...,
+  // the persistent, non-versioned directory every release shares); the
+  // default here only ever matters for local dev, where the file lives
+  // at apps/api/data/geoip/ relative to cwd (see the repo root's own
+  // .env.example for the one-time download command).
+  geoIpDbPath: string;
 }
 
 // Reads a systemd LoadCredential= file at $CREDENTIALS_DIRECTORY/<name>
@@ -149,5 +158,6 @@ export function loadConfig(): AppConfig {
     database: loadDatabaseConfig(),
     auth: loadAuthConfig(),
     email: loadEmailConfig(),
+    geoIpDbPath: process.env.GEOIP_DB_PATH ?? join(process.cwd(), "data", "geoip", "GeoLite2-City.mmdb"),
   };
 }

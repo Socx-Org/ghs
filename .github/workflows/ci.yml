@@ -151,6 +151,57 @@ jobs:
             node_modules \
             package-lock.json
 
+      # ghs#234: runs BEFORE "Deploy to droplet" below, not after -- so a
+      # freshly restarted API process can pick up a current database on
+      # its very first startup, not just its next one. Best-effort, not
+      # gated on: a download/extract failure (MaxMind outage, an expired
+      # or revoked license key) must never block a deploy, since this
+      # step's own real design constraint is that a missing/stale
+      # database only ever degrades login_attempts.country/region/city
+      # to null -- a minor audit-log gap, not a security or availability
+      # issue (see deploy/README.md's own "Geo-IP database" section).
+      # Downloaded to a fresh temp dir and moved into place with `mv`
+      # (atomic on the same filesystem), not written in place -- the
+      # running app (apps/api/src/lib/geoip.ts) only ever opens this file
+      # once at its own startup, but a half-written file from an
+      # in-progress download could still make a *later* restart fail to
+      # open it.
+      - name: Refresh geo-IP database
+        env:
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+          DROPLET_HOST_KEY: ${{ secrets.DROPLET_HOST_KEY }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          MAXMIND_LICENSE_KEY: ${{ secrets.MAXMIND_LICENSE_KEY }}
+        run: |
+          set -euo pipefail
+          KEY_FILE="$(mktemp)"
+          KNOWN_HOSTS_FILE="$(mktemp)"
+          trap 'rm -f "$KEY_FILE" "$KNOWN_HOSTS_FILE"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+
+          # Pinned host key -- see "Deploy to droplet" below for the full
+          # reasoning (socx-platform#108/PR #109).
+          printf '%s\n' "$DROPLET_HOST_KEY" > "$KNOWN_HOSTS_FILE"
+          SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}")
+          REMOTE="${DEPLOY_USER}@${DROPLET_HOST}"
+
+          ssh "${SSH_OPTS[@]}" "$REMOTE" "
+            set -uo pipefail
+            sudo -u ghs mkdir -p /opt/ghs/shared/geoip
+            TMP_DIR=\$(sudo -u ghs mktemp -d)
+            if sudo -u ghs curl -sL --fail 'https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=${MAXMIND_LICENSE_KEY}&suffix=tar.gz' -o \"\$TMP_DIR/geolite2.tar.gz\" \
+              && sudo -u ghs tar -xzf \"\$TMP_DIR/geolite2.tar.gz\" -C \"\$TMP_DIR\" \
+              && sudo -u ghs find \"\$TMP_DIR\" -name GeoLite2-City.mmdb -exec cp {} /opt/ghs/shared/geoip/GeoLite2-City.mmdb.new \\;; then
+              sudo -u ghs mv -f /opt/ghs/shared/geoip/GeoLite2-City.mmdb.new /opt/ghs/shared/geoip/GeoLite2-City.mmdb
+              echo 'geoip database refreshed'
+            else
+              echo 'WARNING: geoip database refresh failed -- continuing deploy with whatever database (if any) already exists' >&2
+            fi
+            sudo -u ghs rm -rf \"\$TMP_DIR\"
+          "
+
       - name: Deploy to droplet
         env:
           DROPLET_HOST: ${{ secrets.DROPLET_HOST }}

@@ -24,6 +24,14 @@ export interface RecordLoginAttemptInput {
   // not a trust/security control (trivially spoofable, same as
   // ipAddress already is). Null when the request had no such header.
   userAgent: string | null;
+  // ghs#234: resolved by auth.service.ts's own GeoIpService before this
+  // is ever called -- this repository stays a pure data-access layer,
+  // same as every field above. Null whenever no geo answer exists (a
+  // private/local/reserved ipAddress, or the database being
+  // unavailable) -- a real, permanent absence, not a loading state.
+  country: string | null;
+  region: string | null;
+  city: string | null;
 }
 
 export interface LoginAttemptRecord {
@@ -32,7 +40,7 @@ export interface LoginAttemptRecord {
   userId: string | null;
   outcome: LoginAttemptOutcome;
   ipAddress: string;
-  // ghs#232 (geo-IP enrichment): always null until that issue lands.
+  // ghs#234 (geo-IP enrichment).
   country: string | null;
   region: string | null;
   city: string | null;
@@ -118,9 +126,9 @@ export function createLoginAttemptsRepository(pool: Pool): LoginAttemptsReposito
   return {
     async record(input, client) {
       await (client ?? pool).query(
-        `INSERT INTO login_attempts (email, user_id, outcome, ip_address, session_id, user_agent)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [input.email, input.userId, input.outcome, input.ipAddress, input.sessionId, input.userAgent],
+        `INSERT INTO login_attempts (email, user_id, outcome, ip_address, session_id, user_agent, country, region, city)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [input.email, input.userId, input.outcome, input.ipAddress, input.sessionId, input.userAgent, input.country, input.region, input.city],
       );
     },
 

@@ -31,6 +31,16 @@ Environment=NODE_ENV=production
 Environment=SOCX_ENV=production
 Environment=PORT=3001
 
+# ghs#234: a plain file path, not a credential (the file it points at is
+# a public MaxMind database) -- so a non-secret Environment= line, not
+# LoadCredential=, matching config.ts's own non-secret/secret split.
+# Lives under /opt/ghs/shared (already an allowed ReadWritePaths entry
+# below), the one persistent, non-versioned directory that survives a
+# release's releases/<version> directory being replaced -- refreshed by
+# the CI deploy job's own "Refresh geo-IP database" step, not by this
+# service itself.
+Environment=GEOIP_DB_PATH=/opt/ghs/shared/geoip/GeoLite2-City.mmdb
+
 # Secrets via systemd credentials (ADR-130, SEC-010.3) -- apps/api/src/
 # config.ts's readSecret() reads $CREDENTIALS_DIRECTORY/<name> at startup
 # (APP-010: read once, passed down). Three names, not the template's two --
