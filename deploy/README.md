@@ -23,7 +23,25 @@ Its "Refresh geo-IP database" step (ghs#234) additionally requires `MAXMIND_LICE
 
 Graceful degradation is the core design constraint, not an edge case: a missing file (a brand-new environment's first-ever deploy, before this step has run once) or a failed refresh (MaxMind outage, an expired/revoked license key) must never crash startup or fail a deploy — every `country`/`region`/`city` just stays `null`, identical to this column's behaviour before ghs#234 shipped at all. The CI step enforces this itself: a download/extract failure is caught and logged as a warning, the deploy continues, and the API starts up against whatever database (if any) the previous successful refresh already left in place.
 
-**Known gap, flagged for whoever runs the first real deploy after this lands:** the CI step's remote commands assume `$DEPLOY_USER` already has the same `sudo -u ghs <command>` privilege the existing "Run database migrations" step relies on (confirmed working there) — this hasn't been independently re-verified for the specific `mkdir`/`curl`/`tar`/`mv` sequence this new step runs. If the droplet's sudoers scopes `$DEPLOY_USER`'s sudo rights more narrowly than that existing step implies, this step will fail (loudly, in CI, as its own distinct step) without affecting the rest of the deploy — worth a manual SSH dry-run of the step's own commands before relying on it, if that's not already confirmed by the time this is read.
+**Resolved gap (ghs#241), kept here for the real incident's own record:** the step's first real production run failed -- `$DEPLOY_USER`'s `sudo -u ghs` privilege itself was fine (confirmed, same as the existing "Run database migrations" step), but GNU `find` failed with `Failed to change directory: /home/...: Permission denied`. `sudo -u ghs` doesn't change the working directory, so `find` inherited the SSH session's own (inaccessible-to-`ghs`) home directory as its cwd, and needs to open that cwd at startup for its safe traversal even though the path it actually searches is absolute. Fixed with a single `cd /tmp` (world-executable) before any `sudo -u ghs` command runs.
+
+## Systemd unit file sync (ghs#243)
+
+**Deploy never applies a changed `deploy/*.service` file to the droplet.** The pipeline only ships application code (`release.tar.gz`) and flips the `current` symlink -- it has no step that copies `deploy/ghs-api.service`/`deploy/ghs-worker.service` to `/etc/systemd/system/` or runs `systemctl daemon-reload`. This was discovered the hard way: `ghs#234`/PR #240 added `Environment=GEOIP_DB_PATH=...` to `deploy/ghs-api.service`, and the droplet silently kept running its old unit file -- with no error anywhere -- for two full deploys, until a manual `journalctl` check caught it.
+
+`ci.yml`'s `deploy` job now has a non-blocking "Check systemd unit drift" step (its final step) that diffs the repo's own `deploy/ghs-api.service`/`deploy/ghs-worker.service` against the droplet's live copies on every deploy, read-only, and emits a loud `::warning::` annotation (visible on the run and the PR checks tab) when they differ -- never a hard failure, same "diagnostic, not a gate" precedent `apps/api`'s own `checkMigrationDrift` already set for schema drift. This makes the drift impossible to miss silently again, but applying the fix is still a deliberate, manual step:
+
+```bash
+# On prod-lab-01, for whichever unit drifted (ghs-api or ghs-worker):
+sudo tee /etc/systemd/system/<unit>.service > /dev/null <<'UNITFILE'
+<paste the exact current content of deploy/<unit>.service here>
+UNITFILE
+
+sudo systemctl daemon-reload
+sudo systemctl restart <unit>.service
+```
+
+Deliberately manual, not auto-applied on every deploy (ghs#243's own real trade-off): a systemd unit has zero automated test coverage, unlike application code, which already goes through PR review and the full CI suite before it ever reaches this pipeline -- auto-writing an unreviewed hardening/`ExecStart` change straight to a production unit file on every merge trades "someone might forget to sync it" (recoverable, as this very incident showed) for "a bad change reaches production with no human looking at it first" (not).
 
 ## API versioning & the frontend split (ghs#57, ghs#62)
 
