@@ -396,8 +396,20 @@ jobs:
           REMOTE="${DEPLOY_USER}@${DROPLET_HOST}"
 
           for unit in ghs-api ghs-worker; do
-            remote_content=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo cat /etc/systemd/system/${unit}.service" 2>/dev/null)
+            # Review fix: stderr captured (not discarded), and folded
+            # into the warning when the ssh/sudo call itself fails --
+            # "exited 255" alone gives no way to tell a network blip
+            # from a real permissions regression apart without a second,
+            # manual SSH session; the remote command's own stderr
+            # (e.g. "Permission denied", "Connection timed out") is
+            # exactly the detail that makes this warning actionable.
+            # Newlines collapsed to spaces -- a GitHub ::warning::
+            # message is a single logical line.
+            ssh_stderr_file="$(mktemp)"
+            remote_content=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo cat /etc/systemd/system/${unit}.service" 2>"$ssh_stderr_file")
             ssh_status=$?
+            ssh_stderr=$(tr '\n' ' ' < "$ssh_stderr_file")
+            rm -f "$ssh_stderr_file"
             # Distinguished from a real drift finding below, same
             # reasoning as checkMigrationDrift's own checkError vs
             # pendingFiles split (apps/api/src/data/migrations/apply.ts)
@@ -406,18 +418,21 @@ jobs:
             # it's out of sync" (a real difference silently masquerading
             # as "couldn't tell" would be just as bad the other way).
             if [ "$ssh_status" -ne 0 ]; then
-              echo "::warning file=deploy/${unit}.service::Could not read ${unit}.service from prod-lab-01 to check for drift (ssh/sudo exited ${ssh_status}) -- not a drift finding, just an inconclusive check this run."
+              echo "::warning file=deploy/${unit}.service::Could not read ${unit}.service from prod-lab-01 to check for drift (ssh/sudo exited ${ssh_status}: ${ssh_stderr}) -- not a drift finding, just an inconclusive check this run."
               continue
             fi
             local_content=$(cat "deploy/${unit}.service")
             if [ "$remote_content" != "$local_content" ]; then
-              echo "::warning file=deploy/${unit}.service::${unit}.service on prod-lab-01 does not match this repo's copy -- systemd unit file changes are never auto-deployed by this pipeline (ghs#243). See deploy/README.md's 'Syncing a changed systemd unit file' section for the manual sync command."
+              echo "::warning file=deploy/${unit}.service::${unit}.service on prod-lab-01 does not match this repo's copy -- systemd unit file changes are never auto-deployed by this pipeline (ghs#243). See deploy/README.md's 'Systemd unit file sync' section for the manual sync command."
             fi
           done
 
-          # Explicit, unconditional success -- without this, the step's
-          # own exit status would be whatever the last `[ ... ]` test
-          # above happened to evaluate to (1/false whenever the last
-          # unit checked had NO drift), silently failing this
-          # diagnostic-only step over finding nothing wrong at all.
+          # Explicit, defensive success -- every real path through the
+          # loop above already leaves $? at 0 by this point (an `if`
+          # with a false condition and no `else`, like the drift check
+          # itself, exits 0 on its own; confirmed directly, not assumed).
+          # This doesn't change that, but makes this diagnostic-only
+          # step's success independent of exactly how the loop body
+          # evolves later, rather than relying on that invariant holding
+          # implicitly forever.
           exit 0
