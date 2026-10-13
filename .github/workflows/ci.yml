@@ -353,3 +353,71 @@ jobs:
               MFA_ENCRYPTION_KEY="$MFA_ENCRYPTION_KEY" \
               bash -c "cd /opt/ghs/current/apps/api && node dist/migrate.js"
           '
+
+      # ghs#243: found via a real incident -- ghs#234/PR #240 changed
+      # deploy/ghs-api.service, but nothing in this pipeline copies
+      # deploy/*.service to /etc/systemd/system/ or runs `systemctl
+      # daemon-reload`; the droplet silently kept running its old unit
+      # file for two full deploys with no error anywhere. This step
+      # can't fix that gap (writing to /etc/systemd/system/ unreviewed,
+      # on every merge, trades "someone might forget to sync it" for
+      # "a bad unit-file change reaches production with zero automated
+      # verification and no human looking at it first" -- confirmed
+      # trade-off, not an oversight), but it makes the drift impossible
+      # to miss silently again.
+      #
+      # Deliberately never fails this step/job -- same "diagnostic, not
+      # a gate" precedent as apps/api's own checkMigrationDrift (index.ts):
+      # an out-of-sync unit file is real, worth surfacing loudly, but
+      # the running service may still be perfectly healthy on its
+      # current (stale) unit file, and blocking an unrelated, possibly
+      # urgent app-code deploy on it would be the wrong trade-off.
+      # `::warning::` is a GitHub Actions workflow command -- it renders
+      # as a visible annotation on the run and the PR checks tab, not
+      # just another buried line in this step's own log output.
+      - name: Check systemd unit drift
+        env:
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+          DROPLET_HOST_KEY: ${{ secrets.DROPLET_HOST_KEY }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -uo pipefail
+          KEY_FILE="$(mktemp)"
+          KNOWN_HOSTS_FILE="$(mktemp)"
+          trap 'rm -f "$KEY_FILE" "$KNOWN_HOSTS_FILE"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+
+          # Pinned host key -- see "Deploy to droplet" above for the
+          # full reasoning (socx-platform#108/PR #109).
+          printf '%s\n' "$DROPLET_HOST_KEY" > "$KNOWN_HOSTS_FILE"
+          SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}")
+          REMOTE="${DEPLOY_USER}@${DROPLET_HOST}"
+
+          for unit in ghs-api ghs-worker; do
+            remote_content=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "sudo cat /etc/systemd/system/${unit}.service" 2>/dev/null)
+            ssh_status=$?
+            # Distinguished from a real drift finding below, same
+            # reasoning as checkMigrationDrift's own checkError vs
+            # pendingFiles split (apps/api/src/data/migrations/apply.ts)
+            # -- an ssh/sudo failure genuinely couldn't check anything,
+            # which must never be reported identically to "checked, and
+            # it's out of sync" (a real difference silently masquerading
+            # as "couldn't tell" would be just as bad the other way).
+            if [ "$ssh_status" -ne 0 ]; then
+              echo "::warning file=deploy/${unit}.service::Could not read ${unit}.service from prod-lab-01 to check for drift (ssh/sudo exited ${ssh_status}) -- not a drift finding, just an inconclusive check this run."
+              continue
+            fi
+            local_content=$(cat "deploy/${unit}.service")
+            if [ "$remote_content" != "$local_content" ]; then
+              echo "::warning file=deploy/${unit}.service::${unit}.service on prod-lab-01 does not match this repo's copy -- systemd unit file changes are never auto-deployed by this pipeline (ghs#243). See deploy/README.md's 'Syncing a changed systemd unit file' section for the manual sync command."
+            fi
+          done
+
+          # Explicit, unconditional success -- without this, the step's
+          # own exit status would be whatever the last `[ ... ]` test
+          # above happened to evaluate to (1/false whenever the last
+          # unit checked had NO drift), silently failing this
+          # diagnostic-only step over finding nothing wrong at all.
+          exit 0
